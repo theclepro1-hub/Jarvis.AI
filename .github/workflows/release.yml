@@ -1,0 +1,68 @@
+name: Release Build 2.0
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate tag and app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $branding = ".\jarvis_ai\branding.py"
+          $m = Select-String -Path $branding -Pattern 'APP_VERSION\s*=\s*"([^"]+)"' -Encoding UTF8 | Select-Object -First 1
+          if (-not $m -or $m.Matches.Count -eq 0) {
+            throw "APP_VERSION not found in jarvis_ai/branding.py"
+          }
+          $appVersion = $m.Matches[0].Groups[1].Value
+          if ($appVersion -ne $tag) {
+            throw "Tag version ($tag) must match APP_VERSION ($appVersion)."
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build release artifacts
+        shell: pwsh
+        run: .\build_release.ps1
+
+      - name: Upload artifacts to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body_path: release/RELEASE_NOTES.md
+          files: |
+            release/JarvisAI2_Setup.exe
+            release/jarvis_ai_2.exe
+            release/updates.json
+            release/CHANGELOG.md
+            release/manifest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

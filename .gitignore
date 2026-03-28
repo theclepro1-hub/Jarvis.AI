@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+
+.codex/
+build/
+dist/
+_installer_out/
+release/
+publish_tools/github_bundle/
+
+jarvis_ai_2.exe

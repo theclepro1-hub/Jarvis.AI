@@ -1,0 +1,105 @@
+C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pydub\utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work
+  warn("Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work", RuntimeWarning)
+2026-03-28 09:08:13,881 - JarvisAI2 - INFO - Shutting down...
+Timeout (0:00:08)!
+Thread 0x00000ee4 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\tkinter\__init__.py", line 566 in get
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_voice.py", line 171 in _apply_voice_insight_widgets
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_voice.py", line 148 in _ensure_voice_debug_state
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_voice.py", line 336 in _update_audio_signal_snapshot
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_voice.py", line 478 in _callback
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\sounddevice.py", line 2777 in _wrap_callback
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\sounddevice.py", line 853 in callback_ptr
+
+Thread 0x00005914 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\sounddevice.py", line 1142 in stop
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\sounddevice.py", line 1116 in __exit__
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_voice.py", line 492 in _audio_meter_task
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00005bd4 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\drivers\sapi5.py", line 56 in say
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\driver.py", line 90 in _pump
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\driver.py", line 117 in setBusy
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\drivers\sapi5.py", line 125 in startLoop
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\driver.py", line 192 in runAndWait
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\engine.py", line 180 in runAndWait
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis.py", line 2863 in _speak_with_pyttsx3
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis.py", line 2979 in _speak_by_provider
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis.py", line 4701 in _speak
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x000056d4 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 327 in wait
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\queue.py", line 171 in get
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\keyboard\_generic.py", line 57 in process
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00003a54 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\keyboard\_winkeyboard.py", line 563 in listen
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\keyboard\__init__.py", line 294 in listen
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00002280 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 331 in wait
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\queue.py", line 180 in get
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\util.py", line 82 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00000c08 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 331 in wait
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\queue.py", line 180 in get
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\util.py", line 82 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00006b6c (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\ssl.py", line 1166 in read
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\ssl.py", line 1314 in recv_into
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\socket.py", line 706 in readinto
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 286 in _read_status
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 325 in begin
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\http\client.py", line 1395 in getresponse
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\urllib3\connection.py", line 571 in getresponse
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\urllib3\connectionpool.py", line 534 in _make_request
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\urllib3\connectionpool.py", line 787 in urlopen
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\adapters.py", line 644 in send
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\sessions.py", line 703 in send
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\requests\sessions.py", line 589 in request
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\apihelper.py", line 156 in _make_request
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\apihelper.py", line 321 in get_updates
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\__init__.py", line 623 in get_updates
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\__init__.py", line 634 in __skip_updates
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\telebot\__init__.py", line 948 in infinity_polling
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\telegram_bot.py", line 103 in _run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00005a7c (most recent call first):
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\state.py", line 977 in flush_loop
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 982 in run
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1045 in _bootstrap_inner
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\threading.py", line 1002 in _bootstrap
+
+Thread 0x00006a80 (most recent call first):
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\drivers\sapi5.py", line 63 in stop
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\driver.py", line 151 in stop
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\site-packages\pyttsx3\engine.py", line 106 in stop
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis.py", line 5182 in shutdown
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_shell.py", line 173 in _patched_shutdown
+  File "C:\JARVIS_AI\jarvisAI 2.0\jarvis_ai\runtime_shell.py", line 110 in _patched_quit_app_main
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\tkinter\__init__.py", line 861 in callit
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\tkinter\__init__.py", line 1967 in __call__
+  File "C:\Users\thecl\AppData\Local\Programs\Python\Python311\Lib\tkinter\__init__.py", line 1504 in mainloop
+  File "C:\JARVIS_AI\jarvisAI 2.0\.codex_close_probe.py", line 12 in <module>
+2026-03-28 09:08:19,778 - JarvisAI2 - INFO - Shutdown complete.
