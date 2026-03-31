@@ -8,20 +8,60 @@ def bind_dynamic_wrap(label, parent=None, padding: int = 28, minimum: int = 180)
     if host is None:
         return label
 
-    def _sync_wrap(_event=None):
+    def _wrap_from_host_width():
         try:
-            width = int(host.winfo_width() or 0)
+            width = int(host.winfo_width() or host.winfo_reqwidth() or 0)
         except Exception:
             width = 0
-        wrap = max(minimum, width - padding)
+        if width > 0:
+            return max(minimum, width - padding)
+        return max(minimum, int(getattr(label, "_jarvis_manual_wraplength", 0) or minimum))
+
+    if bool(getattr(label, "_jarvis_manual_wrap", False)):
+        wrap = _wrap_from_host_width()
         try:
             label.configure(wraplength=wrap)
+            label._jarvis_wraplength = wrap
+        except Exception:
+            pass
+        return label
+
+    def _apply_wrap():
+        wrap = _wrap_from_host_width()
+        if wrap == getattr(label, "_jarvis_wraplength", None):
+            return
+        try:
+            label.configure(wraplength=wrap)
+            label._jarvis_wraplength = wrap
         except Exception:
             pass
 
+    _apply_wrap()
+
+    def _sync_wrap(_event=None):
+        pending = getattr(label, "_jarvis_wrap_after_id", None)
+        if pending:
+            try:
+                host.after_cancel(pending)
+            except Exception:
+                pass
+            label._jarvis_wrap_after_id = None
+        try:
+            top = label.winfo_toplevel()
+        except Exception:
+            top = None
+        try:
+            delay = 140 if bool(getattr(top, "_jarvis_resize_in_progress", False)) else 24
+        except Exception:
+            delay = 24
+        try:
+            label._jarvis_wrap_after_id = host.after(delay, _apply_wrap)
+        except Exception:
+            _apply_wrap()
+
     try:
         host.bind("<Configure>", _sync_wrap, add="+")
-        label.after(0, _sync_wrap)
+        label.after_idle(_sync_wrap)
     except Exception:
         pass
     return label
@@ -39,6 +79,7 @@ def create_section_card(parent, title: str, description: str = "", padx: int = 1
             fg=Theme.FG_SECONDARY,
             font=("Segoe UI", 9),
             justify="left",
+            anchor="w",
         )
         desc.pack(anchor="w", fill="x", padx=padx, pady=(6, 10))
         bind_dynamic_wrap(desc, card, padding=(padx * 2) + 12, minimum=220)
@@ -55,6 +96,11 @@ def create_action_button(parent, text: str, command, bg: str = "", fg: str = "",
         bg=bg or Theme.BUTTON_BG,
         fg=fg or Theme.FG,
         relief="flat",
+        bd=0,
+        highlightthickness=0,
+        activebackground=Theme.ACCENT,
+        activeforeground=Theme.FG,
+        cursor="hand2",
         padx=14,
         pady=8,
     )
@@ -88,6 +134,11 @@ def create_action_grid(parent, items, columns: int = 2, bg: str = ""):
             bg=button_bg,
             fg=button_fg,
             relief="flat",
+            bd=0,
+            highlightthickness=0,
+            activebackground=Theme.ACCENT,
+            activeforeground=Theme.FG,
+            cursor="hand2",
             padx=14,
             pady=8,
             anchor="center",
@@ -112,6 +163,7 @@ def create_note_box(parent, text: str, tone: str = "soft"):
         bg=bg,
         fg=fg,
         justify="left",
+        anchor="w",
         font=("Segoe UI", 9),
     )
     label.pack(fill="x", padx=12, pady=10)

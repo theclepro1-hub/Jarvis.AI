@@ -1,4 +1,4 @@
-import tkinter as tk
+﻿import tkinter as tk
 from tkinter import ttk
 
 from PIL import ImageTk
@@ -7,6 +7,7 @@ from .branding import app_version_badge
 from .guide_noobs import GuideNoobPanel
 from .runtime import parse_geometry
 from .theme import Theme
+from .ui_actions import build_workspace_menu_actions, build_workspace_section_actions
 from .ui_factory import bind_dynamic_wrap, create_action_grid
 
 
@@ -19,38 +20,38 @@ def _advance_guide_hint(self):
         (
             "Нубик JARVIS",
             "Привет, я рядом",
-            "Главный экран теперь держится на одном принципе: в центре только разговор, а не админ-панель.",
-            "→ Напишите команду внизу или нажмите на микрофон справа.",
+            "Главный экран держится на одном правиле: в центре только разговор.",
+            "→ Напишите команду снизу или нажмите микрофон справа.",
         ),
         (
             "Нубик JARVIS",
             "Подсказка по голосу",
-            "Если реакция на голос кажется слабой, сначала смотрите на живой индикатор в углу. Он сразу показывает уровень и текущий порог.",
-            "→ Потом уже открывайте «Центр голоса» для глубокой проверки.",
+            "Если голос срабатывает слабо, сначала смотрите на живой индикатор в углу.",
+            "→ Потом уже открывайте «Центр голоса».",
         ),
         (
             "Нубик JARVIS",
             "Факт дня",
-            "Ложные срабатывания wake-word чаще всего приходят не от модели, а от слишком агрессивного порога и фонового шума в комнате.",
-            "→ Для тихой комнаты лучше держать базовый или усиленный режим, а не максимальный.",
+            "Ложные срабатывания чаще приходят от шума и слишком агрессивного порога.",
+            "→ Для тихой комнаты обычно хватает усиленного режима.",
         ),
         (
             "Нубик JARVIS",
             "Про настройки",
-            "Настройки оставлены вкладками, чтобы все глубокие вещи открывались по клику и не ломали главный экран.",
-            "→ Если наведете на важные кнопки, я подскажу, что они делают.",
+            "Настройки открываются отдельным центром, чтобы не ломать чат.",
+            "→ Наведите на важные кнопки, и я подскажу их смысл.",
         ),
         (
             "Нубик JARVIS",
             "Про систему",
-            "Релизные проверки, память, сценарии и журнал не должны жить рядом с чат-композером. Иначе внимание распадается.",
-            "→ Для редких действий открывайте «Система», а тут держите спокойный центр.",
+            "Редкие системные действия лучше держать вне чата, чтобы не терять фокус.",
+            "→ Для них открывайте раздел «Система».",
         ),
         (
             "Нубик JARVIS",
             "Еще факт",
-            "На Windows слишком мелкий текст ломается раньше, чем кажется: Microsoft рекомендует не опускаться ниже 12 px regular и 14 px semibold.",
-            "→ Поэтому я стараюсь держать иерархию спокойной и читаемой.",
+            "На Windows слишком мелкий текст ломается быстрее, чем кажется.",
+            "→ Поэтому интерфейс лучше держать спокойным и читаемым.",
         ),
     ]
 
@@ -219,7 +220,7 @@ def _patched_reload_services(self):
     return result
 
 
-def _nav_button(parent, text, command, accent: bool = False):
+def _nav_button(parent, text, command, accent: bool = False, *, font=None, padx: int = 16, pady: int = 11):
     return tk.Button(
         parent,
         text=text,
@@ -228,16 +229,16 @@ def _nav_button(parent, text, command, accent: bool = False):
         bg=Theme.ACCENT if accent else Theme.BUTTON_BG,
         fg=Theme.FG,
         relief="flat",
-        padx=16,
-        pady=11,
+        padx=padx,
+        pady=pady,
         highlightbackground=Theme.BORDER,
         highlightthickness=1,
         cursor="hand2",
-        font=("Segoe UI Semibold", 10),
+        font=font or ("Segoe UI Semibold", 10),
     )
 
 
-def _toolbar_button(parent, text, command, accent: bool = False):
+def _toolbar_button(parent, text, command, accent: bool = False, *, font=None, padx: int = 12, pady: int = 8):
     return tk.Button(
         parent,
         text=text,
@@ -245,23 +246,68 @@ def _toolbar_button(parent, text, command, accent: bool = False):
         bg=Theme.ACCENT if accent else Theme.BUTTON_BG,
         fg=Theme.FG,
         relief="flat",
-        padx=12,
-        pady=8,
+        padx=padx,
+        pady=pady,
         highlightbackground=Theme.BORDER,
         highlightthickness=1,
         cursor="hand2",
-        font=("Segoe UI Semibold", 9),
+        font=font or ("Segoe UI Semibold", 9),
     )
 
 
-def _status_chip(parent, title, *, text="", textvariable=None, fg=None, min_width: int = 150):
+def _open_workspace_menu(self):
+    menu = tk.Menu(
+        self.root,
+        tearoff=0,
+        bg=Theme.CARD_BG,
+        fg=Theme.FG,
+        activebackground=Theme.ACCENT,
+        activeforeground=Theme.FG,
+        bd=0,
+        relief="flat",
+    )
+    items = build_workspace_menu_actions(self)
+    for item in items:
+        if item is None:
+            menu.add_separator()
+            continue
+        text, command = item
+        menu.add_command(label=text, command=command)
+    try:
+        if getattr(self, "menu_btn", None) is not None and self.menu_btn.winfo_exists():
+            x = self.menu_btn.winfo_rootx()
+            y = self.menu_btn.winfo_rooty() + self.menu_btn.winfo_height() + 4
+        else:
+            x = self.root.winfo_rootx() + 24
+            y = self.root.winfo_rooty() + 64
+        menu.tk_popup(x, y)
+    finally:
+        try:
+            menu.grab_release()
+        except Exception:
+            pass
+
+
+def _status_chip(
+    parent,
+    title,
+    *,
+    text="",
+    textvariable=None,
+    fg=None,
+    min_width: int = 150,
+    title_font=None,
+    value_font=None,
+    padx: int = 12,
+    pady: int = 10,
+):
     card = tk.Frame(
         parent,
         bg=Theme.BUTTON_BG,
         highlightbackground=Theme.BORDER,
         highlightthickness=1,
-        padx=12,
-        pady=10,
+        padx=padx,
+        pady=pady,
     )
     card.pack(side="left", fill="both", expand=True, padx=(0, 8))
     card.pack_propagate(False)
@@ -271,7 +317,7 @@ def _status_chip(parent, title, *, text="", textvariable=None, fg=None, min_widt
         text=title,
         bg=Theme.BUTTON_BG,
         fg=Theme.FG_SECONDARY,
-        font=("Segoe UI", 8, "bold"),
+        font=title_font or ("Segoe UI", 8, "bold"),
         justify="left",
     ).pack(anchor="w")
     value = tk.Label(
@@ -280,7 +326,7 @@ def _status_chip(parent, title, *, text="", textvariable=None, fg=None, min_widt
         textvariable=textvariable,
         bg=Theme.BUTTON_BG,
         fg=fg or Theme.FG,
-        font=("Segoe UI", 10),
+        font=value_font or ("Segoe UI", 10),
         justify="left",
     )
     value.pack(anchor="w", fill="x", pady=(6, 0))
@@ -331,15 +377,12 @@ def _set_workspace_section(self, section: str = "chat"):
     normalized = str(section or "chat").strip().lower()
     self._workspace_section = normalized
     mapping = {
-        "chat": ("Диалог", "Главный рабочий режим: слева навигация, в центре разговор, справа живые подсказки и голос."),
-        "main": ("Настройки", "Крупные настройки теперь живут внутри приложения как вкладки, без конфликтующего отдельного окна."),
-        "voice": ("Центр голоса", "Здесь настраиваются микрофон, слышимость, wake-word и связанные голосовые сценарии."),
-        "audio": ("Центр голоса", "Здесь настраиваются микрофон, слышимость, wake-word и связанные голосовые сценарии."),
-        "apps": ("Приложения и сценарии", "Быстрые действия, подключаемые инструменты и пользовательские маршруты собраны в одном месте."),
+        "chat": ("Диалог", "Главный рабочий режим: слева разделы, в центре разговор и снизу быстрый ввод без лишней служебной панели."),
+        "main": ("Настройки", "Все глубокие настройки открываются отдельно от чата и не ломают главный экран."),
+        "voice": ("Центр голоса", "Здесь настраиваются микрофон, слышимость, слово активации и связанные голосовые сценарии."),
+        "audio": ("Центр голоса", "Здесь настраиваются микрофон, слышимость, слово активации и связанные голосовые сценарии."),
         "diagnostics": ("Диагностика", "Предрелизные проверки, внутренняя диагностика и живые отчеты без лишнего шума на главном экране."),
-        "updates": ("Релиз и обновления", "Здесь лежат каналы обновлений, публикация и релизные инструменты."),
-        "release": ("Релиз и обновления", "Здесь лежат каналы обновлений, публикация и релизные инструменты."),
-        "system": ("Система", "Редкие системные операции, бэкапы и обслуживание вынесены подальше от повседневного диалога."),
+        "system": ("Система", "Редкие системные операции, память, сценарии, приложения и релизные инструменты собраны отдельно от разговора."),
     }
     title, desc = mapping.get(normalized, mapping["chat"])
     try:
@@ -357,6 +400,118 @@ def _set_workspace_section(self, section: str = "chat"):
             btn.configure(bg=Theme.ACCENT if active else Theme.BUTTON_BG)
         except Exception:
             pass
+    compact_buttons = getattr(self, "compact_section_buttons", {})
+    for key, btn in compact_buttons.items():
+        try:
+            active = key == normalized or (normalized in {"audio", "voice"} and key == "voice")
+            btn.configure(bg=Theme.ACCENT if active else Theme.BUTTON_BG)
+        except Exception:
+            pass
+
+
+def _patched_build_workspace_shell_v2(self, metrics=None):
+    metrics = metrics or self._workspace_metrics()
+
+    self.shell = tk.Frame(self.main_container, bg=Theme.BG_LIGHT)
+    self.shell.pack(fill="both", expand=True, padx=metrics["shell_pad"], pady=metrics["shell_pad"])
+    self.shell.grid_columnconfigure(0, weight=0)
+    self.shell.grid_columnconfigure(1, weight=1)
+    self.shell.grid_rowconfigure(0, weight=1)
+
+    self.sidebar = tk.Frame(
+        self.shell,
+        bg=Theme.CARD_BG,
+        highlightbackground=Theme.BORDER,
+        highlightthickness=1,
+        width=metrics["sidebar_width"],
+    )
+    self.sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+    self.sidebar.grid_propagate(False)
+
+    self.workspace = tk.Frame(self.shell, bg=Theme.BG_LIGHT)
+    self.workspace.grid(row=0, column=1, sticky="nsew")
+
+    self.side_panel = tk.Frame(self.shell, bg=Theme.BG_LIGHT, width=1)
+    self.side_panel.grid(row=0, column=2, sticky="nsew")
+    self.side_panel.grid_propagate(False)
+    self.side_panel.grid_remove()
+
+    self.top_bar = tk.Frame(
+        self.workspace,
+        bg=Theme.CARD_BG,
+        highlightbackground=Theme.BORDER,
+        highlightthickness=1,
+        padx=metrics["card_pad"],
+        pady=metrics["card_pad"],
+    )
+    self.top_bar.pack(side="top", fill="x")
+
+    self.quick_bar = tk.Frame(self.workspace, bg=Theme.CARD_BG)
+    self.quick_head = tk.Frame(self.quick_bar, bg=Theme.CARD_BG)
+
+    self.content_stage = tk.Frame(self.workspace, bg=Theme.BG_LIGHT)
+    self.content_stage.pack(side="top", fill="both", expand=True, pady=(10, 0))
+
+    self._build_workspace_sidebar(metrics)
+    self._build_workspace_overview(metrics)
+    self._build_workspace_chat(metrics)
+    self._build_workspace_controls(metrics)
+    self._build_workspace_rail(metrics)
+    self._refresh_chat_empty_state()
+    try:
+        self.refresh_workspace_layout_mode()
+    except Exception:
+        pass
+
+
+def _patched_rebuild_workspace_shell_v2(self):
+    if not hasattr(self, "main_container"):
+        return
+
+    metrics = self._workspace_metrics()
+    previous_entry = ""
+    try:
+        if getattr(self, "entry", None) is not None and self.entry.winfo_exists():
+            previous_entry = str(self.entry.get() or "")
+    except Exception:
+        previous_entry = ""
+    current_section = str(getattr(self, "_workspace_section", "chat") or "chat")
+
+    old_shell = getattr(self, "shell", None)
+    if old_shell is not None:
+        try:
+            old_shell.destroy()
+        except Exception:
+            pass
+
+    self._workspace_layout_signature = None
+    self._workspace_shell_layout_mode = None
+    self._scroll_targets = []
+    self._active_scroll_target = None
+    self._wheel_delta_accum = {}
+
+    self._build_workspace_shell_v2(metrics)
+    try:
+        self._set_workspace_section(current_section)
+    except Exception:
+        pass
+    try:
+        self._refresh_chat_theme()
+    except Exception:
+        pass
+    try:
+        if previous_entry:
+            self.entry.delete(0, tk.END)
+            self.entry.insert(0, previous_entry)
+            self.entry.configure(fg=Theme.FG)
+        else:
+            self._show_entry_placeholder()
+    except Exception:
+        pass
+    try:
+        self.refresh_workspace_layout_mode()
+    except Exception:
+        pass
 
 
 def _patched_build_workspace_sidebar(self, metrics):
@@ -380,7 +535,7 @@ def _patched_build_workspace_sidebar(self, metrics):
     ).pack(anchor="w")
     tk.Label(
         top,
-        text=f"{app_version_badge()}  •  workspace 16.1.1",
+        text=f"{app_version_badge()}  •  рабочее пространство",
         bg=Theme.CARD_BG,
         fg=Theme.FG_SECONDARY,
         font=metrics["small_font"],
@@ -393,21 +548,19 @@ def _patched_build_workspace_sidebar(self, metrics):
         highlightthickness=1,
     )
     nav.pack(fill="x", padx=12, pady=(0, 10))
-    tk.Label(nav, text="Вкладки", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 11)).pack(
+    tk.Label(nav, text="Разделы", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 11)).pack(
         anchor="w", padx=14, pady=(14, 8)
     )
 
-    items = [
-        ("Чат", "chat", lambda: (self.close_full_settings_view(), self.clear_chat()), False),
-        ("Центр голоса", "voice", lambda: self.open_full_settings_view("voice"), False),
-        ("Настройки", "main", lambda: self.open_full_settings_view("main"), False),
-        ("Приложения и игры", "apps", lambda: self.open_full_settings_view("apps"), False),
-        ("Диагностика", "diagnostics", lambda: self.open_full_settings_view("diagnostics"), False),
-        ("Релиз", "updates", lambda: self.open_full_settings_view("updates"), False),
-        ("Система", "system", lambda: self.open_full_settings_view("system"), False),
-    ]
-    for text, section, command, accent in items:
-        btn = _nav_button(nav, text, lambda s=section, c=command: (self._update_guide_context(s), c()), accent=accent)
+    for item in build_workspace_section_actions(self):
+        section = str(item["key"])
+        command = item["command"]
+        btn = _nav_button(
+            nav,
+            str(item["label"]),
+            lambda s=section, c=command: (self._update_guide_context(s), c()),
+            accent=False,
+        )
         btn.pack(fill="x", padx=14, pady=(0, 8))
         self._bind_hover_bg(btn, role="button")
         self.sidebar_action_buttons.append(btn)
@@ -415,7 +568,7 @@ def _patched_build_workspace_sidebar(self, metrics):
 
     note = tk.Label(
         self.sidebar,
-        text="Одна вкладка = один режим. Без всплывающих панелей поверх чата и без конкурирующих окон.",
+        text="Главный экран держится вокруг разговора. Когда окно становится узким, боковая колонка исчезает и остается только чат.",
         bg=Theme.BUTTON_BG,
         fg=Theme.FG_SECONDARY,
         justify="left",
@@ -429,15 +582,15 @@ def _patched_build_workspace_sidebar(self, metrics):
     bind_dynamic_wrap(note, self.sidebar, padding=36, minimum=160)
 
     guide_host = tk.Frame(self.sidebar, bg=Theme.CARD_BG)
-    guide_host.pack(fill="both", expand=True, padx=12, pady=(0, 12))
-    noob_asset = self.assets.get("noob")
+    guide_host.pack(fill="x", expand=False, padx=12, pady=(0, 12))
+    noob_asset = self.assets.get("noob_sidebar") or self.assets.get("noob")
     noob_image = noob_asset if isinstance(noob_asset, ImageTk.PhotoImage) else None
     self.guide_panel = GuideNoobPanel(
         guide_host,
         image=noob_image,
         title="Нубик JARVIS",
         on_click=self._advance_guide_hint,
-        variant="default",
+        variant="sidebar",
     )
     self._update_guide_context("chat")
     self._set_workspace_section("chat")
@@ -445,7 +598,7 @@ def _patched_build_workspace_sidebar(self, metrics):
 
 def _patched_build_workspace_overview(self, metrics):
     self._ensure_voice_debug_state()
-    for container in (getattr(self, "top_bar", None), getattr(self, "quick_head", None), getattr(self, "quick_bar", None)):
+    for container in (getattr(self, "top_bar", None),):
         if container is None:
             continue
         for child in list(container.winfo_children()):
@@ -477,7 +630,7 @@ def _patched_build_workspace_overview(self, metrics):
     self.quick_title_label.pack(anchor="w", pady=(8, 0))
     self.quick_desc_label = tk.Label(
         left,
-        text="Главный рабочий режим: слева навигация, в центре разговор, справа живые подсказки и голос.",
+        text="Главный экран показывает только разговор: короткий статус сверху, широкий чат в центре и крупный ввод снизу.",
         bg=Theme.CARD_BG,
         fg=Theme.FG_SECONDARY,
         justify="left",
@@ -494,25 +647,44 @@ def _patched_build_workspace_overview(self, metrics):
     )
     self.status_label.pack(anchor="w", pady=(10, 0))
 
+    self.compact_controls_row = tk.Frame(left, bg=Theme.CARD_BG)
+    self.compact_controls_row.pack(anchor="w", pady=(10, 0))
+    self.compact_nav_bar = tk.Frame(self.compact_controls_row, bg=Theme.CARD_BG)
+    self.compact_nav_bar.pack(side="left")
+    self.compact_section_buttons = {}
+    for item in build_workspace_section_actions(self):
+        key = str(item["key"])
+        btn = _toolbar_button(
+            self.compact_nav_bar,
+            str(item["compact"]),
+            item["command"],
+            accent=False,
+        )
+        btn.pack(side="left", padx=(0, 6))
+        self._bind_hover_bg(btn, role="button")
+        self.compact_section_buttons[key] = btn
+
+    self.menu_btn = _toolbar_button(self.compact_controls_row, "Меню", self._open_workspace_menu, accent=False)
+    self.menu_btn.pack(side="left")
+    self._bind_hover_bg(self.menu_btn, role="button")
+    self.compact_controls_row.pack_forget()
+
     right = tk.Frame(header, bg=Theme.CARD_BG)
     right.pack(side="right", padx=(18, 0))
     self.header_action_buttons = []
-    for text, command, accent in (
-        ("Новый чат", lambda: (self.close_full_settings_view(), self.clear_chat()), False),
-        ("Журнал", self.show_history, False),
-        ("Ctrl+K", self.open_command_palette, False),
-        ("Настройки", lambda: self.open_full_settings_view("main"), True),
-    ):
-        btn = _toolbar_button(right, text, command, accent=accent)
-        btn.pack(side="right", padx=(0, 8))
-        self._bind_hover_bg(btn, role="button")
-        self.header_action_buttons.append(btn)
+    self.header_meter_host = tk.Frame(right, bg=Theme.CARD_BG)
+    self.header_meter_host.pack(side="right")
+    _build_corner_meter(self, parent=self.header_meter_host)
 
+    for child in list(self.quick_bar.winfo_children()):
+        try:
+            child.destroy()
+        except Exception:
+            pass
     summary = tk.Frame(self.quick_bar, bg=Theme.CARD_BG)
     summary.pack(fill="x")
     row = tk.Frame(summary, bg=Theme.CARD_BG)
     row.pack(fill="x")
-
     self.net_chip, self.net_label = _status_chip(row, "Сеть", text="Онлайн", fg=Theme.ONLINE, min_width=132)
     self.mic_status_var = tk.StringVar(value="Микрофон: не выбран")
     self.mic_chip, self.mic_status_label = _status_chip(row, "Микрофон", textvariable=self.mic_status_var, min_width=184)
@@ -520,10 +692,6 @@ def _patched_build_workspace_overview(self, metrics):
     self.output_chip, self.output_status_label = _status_chip(row, "Вывод", textvariable=self.output_status_var, min_width=184)
     self.tts_status_var = tk.StringVar(value="Голос: pyttsx3")
     self.tts_chip, self.tts_status_label = _status_chip(row, "Озвучка", textvariable=self.tts_status_var, min_width=172)
-    try:
-        self.tts_chip.pack_configure(padx=(0, 0))
-    except Exception:
-        pass
 
     self.workspace_mode_badge = None
     self.top_divider = tk.Frame(self.workspace, bg=Theme.BORDER, height=1)
@@ -591,39 +759,16 @@ def _patched_build_workspace_chat(self, metrics):
     self.chat_frame.bind("<Configure>", lambda _e: self._sync_chat_scroll_region())
     self.chat_canvas.bind("<Configure>", lambda e: self._sync_chat_canvas_width(e.width))
     self._register_scroll_target(self.chat_canvas)
-
-    self.chat_side = tk.Frame(stage, bg=Theme.BG_LIGHT, width=318)
-    self.chat_side.grid(row=0, column=1, sticky="ns", padx=(14, 0))
-    self.chat_side.grid_propagate(False)
-
-    voice_host = tk.Frame(self.chat_side, bg=Theme.BG_LIGHT)
-    voice_host.pack(fill="x")
-    _build_corner_meter(self, parent=voice_host)
-
-    noob_host = tk.Frame(self.chat_side, bg=Theme.BG_LIGHT)
-    noob_host.pack(fill="both", expand=True, pady=(12, 0))
-    noob_asset = self.assets.get("noob")
-    noob_image = noob_asset if isinstance(noob_asset, ImageTk.PhotoImage) else None
-    self.chat_noob_panel = GuideNoobPanel(
-        noob_host,
-        image=noob_image,
-        title="Нубик JARVIS",
-        on_click=self._advance_guide_hint,
-        variant="default",
-    )
-    self.utility_shell = self.chat_side
+    self._preferred_scroll_target = self.chat_canvas
+    self.chat_side = None
+    self.chat_noob_panel = None
+    self.utility_shell = None
 
 
 def _patched_build_workspace_controls(self, metrics):
     self.controls_bar = tk.Frame(self.workspace, bg=Theme.BG_LIGHT, height=max(metrics["entry_height"], 88))
     self.controls_bar.pack(side="bottom", fill="x", pady=(12, 0))
     self.controls_bar.pack_propagate(False)
-
-    left_tools = tk.Frame(self.controls_bar, bg=Theme.BG_LIGHT)
-    left_tools.pack(side="left", padx=(0, 8))
-    palette_btn = _toolbar_button(left_tools, "Ctrl+K", self.open_command_palette)
-    palette_btn.pack(side="left")
-    self._bind_hover_bg(palette_btn, role="button")
 
     self.entry_wrap = tk.Frame(
         self.controls_bar,
@@ -633,7 +778,7 @@ def _patched_build_workspace_controls(self, metrics):
         highlightbackground=Theme.BORDER,
         highlightthickness=1,
     )
-    self.entry_wrap.pack(side="left", fill="both", expand=True)
+    self.entry_wrap.pack(side="left", fill="both", expand=True, padx=(0, 8))
     self.entry = tk.Entry(
         self.entry_wrap,
         bg=Theme.INPUT_BG,
@@ -647,18 +792,75 @@ def _patched_build_workspace_controls(self, metrics):
     self.entry.pack(side="left", fill="both", expand=True, ipady=8)
     self._setup_entry_bindings(self.entry)
     self.entry.bind("<Return>", lambda e: self.send_text())
+    self.entry.bind("<FocusIn>", lambda _e: self._clear_entry_placeholder(), add="+")
+    self.entry.bind(
+        "<FocusOut>",
+        lambda _e: self._show_entry_placeholder() if not str(self.entry.get() or "").strip() else None,
+        add="+",
+    )
 
-    self.paste_btn = tk.Label(self.entry_wrap, text="📎", bg=Theme.BUTTON_BG, fg=Theme.FG, font=("Segoe UI", 10), cursor="hand2", padx=9, pady=6)
+    def _entry_keypress(event):
+        if bool(getattr(self, "_entry_placeholder_active", False)):
+            ignored = {
+                "Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R",
+                "Caps_Lock", "Tab", "Escape", "Left", "Right", "Up", "Down",
+                "Home", "End", "Prior", "Next",
+            }
+            if str(getattr(event, "keysym", "") or "") not in ignored:
+                self._clear_entry_placeholder()
+        return None
+
+    self.entry.bind("<KeyPress>", _entry_keypress, add="+")
+    self.entry.bind("<Button-1>", lambda _e: self._clear_entry_placeholder(), add="+")
+
+    self.paste_btn = tk.Button(
+        self.entry_wrap,
+        text="📎",
+        command=self.paste_text,
+        bg=Theme.BUTTON_BG,
+        fg=Theme.FG,
+        font=("Segoe UI", 10),
+        cursor="hand2",
+        padx=9,
+        pady=6,
+        relief="flat",
+        bd=0,
+        highlightthickness=0,
+        takefocus=False,
+    )
     self.paste_btn.pack(side="right", padx=(6, 0))
-    self.paste_btn.bind("<Button-1>", lambda e: self.paste_text())
     self._bind_hover_bg(self.paste_btn, role="input_icon")
 
-    self.copy_btn = tk.Label(self.entry_wrap, text="📋", bg=Theme.BUTTON_BG, fg=Theme.FG, font=("Segoe UI", 10), cursor="hand2", padx=9, pady=6)
+    self.copy_btn = tk.Button(
+        self.entry_wrap,
+        text="📋",
+        command=self.copy_chat,
+        bg=Theme.BUTTON_BG,
+        fg=Theme.FG,
+        font=("Segoe UI", 10),
+        cursor="hand2",
+        padx=9,
+        pady=6,
+        relief="flat",
+        bd=0,
+        highlightthickness=0,
+        takefocus=False,
+    )
     self.copy_btn.pack(side="right", padx=(6, 0))
-    self.copy_btn.bind("<Button-1>", lambda e: self.copy_chat())
     self._bind_hover_bg(self.copy_btn, role="input_icon")
 
-    self.send_btn = tk.Label(self.entry_wrap, bg=Theme.BUTTON_BG, cursor="hand2", padx=10, pady=6)
+    self.send_btn = tk.Button(
+        self.entry_wrap,
+        bg=Theme.BUTTON_BG,
+        cursor="hand2",
+        padx=10,
+        pady=6,
+        command=self.send_text,
+        relief="flat",
+        bd=0,
+        highlightthickness=0,
+        takefocus=False,
+    )
     self.send_btn.pack(side="right", padx=(6, 0))
     if "send" in self.assets:
         if isinstance(self.assets["send"], ImageTk.PhotoImage):
@@ -667,10 +869,9 @@ def _patched_build_workspace_controls(self, metrics):
             self.send_btn.config(text=self.assets["send"], fg=Theme.MIC_ICON_FG, font=("Segoe UI", 11, "bold"))
     else:
         self.send_btn.config(text="➤", fg=Theme.MIC_ICON_FG, font=("Segoe UI", 11, "bold"))
-    self.send_btn.bind("<Button-1>", lambda e: self.send_text())
     self._bind_hover_bg(self.send_btn, role="input_icon")
 
-    self.mic_btn = tk.Label(
+    self.mic_btn = tk.Button(
         self.controls_bar,
         bg=Theme.ACCENT,
         fg=Theme.FG,
@@ -679,6 +880,10 @@ def _patched_build_workspace_controls(self, metrics):
         pady=11,
         highlightbackground=Theme.BORDER,
         highlightthickness=1,
+        command=self.mic_click,
+        relief="flat",
+        bd=0,
+        takefocus=False,
     )
     self.mic_btn.pack(side="right", padx=(8, 0))
     if "mic" in self.assets:
@@ -688,7 +893,6 @@ def _patched_build_workspace_controls(self, metrics):
             self.mic_btn.config(text=self.assets["mic"], fg=Theme.FG, font=("Segoe UI", 16))
     else:
         self.mic_btn.config(text="🎤", fg=Theme.FG, font=("Segoe UI", 16))
-    self.mic_btn.bind("<Button-1>", self.mic_click)
     self._bind_hover_bg(self.mic_btn, role="button")
 
 
@@ -733,7 +937,6 @@ def _patched_refresh_chat_empty_state(self):
         [
             {"text": "Центр голоса", "command": lambda: self.open_full_settings_view("voice"), "bg": Theme.ACCENT},
             {"text": "Настройки", "command": lambda: self.open_full_settings_view("main")},
-            {"text": "Приложения и игры", "command": lambda: self.open_full_settings_view("apps")},
             {"text": "Система", "command": lambda: self.open_full_settings_view("system")},
         ],
         columns=2,
@@ -758,11 +961,32 @@ def _patched_refresh_workspace_layout_mode(self, *_args):
     if not hasattr(self, "shell"):
         return
     try:
-        width = int(self.main_container.winfo_width() or self.root.winfo_width() or 0)
+        if hasattr(self, "_apply_main_container_bounds"):
+            self._apply_main_container_bounds()
+    except Exception:
+        pass
+    try:
+        width = int(self.root.winfo_width() or self.main_container.winfo_width() or 0)
     except Exception:
         width = 0
     focus = bool(self._cfg().get_focus_mode_enabled())
-    sidebar_visible = (not focus) and width >= 1060
+    previous_mode = str(getattr(self, "_workspace_shell_layout_mode", "") or "")
+    if focus:
+        layout_mode = "focus"
+    elif previous_mode == "wide":
+        layout_mode = "wide" if width >= 1360 else "compact"
+    elif previous_mode == "compact":
+        layout_mode = "wide" if width >= 1440 else "compact"
+    else:
+        layout_mode = "wide" if width >= 1400 else "compact"
+
+    sidebar_visible = (not focus) and layout_mode == "wide"
+    compact_nav_visible = (not focus) and layout_mode == "compact"
+    layout_signature = (layout_mode, sidebar_visible, compact_nav_visible)
+    if layout_signature == getattr(self, "_workspace_layout_signature", None):
+        return
+    self._workspace_layout_signature = layout_signature
+    self._workspace_shell_layout_mode = layout_mode
     self._set_focus_layout_visible(sidebar_visible, False)
 
     utility_shell = getattr(self, "utility_shell", None)
@@ -774,34 +998,34 @@ def _patched_refresh_workspace_layout_mode(self, *_args):
 
     chat_stage = getattr(self, "chat_stage", None)
     chat_side = getattr(self, "chat_side", None)
-    settings_open = False
-    if hasattr(self, "_is_full_settings_open"):
+    if chat_stage is not None and chat_side is not None:
         try:
-            settings_open = bool(self._is_full_settings_open())
+            chat_side.grid_remove()
         except Exception:
-            settings_open = False
-    if chat_stage is not None and chat_side is not None and not settings_open:
+            pass
+
+    compact_controls_row = getattr(self, "compact_controls_row", None)
+    if compact_controls_row is not None:
         try:
-            if focus:
-                chat_side.grid_remove()
-            elif width >= 1380:
-                chat_side.grid()
-                chat_side.grid(row=0, column=1, sticky="ns", padx=(14, 0), pady=0)
-                chat_side.grid_propagate(False)
-                chat_side.configure(width=318)
-            elif width >= 1120:
-                chat_side.grid()
-                chat_side.grid(row=1, column=0, columnspan=2, sticky="ew", padx=0, pady=(12, 0))
-                chat_side.grid_propagate(True)
-                chat_side.configure(width=1)
-            else:
-                chat_side.grid_remove()
+            mapped = bool(str(compact_controls_row.winfo_manager() or "").strip())
+        except Exception:
+            mapped = False
+        if compact_nav_visible and not mapped:
+            compact_controls_row.pack(anchor="w", pady=(10, 0))
+        elif not compact_nav_visible and mapped:
+            compact_controls_row.pack_forget()
+
+    quick_bar = getattr(self, "quick_bar", None)
+    if quick_bar is not None:
+        try:
+            quick_bar.pack_forget()
         except Exception:
             pass
 
     current_section = getattr(self, "_workspace_section", "chat")
-    self._set_workspace_section("chat" if focus and current_section == "chat" else current_section)
-    self._update_guide_context("focus" if focus else "chat")
+    if current_section:
+        self._set_workspace_section(current_section)
+    self._update_guide_context("focus" if focus else current_section)
 
 
 def register_shell_runtime(app_cls):
@@ -812,8 +1036,13 @@ def register_shell_runtime(app_cls):
     if not hasattr(app_cls, "_base_reload_services_v2"):
         app_cls._base_reload_services_v2 = app_cls.reload_services
 
-    app_cls._advance_guide_hint = _advance_guide_hint
-    app_cls._hide_to_tray_force = _hide_to_tray_force
+    def _assign(name, value):
+        if name in app_cls.__dict__:
+            return
+        setattr(app_cls, name, value)
+
+    _assign("_advance_guide_hint", _advance_guide_hint)
+    _assign("_hide_to_tray_force", _hide_to_tray_force)
     app_cls.hide_to_tray = _patched_hide_to_tray
     app_cls.toggle_window = _patched_toggle_window
     app_cls._quit_app_main = _patched_quit_app_main
@@ -824,14 +1053,17 @@ def register_shell_runtime(app_cls):
     app_cls._run_delayed_voice_meter_boot = _run_delayed_voice_meter_boot
     app_cls._start_runtime_services = _patched_start_runtime_services
     app_cls.reload_services = _patched_reload_services
-    app_cls._set_workspace_section = _set_workspace_section
-    app_cls._build_workspace_sidebar = _patched_build_workspace_sidebar
-    app_cls._build_workspace_overview = _patched_build_workspace_overview
-    app_cls._build_workspace_chat = _patched_build_workspace_chat
-    app_cls._build_workspace_controls = _patched_build_workspace_controls
-    app_cls._refresh_chat_empty_state = _patched_refresh_chat_empty_state
-    app_cls._build_workspace_rail = _patched_build_workspace_rail
-    app_cls.refresh_workspace_layout_mode = _patched_refresh_workspace_layout_mode
+    _assign("_set_workspace_section", _set_workspace_section)
+    _assign("_build_workspace_shell_v2", _patched_build_workspace_shell_v2)
+    _assign("_rebuild_workspace_shell_v2", _patched_rebuild_workspace_shell_v2)
+    _assign("_build_workspace_sidebar", _patched_build_workspace_sidebar)
+    _assign("_build_workspace_overview", _patched_build_workspace_overview)
+    _assign("_build_workspace_chat", _patched_build_workspace_chat)
+    _assign("_build_workspace_controls", _patched_build_workspace_controls)
+    _assign("_refresh_chat_empty_state", _patched_refresh_chat_empty_state)
+    _assign("_build_workspace_rail", _patched_build_workspace_rail)
+    _assign("refresh_workspace_layout_mode", _patched_refresh_workspace_layout_mode)
+    _assign("_open_workspace_menu", _open_workspace_menu)
 
 
 __all__ = ["register_shell_runtime"]

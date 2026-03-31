@@ -1,0 +1,49 @@
+{
+  "name": "JARVIS NEXT",
+  "codename": "control-hub",
+  "status": "foundation",
+  "source_of_truth": "next_core",
+  "legacy_project": "jarvisAI 2.0",
+  "pillars": [
+    "one_brain",
+    "one_shell",
+    "many_modes",
+    "asset_first",
+    "execution_over_talk",
+    "quality_gate_required"
+  ],
+  "modes": [
+    "create",
+    "code",
+    "roblox",
+    "system",
+    "research",
+    "recreate"
+  ],
+  "style": {
+    "theme": "doors_ps1_control_hub",
+    "keywords": [
+      "hub",
+      "operator_room",
+      "heavy_panels",
+      "dither",
+      "ps1_noise",
+      "tension"
+    ]
+  },
+  "release_rules": {
+    "menu_only_in_compact": true,
+    "chat_min_width_ratio_wide": 0.68,
+    "no_clipped_controls": true,
+    "no_mojibake": true,
+    "dry_run_required_for_risky_actions": true
+  },
+  "docs": {
+    "manifesto": "next_core/MANIFESTO.md",
+    "v1_spec": "next_core/V1_SPEC.md",
+    "style_guide": "next_core/STYLE_GUIDE.md",
+    "quality_gate": "next_core/QUALITY_GATE.md",
+    "prologue": "next_core/PROLOGUE.md",
+    "roadmap": "next_core/ROADMAP.md"
+  }
+}

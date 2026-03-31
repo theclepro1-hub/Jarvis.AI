@@ -1,6 +1,6 @@
-#define MyAppName "Jarvis AI 2.0"
+﻿#define MyAppName "Jarvis AI 2.0"
 #ifndef MyAppVersion
-  #define MyAppVersion "16.1.1"
+#define MyAppVersion "20.0.0"
 #endif
 
 [Setup]

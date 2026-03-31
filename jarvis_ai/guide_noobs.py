@@ -1,4 +1,4 @@
-import tkinter as tk
+﻿import tkinter as tk
 from typing import Callable, Optional
 
 from .theme import Theme
@@ -19,16 +19,23 @@ class GuideNoobPanel:
         self._click_callback = on_click
         self.variant = str(variant or "default").strip().lower()
         self.is_hero = self.variant == "hero"
+        self.is_settings = self.variant == "settings"
 
-        outer_pad = 22 if self.is_hero else 14
-        title_font = ("Segoe UI Semibold", 18 if self.is_hero else 12)
-        status_font = ("Segoe UI", 12 if self.is_hero else 9)
-        message_font = ("Segoe UI", 12 if self.is_hero else 10)
+        outer_pad = 22 if self.is_hero else 16 if self.is_settings else 14
+        title_font = ("Segoe UI Semibold", 18 if self.is_hero else 13 if self.is_settings else 12)
+        status_font = ("Segoe UI", 12 if self.is_hero else 10 if self.is_settings else 9)
+        message_font = ("Segoe UI", 12 if self.is_hero else 11 if self.is_settings else 10)
         pointer_font = ("Segoe UI Semibold", 12 if self.is_hero else 10)
         avatar_font = ("Segoe UI", 52 if self.is_hero else 28, "bold")
         wave_font = ("Segoe UI Emoji", 22 if self.is_hero else 16)
-        self._wave_anchor_x = 122 if self.is_hero else 48
-        self._wave_base_y = 6 if self.is_hero else 4
+        initial_wrap = 220 if self.is_hero else 210 if self.is_settings else 180
+        self._wave_anchor_relx = 1.0
+        self._wave_anchor = "ne"
+        self._wave_base_x = -12 if self.is_hero else -4
+        self._wave_base_y = -2 if self.is_hero else 1
+        self._outer_pad = outer_pad
+        self._layout_after = None
+        self._layout_signature = None
 
         self.frame = tk.Frame(
             parent,
@@ -37,7 +44,7 @@ class GuideNoobPanel:
             highlightthickness=1,
             cursor="hand2",
         )
-        self.frame.pack(fill="both", expand=False)
+        self.frame.pack(fill="x", expand=False)
 
         self.top = tk.Frame(self.frame, bg=Theme.CARD_BG, cursor="hand2")
         self.top.pack(fill="x", padx=outer_pad, pady=(outer_pad, 10))
@@ -55,7 +62,7 @@ class GuideNoobPanel:
         self.avatar.pack(anchor="center")
 
         self.wave = tk.Label(self.avatar_wrap, text="👋", bg=Theme.CARD_BG, fg=Theme.ACCENT, font=wave_font, cursor="hand2")
-        self.wave.place(x=self._wave_anchor_x, y=self._wave_base_y)
+        self.wave.place(relx=self._wave_anchor_relx, x=self._wave_base_x, y=self._wave_base_y, anchor=self._wave_anchor)
 
         self.text_wrap = tk.Frame(self.top, bg=Theme.CARD_BG, cursor="hand2")
         if self.is_hero:
@@ -103,9 +110,10 @@ class GuideNoobPanel:
             justify="left",
             font=message_font,
             cursor="hand2",
+            wraplength=initial_wrap,
         )
         self.message_label.pack(fill="x", padx=14 if self.is_hero else 12, pady=12 if self.is_hero else 10)
-        bind_dynamic_wrap(self.message_label, self.message_box, padding=36 if self.is_hero else 28, minimum=260 if self.is_hero else 220)
+        bind_dynamic_wrap(self.message_label, self.message_box, padding=36 if self.is_hero else 28, minimum=260 if self.is_hero else 150)
 
         self.pointer_label = tk.Label(
             self.frame,
@@ -115,14 +123,36 @@ class GuideNoobPanel:
             font=pointer_font,
             justify="left",
             cursor="hand2",
+            wraplength=initial_wrap,
         )
         self.pointer_label.pack(anchor="w", padx=outer_pad, pady=(0, outer_pad))
-        bind_dynamic_wrap(self.pointer_label, self.frame, padding=(outer_pad * 2) + 8, minimum=220)
+        bind_dynamic_wrap(self.pointer_label, self.frame, padding=(outer_pad * 2) + 8, minimum=150)
 
         self._wave_tick = 0
         self._wave_after = None
         self._bind_clicks()
         self.start_wave()
+        self.frame.bind("<Configure>", lambda _event: self._schedule_layout_refresh(), add="+")
+        try:
+            self.parent.bind("<Configure>", lambda _event: self._schedule_layout_refresh(), add="+")
+        except Exception:
+            pass
+        self._schedule_layout_refresh()
+
+    def _apply_wrap_constraints(self):
+        try:
+            frame_w = int(self.frame.winfo_width() or self.parent.winfo_width() or 0)
+        except Exception:
+            frame_w = 0
+        if frame_w <= 0:
+            return
+        try:
+            message_wrap = max(150, frame_w - (self._outer_pad * 2) - 28)
+            pointer_wrap = max(150, frame_w - (self._outer_pad * 2) - 16)
+            self.message_label.configure(wraplength=message_wrap)
+            self.pointer_label.configure(wraplength=pointer_wrap)
+        except Exception:
+            pass
 
     def _bind_clicks(self):
         for widget in (
@@ -154,6 +184,7 @@ class GuideNoobPanel:
         self._click_callback = callback
 
     def set_message(self, title: str = "", status: str = "", text: str = "", pointer: str = ""):
+        self._apply_wrap_constraints()
         if title:
             self.title_label.configure(text=title)
         if status:
@@ -162,6 +193,7 @@ class GuideNoobPanel:
             self.message_label.configure(text=text)
         if pointer:
             self.pointer_label.configure(text=pointer)
+        self._schedule_layout_refresh()
 
     def apply_theme(self):
         self.frame.configure(bg=Theme.CARD_BG, highlightbackground=Theme.BORDER)
@@ -176,6 +208,66 @@ class GuideNoobPanel:
         self.wave.configure(bg=Theme.CARD_BG, fg=Theme.ACCENT)
         if not self.image:
             self.avatar.configure(bg=Theme.CARD_BG, fg=Theme.ACCENT)
+        self._schedule_layout_refresh()
+
+    def _schedule_layout_refresh(self):
+        if self.is_hero:
+            return
+        after_id = self._layout_after
+        if after_id is not None:
+            try:
+                self.frame.after_cancel(after_id)
+            except Exception:
+                pass
+
+        def _refresh():
+            self._layout_after = None
+            self._refresh_layout()
+
+        try:
+            self._layout_after = self.frame.after(24, _refresh)
+        except Exception:
+            self._refresh_layout()
+
+    def _refresh_layout(self):
+        if self.is_hero:
+            return
+        self._apply_wrap_constraints()
+        try:
+            width = max(int(self.frame.winfo_width() or self.parent.winfo_width() or 0), 1)
+        except Exception:
+            return
+        stacked = width < (280 if self.is_settings else 240)
+        centered = stacked or self.is_settings
+        layout_signature = (stacked, centered)
+        if layout_signature == self._layout_signature:
+            return
+        self._layout_signature = layout_signature
+
+        try:
+            self.avatar_wrap.pack_forget()
+            self.text_wrap.pack_forget()
+        except Exception:
+            pass
+
+        if stacked:
+            self.avatar_wrap.pack(anchor="center", pady=(0, 8))
+            self.text_wrap.pack(fill="x", expand=True, pady=(2, 0))
+        else:
+            self.avatar_wrap.pack(side="left", anchor="n")
+            self.text_wrap.pack(side="left", fill="x", expand=True, padx=(12, 0))
+
+        anchor = "center" if centered else "w"
+        justify = "center" if centered else "left"
+        try:
+            self.title_label.pack_configure(anchor=anchor)
+            self.status_label.pack_configure(anchor=anchor, pady=(6, 0))
+            self.pointer_label.pack_configure(anchor=anchor, padx=self._outer_pad, pady=(0, self._outer_pad))
+        except Exception:
+            pass
+        self.title_label.configure(justify=justify)
+        self.status_label.configure(justify=justify)
+        self.pointer_label.configure(justify=justify)
 
     def start_wave(self):
         if self._wave_after is not None:
@@ -186,9 +278,14 @@ class GuideNoobPanel:
             if not self.wave.winfo_exists():
                 return
             offset_y = -3 if self._wave_tick % 2 == 0 else 3
-            offset_x = self._wave_anchor_x - 3 if self._wave_tick % 2 == 0 else self._wave_anchor_x + 2
+            offset_x = self._wave_base_x - 2 if self._wave_tick % 2 == 0 else self._wave_base_x + 2
             try:
-                self.wave.place_configure(x=offset_x, y=self._wave_base_y + offset_y)
+                self.wave.place_configure(
+                    relx=self._wave_anchor_relx,
+                    x=offset_x,
+                    y=self._wave_base_y + offset_y,
+                    anchor=self._wave_anchor,
+                )
             except Exception:
                 return
             self._wave_tick += 1
@@ -203,6 +300,12 @@ class GuideNoobPanel:
             except Exception:
                 pass
             self._wave_after = None
+        if self._layout_after is not None:
+            try:
+                self.frame.after_cancel(self._layout_after)
+            except Exception:
+                pass
+            self._layout_after = None
 
 
 __all__ = ["GuideNoobPanel"]

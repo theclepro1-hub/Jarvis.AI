@@ -143,7 +143,7 @@ class TelegramBot:
                 pass
         try:
             if self.thread and self.thread.is_alive():
-                self.thread.join(timeout=2.5)
+                self.thread.join(timeout=0.6)
         except Exception:
             pass
 

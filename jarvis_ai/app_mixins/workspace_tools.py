@@ -23,24 +23,42 @@ class WorkspaceToolsMixin:
     def _cfg(self):
         return getattr(self, "config_mgr", CONFIG_MGR)
 
+    def _workspace_scale_factor(self) -> float:
+        try:
+            scale_percent = int(self._cfg().get_ui_scale_percent() or 100)
+        except Exception:
+            scale_percent = 100
+        scale_percent = max(90, min(150, scale_percent))
+        if scale_percent >= 100:
+            factor = 1.0 + ((scale_percent - 100) / 500.0)
+        else:
+            factor = max(0.96, 1.0 - ((100 - scale_percent) / 300.0))
+        return max(0.94, min(1.12, float(factor)))
+
     def _workspace_density_key(self) -> str:
         value = str(self._cfg().get_ui_density() or "comfortable").strip().lower()
         return value if value in {"compact", "comfortable"} else "comfortable"
 
     def _workspace_metrics(self):
         compact = self._workspace_density_key() == "compact"
+        scale = self._workspace_scale_factor()
+
+        def s(value: int, minimum: int = 1) -> int:
+            return max(minimum, int(round(float(value) * scale)))
+
         return {
             "compact": compact,
-            "shell_pad": 14 if compact else 18,
-            "card_pad": 16 if compact else 20,
-            "sidebar_width": 238 if compact else 278,
+            "scale": scale,
+            "shell_pad": s(10 if compact else 14),
+            "card_pad": s(13 if compact else 16),
+            "sidebar_width": s(208 if compact else 228, minimum=168),
             "rail_width": 0,
-            "brand_font": ("Bahnschrift SemiBold", 18 if compact else 22),
-            "title_font": ("Bahnschrift SemiBold", 25 if compact else 31),
-            "body_font": ("Segoe UI", 11 if compact else 12),
-            "small_font": ("Segoe UI", 10 if compact else 11),
-            "input_font": ("Segoe UI", 13 if compact else 14),
-            "entry_height": 78 if compact else 88,
+            "brand_font": ("Bahnschrift SemiBold", s(20 if compact else 24, minimum=14)),
+            "title_font": ("Bahnschrift SemiBold", s(28 if compact else 34, minimum=18)),
+            "body_font": ("Segoe UI", s(12 if compact else 14, minimum=10)),
+            "small_font": ("Segoe UI", s(11 if compact else 12, minimum=9)),
+            "input_font": ("Segoe UI", s(15 if compact else 17, minimum=11)),
+            "entry_height": s(90 if compact else 104, minimum=76),
         }
 
     def _apply_dpi_scaling(self):
@@ -50,13 +68,11 @@ class WorkspaceToolsMixin:
             scale_percent = int(self._cfg().get_ui_scale_percent() or 100)
         except Exception:
             scale_percent = 100
-        scale_percent = max(92, min(150, scale_percent))
+        scale_percent = max(90, min(150, scale_percent))
         if scale_percent >= 100:
-            base_scale = 1.0 + ((scale_percent - 100) / 250.0)
+            base_scale = 1.0 + ((scale_percent - 100) / 500.0)
         else:
-            base_scale = max(0.94, 1.0 - ((100 - scale_percent) / 150.0))
-        if self._workspace_density_key() == "comfortable":
-            base_scale = max(base_scale, 1.06)
+            base_scale = max(0.96, 1.0 - ((100 - scale_percent) / 300.0))
         if self._cfg().get_dpi_adaptation_enabled():
             try:
                 screen_w = int(self.root.winfo_screenwidth() or 0)
@@ -67,8 +83,12 @@ class WorkspaceToolsMixin:
                 base_scale = max(base_scale, 1.03)
             if screen_h and screen_h <= 900:
                 base_scale = max(0.98, base_scale - 0.02)
+        last_scale = getattr(self, "_last_applied_dpi_scale", None)
+        if isinstance(last_scale, (int, float)) and abs(float(last_scale) - float(base_scale)) < 0.001:
+            return
         try:
             self.root.tk.call("tk", "scaling", round(base_scale, 3))
+            self._last_applied_dpi_scale = float(base_scale)
         except Exception:
             pass
 
@@ -174,9 +194,9 @@ class WorkspaceToolsMixin:
             if os.path.exists(candidate):
                 extra.append(candidate)
         bundle = export_diagnostics_bundle(extra)
-        self.add_msg(f"Пакет диагностики готов: {bundle}", "bot")
-        messagebox.showinfo(app_brand_name(), f"Диагностика экспортирована:\n{bundle}", parent=self.root)
-        self.set_status("Диагностика экспортирована", "ok")
+        self.add_msg(f"Пакет поддержки готов: {bundle}", "bot")
+        messagebox.showinfo(app_brand_name(), f"Пакет поддержки экспортирован:\n{bundle}", parent=self.root)
+        self.set_status("Пакет поддержки экспортирован", "ok")
 
     def export_plugin_pack_action(self):
         payload = {
@@ -435,8 +455,11 @@ class WorkspaceToolsMixin:
         if mode not in {"compact", "comfortable"}:
             mode = "comfortable"
         self._cfg().set_ui_density(mode)
-        self._cfg().set_ui_scale_percent(106 if mode == "compact" else 132)
         self._apply_dpi_scaling()
+        try:
+            self._rebuild_workspace_shell_v2()
+        except Exception:
+            pass
         self.refresh_workspace_layout_mode()
         labels = {"compact": "компактный", "comfortable": "комфортный"}
         self.set_status(f"Интерфейс: {labels.get(mode, mode)}", "ok")
@@ -462,7 +485,6 @@ class WorkspaceToolsMixin:
         panel = getattr(self, "guide_panel", None)
         if not panel:
             return
-        focus = bool(self._cfg().get_focus_mode_enabled())
         summary = self._cfg().get_readiness_last_summary() or "Готов подсказать, куда идти дальше."
         mapping = {
             "chat": (

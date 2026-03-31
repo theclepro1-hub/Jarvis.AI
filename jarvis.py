@@ -1,35 +1,28 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 """
-JARVIS AI 2.0 Assistant v16.0.0
+JARVIS AI 2.0 Assistant v20.0.0
 """
 
 import os
 import sys
-import json
-import ast
 import time
 import queue
 import ctypes
-import glob
 try:
     import ctypes.wintypes as wintypes
 except Exception:
     wintypes = None
 import threading
-import webbrowser
 import subprocess
 import re
 import logging
 import atexit
-import audioop
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from urllib.parse import quote_plus
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from collections import deque
-from functools import lru_cache
 import asyncio
 import shutil
 import wave
@@ -43,22 +36,26 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk, ImageDraw
 import pystray
 from pystray import MenuItem as trayMenuItem
-import warnings
 
 from jarvis_ai.audio_devices import (
-    _audio_device_family_key,
-    _expand_audio_device_name,
-    _find_audio_device_entry_by_name,
-    _get_audio_device_entry,
-    _host_api_short_label,
-    _is_audio_garbage_name,
-    _is_secondary_audio_choice,
+    audio_device_family_key as _audio_device_family_key,
+    expand_audio_device_name as _expand_audio_device_name,
+    find_audio_device_entry_by_name as _find_audio_device_entry_by_name,
+    get_audio_device_entry as _get_audio_device_entry,
+    host_api_short_label as _host_api_short_label,
+    is_audio_garbage_name as _is_audio_garbage_name,
+    is_secondary_audio_choice as _is_secondary_audio_choice,
     list_input_device_entries_safe,
     list_microphone_names_safe,
     list_output_device_entries_safe,
     list_output_device_names_safe,
     pick_microphone_device,
     pick_output_device,
+)
+from jarvis_ai.audio_runtime import (
+    audio_rms_int16,
+    compressed_audio_decoder_available as _compressed_audio_decoder_available,
+    suppress_pydub_ffmpeg_warnings,
 )
 from jarvis_ai.app_mixins import (
     ChatUiMixin,
@@ -70,27 +67,31 @@ from jarvis_ai.app_mixins import (
     VoicePipelineMixin,
     WorkspaceToolsMixin,
 )
-from jarvis_ai.brain_router import build_action_explanation, route_query
+from jarvis_ai.action_catalog import SUPPORTED_ACTION_KEYS
+from jarvis_ai.bootstrap import AppBootstrap, ensure_httpx_proxy_compat
 from jarvis_ai.commands import (
     CommandParser,
     SIMPLE_BATCH_ACTIONS,
     SPLIT_PATTERN,
     find_dynamic_entry,
+    find_app_key,
     get_dynamic_entry_by_key,
     normalize_text,
 )
-from jarvis_ai.app_context import build_app_context
+from jarvis_ai.action_permissions import (
+    DEFAULT_PERMISSION_MODES,
+    ask_permission,
+    normalize_permission_modes,
+    permission_action_label,
+    permission_category_for_action,
+)
 from jarvis_ai.diagnostics import DiagnosticAssistant
 from jarvis_ai.effects import DvdLogoBouncer
 from jarvis_ai.reminders import ReminderScheduler
-from jarvis_ai.setup_wizard import SetupWizard
 from jarvis_ai.state import (
     CONFIG,
     CONFIG_MGR,
-    LOCAL_APPDATA,
     PROMPT_MGR,
-    ROAMING_APPDATA,
-    USER_PROFILE,
     _is_learned_pattern_generic,
     db,
     get_config_path,
@@ -103,38 +104,49 @@ from jarvis_ai.branding import (
     app_brand_name,
     app_title,
     app_version_badge,
-    APP_VERSION,
 )
+from jarvis_ai.controllers import build_app_controllers
 from jarvis_ai.guide_noobs import GuideNoobPanel
-from jarvis_ai.runtime import parse_geometry, resource_path, runtime_root_path, set_windows_app_id
-from jarvis_ai.runtime_brain import register_brain_runtime
-from jarvis_ai.runtime_activity import register_activity_runtime
-from jarvis_ai.runtime_shell import register_shell_runtime
-from jarvis_ai.runtime_system_ui import register_system_ui
-from jarvis_ai.runtime_voice import register_voice_runtime
+from jarvis_ai.runtime import parse_geometry, resource_path, set_windows_app_id
+from jarvis_ai.app_composition import compose_jarvis_app
+from jarvis_ai.response_parsing import extract_json_block
 from jarvis_ai.service_hub import build_service_hub
-from jarvis_ai.smart_memory import (
-    find_memory_items,
-    format_memory_summary,
-    memory_digest,
-    normalize_memory_items,
-    remove_memory_item,
-    touch_memory_item,
-    upsert_memory_item,
+from jarvis_ai.storage import app_config_dir, app_data_dir, app_log_dir
+from jarvis_ai.runtime_shell import (
+    _patched_build_workspace_chat as restored_build_workspace_chat,
+    _patched_build_workspace_controls as restored_build_workspace_controls,
+    _patched_build_workspace_overview as restored_build_workspace_overview,
+    _patched_build_workspace_rail as restored_build_workspace_rail,
+    _patched_build_workspace_shell_v2 as restored_build_workspace_shell_v2,
+    _patched_build_workspace_sidebar as restored_build_workspace_sidebar,
+    _patched_refresh_chat_empty_state as restored_refresh_chat_empty_state,
+    _patched_refresh_workspace_layout_mode as restored_refresh_workspace_layout_mode,
+    _set_workspace_section as restored_set_workspace_section,
 )
-from jarvis_ai.scenario_engine import (
-    apply_scenario_changes,
-    format_scenario_summary,
-    normalize_scenarios,
-    remove_scenario,
-    scenario_digest,
-    upsert_scenario,
+from jarvis_ai.system_actions import (
+    APP_OPEN_FUNCS,
+    close_app,
+    find_discord_path as _find_discord_path,
+    find_steam_path as _find_steam_path,
+    find_telegram_path as _find_telegram_path,
+    get_date_text,
+    get_time_text,
+    launch_dynamic_entry,
+    lock_pc,
+    maybe_press,
+    open_url_search,
+    open_weather,
+    refresh_known_app_launchers,
+    restart_pc,
+    shutdown_pc,
 )
-from jarvis_ai.storage import app_config_dir, app_data_dir, app_log_dir, prompts_dir
 from jarvis_ai.theme import Theme
 from jarvis_ai.ui_factory import bind_dynamic_wrap, create_action_grid, create_note_box
+from jarvis_ai.structured_logging import log_event
 from jarvis_ai.utils import short_exc
-from jarvis_ai.voice_profiles import device_adaptation_tags, device_profile_kind, resolved_device_profile_kind
+from jarvis_ai.voice_profiles import device_adaptation_tags
+
+ensure_httpx_proxy_compat()
 
 # Windows-specific constants
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
@@ -203,17 +215,7 @@ except Exception:
         ElevenLabs = None
 
 try:
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message="Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work",
-            category=RuntimeWarning,
-        )
-        warnings.filterwarnings(
-            "ignore",
-            message="Couldn't find ffprobe or avprobe - defaulting to ffprobe, but may not work",
-            category=RuntimeWarning,
-        )
+    with suppress_pydub_ffmpeg_warnings():
         from pydub import AudioSegment
 except Exception:
     AudioSegment = None
@@ -287,481 +289,26 @@ else:
 # =========================================================
 # HELPER FUNCTIONS
 # =========================================================
-def open_browser(url):
-    target = (url or "").strip()
-    if not target:
-        return
-    if sys.platform == "win32":
-        try:
-            os.startfile(target)
-            return
-        except Exception as e:
-            logger.warning(f"os.startfile failed for '{target}': {e}")
-        try:
-            subprocess.Popen(["cmd", "/c", "start", "", target], creationflags=CREATE_NO_WINDOW)
-            return
-        except Exception as e:
-            logger.warning(f"cmd start failed for '{target}': {e}")
-    webbrowser.open(target, new=2)
-
-def open_url_search(query: str):
-    q = (query or "").strip()
-    open_browser("https://www.google.com/search?q=" + quote_plus(q) if q else "https://www.google.com")
-
-def maybe_press(key: str, presses: int = 1, interval: float = 0.02) -> bool:
-    if pyautogui:
-        try:
-            pyautogui.press(key, presses=max(1, int(presses)), interval=max(0.0, float(interval)))
-        except TypeError:
-            for _ in range(max(1, int(presses))):
-                pyautogui.press(key)
-                if interval:
-                    time.sleep(interval)
-        return True
-    return False
-
-def get_time_text():
-    return datetime.now().strftime("%H:%M")
-
-def get_date_text():
-    return datetime.now().strftime("%d.%m.%Y")
-
-def _balanced_json_segments(text: str):
-    src = str(text or "")
-    if not src:
-        return []
-    candidates = []
-    for start in (m.start() for m in re.finditer(r"[\{\[]", src)):
-        stack = []
-        in_string = False
-        escaped = False
-        for idx in range(start, len(src)):
-            ch = src[idx]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif ch == "\\":
-                    escaped = True
-                elif ch == '"':
-                    in_string = False
-                continue
-            if ch == '"':
-                in_string = True
-                continue
-            if ch in "{[":
-                stack.append(ch)
-                continue
-            if ch in "}]":
-                if not stack:
-                    break
-                opening = stack.pop()
-                if (opening == "{" and ch != "}") or (opening == "[" and ch != "]"):
-                    break
-                if not stack:
-                    seg = src[start:idx + 1].strip()
-                    if seg:
-                        candidates.append(seg)
-                    break
-    unique = []
-    seen = set()
-    for seg in candidates:
-        if seg not in seen:
-            seen.add(seg)
-            unique.append(seg)
-    return unique
+# Imported from jarvis_ai.response_parsing and jarvis_ai.system_actions.
 
 
-def _try_parse_json_candidate(candidate: str):
-    raw = str(candidate or "").strip()
-    if not raw:
-        return None
-    for variant in (
-        raw,
-        raw.replace("“", '"').replace("”", '"').replace("’", "'"),
-    ):
-        try:
-            return json.loads(variant)
-        except Exception:
-            pass
-    try:
-        obj = ast.literal_eval(raw)
-        if isinstance(obj, (dict, list)):
-            return obj
-    except Exception:
-        pass
-    return None
-
-
-def extract_json_block(text: str):
-    src = str(text or "").strip()
-    if not src:
-        return None
-
-    fenced_match = re.search(r"```(?:json)?\s*(.*?)\s*```", src, flags=re.IGNORECASE | re.DOTALL)
-    if fenced_match:
-        src = fenced_match.group(1).strip()
-
-    direct = _try_parse_json_candidate(src)
-    if isinstance(direct, (dict, list)):
-        return direct
-
-    for candidate in _balanced_json_segments(src):
-        parsed = _try_parse_json_candidate(candidate)
-        if isinstance(parsed, (dict, list)):
-            return parsed
-
-    reply_match = re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)+)"', src)
-    if reply_match:
-        try:
-            return {"reply": bytes(reply_match.group(1), "utf-8").decode("unicode_escape")}
-        except Exception:
-            return {"reply": reply_match.group(1)}
-    return None
-
-def short_exc(exc: Exception) -> str:
-    msg = str(exc).strip()
-    return f"{type(exc).__name__}: {msg[:180]}" if msg else type(exc).__name__
-
-# =========================================================
-# APP LAUNCHER 
-# =========================================================
-def _first_existing_path(candidates) -> Optional[str]:
-    seen = set()
-    for raw in candidates or []:
-        raw_text = str(raw or "").strip().strip('"')
-        if not raw_text:
-            continue
-        path = os.path.normpath(raw_text)
-        if not path or path == ".":
-            continue
-        key = path.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        if os.path.exists(path):
-            return path
-    return None
-
-
-def _query_windows_app_path(exe_name: str) -> Optional[str]:
-    name = str(exe_name or "").strip()
-    if not name:
-        return None
-    try:
-        import winreg
-    except Exception:
-        return None
-
-    subkey = rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{name}"
-    views = [0]
-    for view_flag in (getattr(winreg, "KEY_WOW64_64KEY", 0), getattr(winreg, "KEY_WOW64_32KEY", 0)):
-        if view_flag and view_flag not in views:
-            views.append(view_flag)
-
-    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        for view in views:
-            try:
-                key = winreg.OpenKey(winreg.ConnectRegistry(None, root), subkey, 0, winreg.KEY_READ | view)
-            except Exception:
-                continue
-            try:
-                direct = str(winreg.QueryValueEx(key, "")[0] or "").strip()
-            except Exception:
-                direct = ""
-            try:
-                base_dir = str(winreg.QueryValueEx(key, "Path")[0] or "").strip()
-            except Exception:
-                base_dir = ""
-            try:
-                winreg.CloseKey(key)
-            except Exception:
-                pass
-            resolved = _first_existing_path(
-                [
-                    direct,
-                    os.path.join(base_dir, name) if base_dir else "",
-                ]
-            )
-            if resolved:
-                return resolved
-    return None
-
-
-def _find_latest_localapp_exe(root_dir: str, exe_name: str) -> Optional[str]:
-    base = str(root_dir or "").strip()
-    name = str(exe_name or "").strip()
-    if not base or not name:
-        return None
-    pattern = os.path.join(base, "app-*", name)
-    candidates = sorted(glob.glob(pattern), reverse=True)
-    return _first_existing_path(candidates)
-
-
-def _repair_missing_launch_target(target: str) -> Optional[str]:
-    raw = str(target or "").strip().strip('"')
-    if not raw:
-        return None
-    if os.path.exists(raw):
-        return raw
-
-    basename = os.path.basename(raw) or raw
-    lowered = basename.lower()
-
-    if lowered == "steam.exe":
-        return find_steam_path()
-    if lowered == "discord.exe":
-        return find_discord_path()
-    if lowered == "telegram.exe":
-        return find_telegram_path()
-    if lowered in {"fortnitelauncher.exe", "epicgameslauncher.exe"}:
-        return find_fortnite_launcher()
-
-    direct = _query_windows_app_path(basename)
-    if direct:
-        return direct
-
-    which_hit = shutil.which(raw) or shutil.which(basename)
-    if which_hit and os.path.exists(which_hit):
-        return which_hit
-    return None
-
-
-@lru_cache(maxsize=32)
 def find_steam_path():
-    candidates = []
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
-        candidates.append(winreg.QueryValueEx(key, "SteamExe")[0])
-        winreg.CloseKey(key)
-    except Exception:
-        pass
-    candidates.extend(
-        [
-            _query_windows_app_path("Steam.exe"),
-            CONFIG.get("steam_path", ""),
-            r"C:\Program Files (x86)\Steam\Steam.exe",
-            r"C:\Program Files\Steam\Steam.exe",
-        ]
-    )
-    return _first_existing_path(candidates) or CONFIG["steam_path"]
+    return _find_steam_path()
 
-@lru_cache(maxsize=32)
+
 def find_discord_path():
-    candidates = [
-        _query_windows_app_path("Discord.exe"),
-        _find_latest_localapp_exe(os.path.join(LOCAL_APPDATA, "Discord"), "Discord.exe"),
-    ]
-    candidates.extend(CONFIG.get("discord_candidates", []))
-    candidates.extend(
-        [
-            os.path.join(LOCAL_APPDATA, r"Discord\Discord.exe"),
-        ]
-    )
-    return _first_existing_path(candidates)
+    return _find_discord_path()
 
-@lru_cache(maxsize=32)
-def find_fortnite_launcher():
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Fortnite")
-        path = winreg.QueryValueEx(key, "InstallLocation")[0]
-        launcher = os.path.join(path, "FortniteLauncher.exe")
-        if os.path.exists(launcher):
-            return launcher
-    except Exception:
-        pass
-    for root in CONFIG["fortnite_roots"]:
-        if not os.path.isdir(root):
-            continue
-        for dirpath, _, filenames in os.walk(root):
-            for f in filenames:
-                if f.lower() == "fortnitelauncher.exe":
-                    return os.path.join(dirpath, f)
-    epic = CONFIG["epic_launcher_path"]
-    if epic and os.path.exists(epic):
-        return epic
-    default = os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                           "Epic Games", "Launcher", "Portal", "Binaries", "Win64", "EpicGamesLauncher.exe")
-    return default if os.path.exists(default) else None
 
-@lru_cache(maxsize=32)
 def find_telegram_path():
-    candidates = []
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Telegram Desktop")
-        candidates.append(winreg.QueryValueEx(key, "DisplayIcon")[0])
-        winreg.CloseKey(key)
-    except Exception:
-        pass
-    candidates.extend(
-        [
-            _query_windows_app_path("Telegram.exe"),
-            CONFIG.get("telegram_desktop_path", ""),
-            os.path.join(ROAMING_APPDATA, r"Telegram Desktop\Telegram.exe"),
-            os.path.join(LOCAL_APPDATA, r"Telegram Desktop\Telegram.exe"),
-        ]
-    )
-    return _first_existing_path(candidates) or CONFIG["telegram_desktop_path"]
-
-
-def refresh_known_app_launchers():
-    global STEAM_PATH, DISCORD_PATH, FORTNITE_LAUNCHER, TELEGRAM_PATH
-    for finder in (find_steam_path, find_discord_path, find_fortnite_launcher, find_telegram_path):
-        try:
-            finder.cache_clear()
-        except Exception:
-            pass
-    STEAM_PATH = find_steam_path()
-    DISCORD_PATH = find_discord_path()
-    FORTNITE_LAUNCHER = find_fortnite_launcher()
-    TELEGRAM_PATH = find_telegram_path()
-
-STEAM_PATH = find_steam_path()
-DISCORD_PATH = find_discord_path()
-FORTNITE_LAUNCHER = find_fortnite_launcher()
-TELEGRAM_PATH = find_telegram_path()
-
-def launch_target(target, is_uri=False):
-    try:
-        if is_uri:
-            if re.match(r'^[a-z0-9_\-\.]+$', target, re.I):
-                subprocess.Popen([target], creationflags=CREATE_NO_WINDOW)
-            else:
-                os.startfile(target)
-            return True
-        resolved_target = _repair_missing_launch_target(target)
-        if resolved_target and os.path.exists(resolved_target):
-            subprocess.Popen([resolved_target], creationflags=CREATE_NO_WINDOW)
-            return True
-        logger.warning(f"Target not found: {target}")
-        return False
-    except Exception as e:
-        logger.error(f"Launch error for {target}: {e}")
-        return False
-
-def launch_dynamic_entry(entry: Dict[str, Any]) -> bool:
-    if not isinstance(entry, dict):
-        return False
-    target = str(entry.get("launch", "")).strip()
-    if not target:
-        return False
-    if re.match(r"^[a-z][a-z0-9+\-.]*://", target, re.I):
-        return launch_target(target, is_uri=True)
-    return launch_target(target, is_uri=False)
-
-def open_music():
-    if launch_target(CONFIG["yandex_music_path"]):
-        time.sleep(1.2)
-        if pyautogui:
-            pyautogui.press("space")
-    else:
-        raise FileNotFoundError("Yandex Music not found")
-
-def open_steam():
-    if not launch_target(STEAM_PATH):
-        launch_target("steam://open/main", is_uri=True)
-
-def open_discord():
-    if DISCORD_PATH:
-        launch_target(DISCORD_PATH)
-    else:
-        launch_target("discord://", is_uri=True)
-
-def open_fortnite():
-    if FORTNITE_LAUNCHER:
-        if "EpicGamesLauncher.exe" in FORTNITE_LAUNCHER:
-            subprocess.Popen([FORTNITE_LAUNCHER, "-launch", "Fortnite"], creationflags=CREATE_NO_WINDOW)
-        else:
-            subprocess.Popen([FORTNITE_LAUNCHER], creationflags=CREATE_NO_WINDOW)
-    else:
-        launch_target("com.epicgames.launcher://apps/Fortnite?action=launch", is_uri=True)
-
-def open_telegram():
-    if not launch_target(TELEGRAM_PATH):
-        launch_target("tg://", is_uri=True)
-
-def close_app(key: str):
-    exes = list(APP_CLOSE_EXES.get(key, []))
-    if not exes:
-        dyn = get_dynamic_entry_by_key(key) or find_dynamic_entry(str(key))
-        if dyn:
-            exes = list(dyn.get("close_exes", []) or [])
-            if not exes:
-                launch_target_path = str(dyn.get("launch", "")).strip()
-                if launch_target_path and "://" not in launch_target_path:
-                    exes = [os.path.basename(launch_target_path)]
-    if not exes:
-        return False
-    if not psutil:
-        for exe in exes:
-            try:
-                subprocess.Popen(["taskkill", "/f", "/im", exe], creationflags=CREATE_NO_WINDOW)
-            except Exception as e:
-                logger.warning(f"taskkill error for {exe}: {e}")
-        return bool(exes)
-    lower_exes = [e.lower() for e in exes]
-    killed = False
-    for proc in psutil.process_iter(['name', 'status']):
-        try:
-            if proc.info['name'] and proc.info['name'].lower() in lower_exes and proc.info['status'] != psutil.STATUS_ZOMBIE:
-                proc.kill()
-                killed = True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return killed
-
-def open_dbd(): launch_target("steam://rungameid/381210", is_uri=True)
-def open_cs2(): launch_target("steam://rungameid/730", is_uri=True)
-def open_deadlock(): launch_target("steam://rungameid/1422450", is_uri=True)
-def open_settings(): launch_target("ms-settings:", is_uri=True)
-def open_notepad(): launch_target("notepad", is_uri=True)
-def open_calc(): launch_target("calc", is_uri=True)
-def open_taskmgr(): launch_target("taskmgr", is_uri=True)
-def open_explorer(): launch_target("explorer.exe", is_uri=True)
-def open_downloads():
-    path = os.path.join(USER_PROFILE, "Downloads")
-    subprocess.Popen(["explorer.exe", path], creationflags=CREATE_NO_WINDOW)
-def open_documents():
-    path = os.path.join(USER_PROFILE, "Documents")
-    subprocess.Popen(["explorer.exe", path], creationflags=CREATE_NO_WINDOW)
-def open_desktop():
-    path = os.path.join(USER_PROFILE, "Desktop")
-    subprocess.Popen(["explorer.exe", path], creationflags=CREATE_NO_WINDOW)
-def lock_pc():
-    subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"], creationflags=CREATE_NO_WINDOW)
-def restart_explorer():
-    subprocess.Popen(["taskkill", "/f", "/im", "explorer.exe"], creationflags=CREATE_NO_WINDOW)
-    time.sleep(0.7)
-    subprocess.Popen(["explorer.exe"], creationflags=CREATE_NO_WINDOW)
-def restart_pc():
-    subprocess.Popen(["shutdown", "/r", "/t", "5", "/f"], creationflags=CREATE_NO_WINDOW)
-def shutdown_pc():
-    subprocess.Popen(["shutdown", "/s", "/t", "5", "/f"], creationflags=CREATE_NO_WINDOW)
-def open_youtube(): open_browser("https://youtube.com")
-def open_ozon(): open_browser("https://ozon.ru")
-def open_wildberries(): open_browser("https://www.wildberries.ru")
-def open_twitch(): open_browser("https://www.twitch.tv/")
-def open_roblox():
-    if not launch_target("roblox://", is_uri=True):
-        open_browser("https://www.roblox.com/")
-def open_weather(): open_browser("https://yandex.ru/pogoda/")
-
-APP_OPEN_FUNCS = {
-    "music": open_music, "youtube": open_youtube, "ozon": open_ozon, "wildberries": open_wildberries,
-    "browser": lambda: open_browser("https://www.google.com"), "cs2": open_cs2, "fortnite": open_fortnite,
-    "dbd": open_dbd, "deadlock": open_deadlock, "steam": open_steam, "settings": open_settings,
-    "twitch": open_twitch, "roblox": open_roblox, "discord": open_discord, "notepad": open_notepad, "calc": open_calc,
-    "taskmgr": open_taskmgr, "explorer": open_explorer, "downloads": open_downloads, "documents": open_documents,
-    "desktop": open_desktop, "restart_explorer": restart_explorer, "telegram": open_telegram,
-}
+    return _find_telegram_path()
 
 # =========================================================
 # COMMAND PARSER (улучшенный)
 # =========================================================
 # MAIN APPLICATION
 # =========================================================
+@compose_jarvis_app(settings_mixin_cls=SettingsUiMixin, emoji_detector=_is_emoji_message)
 class JarvisApp(
     WorkspaceToolsMixin,
     SettingsUiMixin,
@@ -773,10 +320,19 @@ class JarvisApp(
     UpdateFlowMixin,
 ):
     def __init__(self, root):
-        self.app_context = build_app_context(config_mgr=CONFIG_MGR, prompt_mgr=PROMPT_MGR, db_manager=db)
+        self.app_bootstrap = AppBootstrap(config_mgr=CONFIG_MGR, prompt_mgr=PROMPT_MGR, db=db)
+        self.app_bootstrap.prepare_runtime()
+        self.app_context = self.app_bootstrap.build_context()
         self.config_mgr = self.app_context.config_mgr
         self.prompt_mgr = self.app_context.prompt_mgr
         self.db = self.app_context.db
+        self.controllers = build_app_controllers(self)
+        self.app_context.controllers = self.controllers
+        self.ui_shell = self.controllers.ui_shell
+        self.conversation_controller = self.controllers.conversation
+        self.voice_controller = self.controllers.voice
+        self.window_controller = self.controllers.window
+        self.action_executor = self.controllers.actions
         Theme.apply_mode(self.config_mgr.get_theme_mode())
         self.root = root
         self.refresh_branding()
@@ -826,6 +382,7 @@ class JarvisApp(
         self.history_window = None
         self.status_var = tk.StringVar(value="Готов")
         self.workspace_mode_var = tk.StringVar(value="Рабочий стол")
+        self.ui_rewrite = None
         self.mic_pulse_state = False
         self.last_ai_reply = ""
         self.chat_history = []
@@ -873,6 +430,13 @@ class JarvisApp(
         self._tts_stop_event = threading.Event()
         self._active_audio_stream = None
         self._last_bg_canvas_size = (0, 0)
+        self._last_resize_signature = None
+        self._last_shell_rebuild_signature = None
+        self._pending_shell_rebuild = False
+        self._resize_preview_after = None
+        self._startup_resize_freeze_until = time.monotonic() + 0.9
+        self._resize_guard_after_id = None
+        self._resize_guard_visible = False
         self._tts_unavailable_notified = set()
         self._last_listen_transient_log_ts = 0.0
         self._last_listen_transient_key = ""
@@ -882,6 +446,15 @@ class JarvisApp(
         self._command_palette_window = None
         self._command_palette_actions = []
         self._command_palette_visible = []
+        self._workspace_resize_in_progress = False
+        self._resize_guard_hold_until = 0.0
+        self._fullscreen_transition_warmed = False
+        self._settings_overlay_warmed = False
+        self._activation_gate_warmed = False
+        try:
+            setattr(self.root, "_jarvis_resize_in_progress", False)
+        except Exception:
+            pass
 
         # Индикатор интернета
         self.is_online = True
@@ -931,7 +504,7 @@ class JarvisApp(
                 except tk.TclError:
                     continue
 
-        geom = CONFIG_MGR.get_window_geometry()
+        geom = self.config_mgr.get_window_geometry()
         parsed = parse_geometry(geom) if geom else None
         self._apply_dpi_scaling()
         min_w, min_h, pref_geom = self._window_geometry_preset()
@@ -961,6 +534,7 @@ class JarvisApp(
         self.refresh_mic_status_label()
         self.refresh_output_status_label()
         self.refresh_tts_status_label()
+        self._prewarm_shell_layout()
         self.set_status("Готов", "ok")
         self.root.after(250, self.mic_pulse_tick)
         self._runtime_started = False
@@ -969,12 +543,12 @@ class JarvisApp(
         atexit.register(self.shutdown)
         self.root.after(40, self._drain_ui_tasks)
 
-        # Первый запуск: показываем встроенную активацию в этом же окне (без отдельного popup).
-        if self._startup_gate_setup:
-            self.root.after(120, self._show_embedded_activation_gate)
-        else:
-            self._start_runtime_services()
-        self.root.after(180, self._show_window_main)
+        # Startup uses the dedicated registration screen when the API key is
+        # missing. Background services only continue when activation is not
+        # blocking startup.
+        if not self._startup_gate_setup:
+            self.root.after(260, self._start_runtime_services)
+        self.root.after(120, self._show_window_main)
 
     def _start_runtime_services(self):
         if self._runtime_started:
@@ -983,35 +557,40 @@ class JarvisApp(
         if self.telegram_bot:
             self.telegram_bot.start()
         if self.safe_mode:
-            self.root.after(150, lambda: self.add_msg("Запущен безопасный режим: Telegram, автопроверки обновлений, фоновая диагностика и wake-word поток урезаны для стабильного старта.", "bot"))
             self.root.after(250, lambda: self.set_status("Безопасный режим", "warn", duration_ms=3600))
             return
-        self.root.after(100, self.check_for_updates)
-        self.root.after(1000, self.update_net_status)
+        self.root.after(1800, self.check_for_updates)
+        self.root.after(2600, self.update_net_status)
         self._start_background_self_check_loop()
         threading.Thread(target=self.listen_task, daemon=True, name="ListenThread").start()
-        self.executor.submit(self.initial_greeting)
-        self.root.after(3000, self.check_update_notification)
+        self.root.after(240, lambda: self.executor.submit(self.initial_greeting))
+        self.root.after(5200, self.check_update_notification)
 
     def run_setup_wizard(self, activation_only: Optional[bool] = None):
-        try:
-            if hasattr(self, "_setup_wizard_window") and self._setup_wizard_window and self._setup_wizard_window.winfo_exists():
-                self._setup_wizard_window.lift()
-                self._setup_wizard_window.focus_force()
-                return
-        except Exception:
-            pass
         if activation_only is None:
             activation_only = bool(self._startup_gate_setup)
-        wiz = SetupWizard(self, activation_only=bool(activation_only))
-        self._setup_wizard_window = wiz.window
+        activation_only = bool(activation_only)
+        self._setup_wizard_window = None
+        if activation_only:
+            self._startup_gate_setup = True
+        gate = getattr(self, "activation_gate", None)
+        gate_ready = False
+        if gate is not None:
+            try:
+                gate_ready = bool(gate.winfo_exists())
+            except Exception:
+                gate_ready = False
+        if not gate_ready:
+            self._build_embedded_activation_gate()
+        self._show_embedded_activation_gate()
+        self.set_status("Заполните регистрацию и ключ", "warn" if activation_only else "busy")
 
     def on_setup_wizard_closed(self):
         self._setup_wizard_window = None
-        api_ready = bool(str(CONFIG_MGR.get_api_key() or "").strip())
+        api_ready = bool(str(self.config_mgr.get_api_key() or "").strip())
         if self._startup_gate_setup and not api_ready:
             self.set_status("Нужна активация", "warn")
-            self.root.after(100, self._show_embedded_activation_gate)
+            self.root.after(100, lambda: self.run_setup_wizard(True))
             return
 
         if self._startup_gate_setup:
@@ -1030,12 +609,17 @@ class JarvisApp(
     def reload_services(self):
         # Перезагружаем Groq клиент и Telegram бот после сохранения настроек в мастере
         global MIC_DEVICE_INDEX, MIC_NAME
+        cfg = self.config_mgr
         refresh_known_app_launchers()
         MIC_DEVICE_INDEX, MIC_NAME = pick_microphone_device()
-        if self.groq_client and CONFIG_MGR.get_api_key():
-            self.groq_client = Groq(api_key=CONFIG_MGR.get_api_key()) if Groq else None
-        elif CONFIG_MGR.get_api_key():
-            self.groq_client = Groq(api_key=CONFIG_MGR.get_api_key()) if Groq else None
+        if cfg.get_api_key() and Groq:
+            try:
+                ensure_httpx_proxy_compat()
+                self.groq_client = Groq(api_key=cfg.get_api_key())
+            except Exception as exc:
+                log_event(logger, "bootstrap", "groq_client_reload_failed", level=logging.ERROR, error=str(exc))
+                logger.error("Failed to reload Groq client: %s", exc, exc_info=True)
+                self.groq_client = None
         else:
             self.groq_client = None
         if hasattr(self, "services"):
@@ -1043,16 +627,16 @@ class JarvisApp(
 
         self._apply_proxy_env_from_config()
         self.proxy_detected = self._detect_proxy_enabled()
-        self.apply_listening_profile(CONFIG_MGR.get_listening_profile())
-        Theme.apply_mode(CONFIG_MGR.get_theme_mode())
+        self.apply_listening_profile(cfg.get_listening_profile())
+        Theme.apply_mode(cfg.get_theme_mode())
              
         if self.telegram_bot:
             self.telegram_bot.stop()
         self.telegram_bot = None if self.safe_mode else TelegramBot(
-            CONFIG_MGR.get_telegram_token(),
-            CONFIG_MGR.get_telegram_user_id(),
+            cfg.get_telegram_token(),
+            cfg.get_telegram_user_id(),
             self.process_telegram_query,
-            display_name=CONFIG_MGR.get_user_name(),
+            display_name=cfg.get_user_name(),
         )
         if self.telegram_bot:
             self.telegram_bot.start()
@@ -1244,9 +828,9 @@ class JarvisApp(
                 "Jarvis.TNotebook.Tab",
                 background=Theme.BUTTON_BG,
                 foreground=Theme.FG,
-                padding=(16, 9),
+                padding=(18, 10),
                 borderwidth=0,
-                font=("Segoe UI Semibold", 10),
+                font=("Segoe UI Semibold", 12),
             )
             style.map(
                 "Jarvis.TNotebook.Tab",
@@ -1264,6 +848,7 @@ class JarvisApp(
                 lightcolor=Theme.INPUT_BORDER,
                 darkcolor=Theme.INPUT_BORDER,
                 insertcolor=Theme.FG,
+                font=("Segoe UI", 12),
             )
             style.map(
                 "Jarvis.TCombobox",
@@ -1278,6 +863,7 @@ class JarvisApp(
                 self.root.option_add("*TCombobox*Listbox.foreground", Theme.FG)
                 self.root.option_add("*TCombobox*Listbox.selectBackground", Theme.ACCENT)
                 self.root.option_add("*TCombobox*Listbox.selectForeground", Theme.FG)
+                self.root.option_add("*TCombobox*Listbox.font", "Segoe UI 12")
             except Exception:
                 pass
 
@@ -1319,6 +905,25 @@ class JarvisApp(
         widget.bind("<Enter>", on_enter, add="+")
         widget.bind("<Leave>", on_leave, add="+")
         on_leave()
+
+    def _bind_guide_hover(self, widget, section: str):
+        def _enter(_=None):
+            try:
+                self._update_guide_context(section)
+            except Exception:
+                pass
+
+        def _leave(_=None):
+            try:
+                self._update_guide_context()
+            except Exception:
+                pass
+
+        try:
+            widget.bind("<Enter>", _enter, add="+")
+            widget.bind("<Leave>", _leave, add="+")
+        except Exception:
+            pass
 
     def _restyle_settings_window(self):
         surfaces = []
@@ -1499,12 +1104,12 @@ class JarvisApp(
             sh = max(int(self.root.winfo_screenheight() or 0), 480)
         except Exception:
             sw, sh = 1366, 768
-        usable_w = max(420, sw - 16)
-        usable_h = max(360, sh - 24)
-        min_w = min(620, usable_w)
-        min_h = min(420, usable_h)
-        pref_w = min(1460, usable_w)
-        pref_h = min(960, usable_h)
+        usable_w = max(480, sw - 12)
+        usable_h = max(360, sh - 18)
+        min_w = min(860, usable_w)
+        min_h = min(640, usable_h)
+        pref_w = min(1600, usable_w)
+        pref_h = min(1040, usable_h)
         pref_w = max(min_w, pref_w)
         pref_h = max(min_h, pref_h)
         x = max((sw - pref_w) // 2, 0)
@@ -1516,24 +1121,127 @@ class JarvisApp(
             root_w = max(int(self.root.winfo_width() or 0), 1)
             root_h = max(int(self.root.winfo_height() or 0), 1)
         except Exception:
-            return 1180, 820
-        target_w = min(1680, max(420, root_w - 8))
-        target_h = min(1080, max(360, root_h - 8))
-        return target_w, target_h
+            return 1280, 860
+        return root_w, root_h
 
     def _apply_main_container_bounds(self):
-        if not hasattr(self, "bg_canvas") or not hasattr(self, "cont_win"):
+        if not hasattr(self, "main_container"):
             return
         try:
             root_w = max(int(self.root.winfo_width() or 0), 1)
             root_h = max(int(self.root.winfo_height() or 0), 1)
             cont_w, cont_h = self._main_container_target_size()
-            self.bg_canvas.coords(self.cont_win, root_w // 2, root_h // 2)
-            self.bg_canvas.itemconfigure(self.cont_win, width=cont_w, height=cont_h)
+            bounds_signature = (root_w, root_h, cont_w, cont_h)
+            if bounds_signature == getattr(self, "_last_main_container_bounds", None):
+                return
+            if isinstance(getattr(self, "bg_canvas", None), tk.Canvas) and hasattr(self, "cont_win"):
+                self.bg_canvas.coords(self.cont_win, 0, 0)
+                self.bg_canvas.itemconfigure(self.cont_win, width=cont_w, height=cont_h)
+            else:
+                try:
+                    self.main_container.configure(width=cont_w, height=cont_h)
+                except Exception:
+                    pass
+            self._last_main_container_bounds = bounds_signature
         except Exception:
             return
         try:
             self._sync_chat_canvas_width()
+        except Exception:
+            pass
+
+    def _show_resize_guard(self):
+        # The resize guard was causing an invisible overlay during window changes.
+        # Disable the overlay and rely on native Tkinter resizing behavior.
+        return
+
+    def _hide_resize_guard(self):
+        guard = getattr(self, "_resize_guard", None)
+        if guard is not None:
+            try:
+                guard.place_forget()
+            except Exception:
+                pass
+        self._resize_guard_visible = False
+        self._resize_guard_hold_until = 0.0
+
+    def _hold_resize_guard(self, hold_ms: int = 120):
+        self._hide_resize_guard()
+
+    def _prewarm_shell_layout(self):
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            self._apply_main_container_bounds()
+        except Exception:
+            pass
+        try:
+            self._sync_chat_canvas_width()
+        except Exception:
+            pass
+        try:
+            self.refresh_workspace_layout_mode()
+        except Exception:
+            pass
+        try:
+            self._refresh_chat_empty_state()
+        except Exception:
+            pass
+
+    def _prime_after_visual_transition(self):
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            self._apply_main_container_bounds()
+        except Exception:
+            pass
+        try:
+            self._sync_chat_canvas_width()
+        except Exception:
+            pass
+        try:
+            self.refresh_workspace_layout_mode()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_schedule_settings_visual_refresh") and self._is_full_settings_open():
+                self._schedule_settings_visual_refresh()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_refresh_activation_gate_layout") and getattr(self, "_startup_gate_setup", False):
+                self._refresh_activation_gate_layout()
+        except Exception:
+            pass
+
+    def _handle_window_map(self, _event=None):
+        if not bool(getattr(self, "_needs_visual_prime_after_map", False)):
+            return
+        try:
+            state_name = str(self.root.state() or "").lower()
+        except Exception:
+            state_name = "normal"
+        if state_name in {"iconic", "withdrawn"}:
+            return
+        self._needs_visual_prime_after_map = False
+        try:
+            self._last_resize_signature = None
+        except Exception:
+            pass
+        try:
+            self.root.after(18, self._prime_after_visual_transition)
+            self.root.after(72, self._prime_after_visual_transition)
+        except Exception:
+            pass
+
+    def _handle_window_unmap(self, _event=None):
+        self._needs_visual_prime_after_map = True
+        try:
+            self._hide_resize_guard()
         except Exception:
             pass
 
@@ -1557,7 +1265,7 @@ class JarvisApp(
                 return "dark"
         except Exception:
             pass
-        mode = str(CONFIG_MGR.get_theme_mode() or "dark").strip().lower()
+        mode = str(self.config_mgr.get_theme_mode() or "dark").strip().lower()
         return mode if mode in {"dark", "light"} else "dark"
 
     def _refresh_chat_theme(self):
@@ -1581,7 +1289,7 @@ class JarvisApp(
             pass
 
     def _header_subtitle_text(self) -> str:
-        user_name = str(CONFIG_MGR.get_user_name() or "").strip()
+        user_name = str(self.config_mgr.get_user_name() or "").strip()
         base = "Чистый рабочий стол для чата, голоса и быстрых команд"
         if user_name:
             return f"{base} • профиль: {user_name}"
@@ -1603,7 +1311,7 @@ class JarvisApp(
             pass
 
     def apply_theme_runtime(self):
-        Theme.apply_mode(CONFIG_MGR.get_theme_mode())
+        Theme.apply_mode(self.config_mgr.get_theme_mode())
         try:
             self.root.configure(bg=Theme.BG)
         except Exception:
@@ -1840,22 +1548,54 @@ class JarvisApp(
 
     def _show_window_main(self):
         try:
-            self.root.deiconify()
+            try:
+                current_state = str(self.root.state() or "").lower()
+            except Exception:
+                current_state = "normal"
+            was_hidden = current_state in {"withdrawn", "iconic"}
+
             if not self.is_full:
                 try:
-                    geom = self._normal_geometry
-                    parsed = parse_geometry(geom) if geom else None
                     min_w, min_h, pref_geom = self._window_geometry_preset()
-                    if not parsed or parsed[0] < min_w or parsed[1] < min_h:
-                        geom = pref_geom
-                    self.root.geometry(geom)
+                    if was_hidden:
+                        geom = self._normal_geometry
+                        parsed = parse_geometry(geom) if geom else None
+                        if not parsed or parsed[0] < min_w or parsed[1] < min_h:
+                            geom = pref_geom
+                        if geom and geom != self.root.geometry():
+                            self.root.geometry(geom)
+                    else:
+                        current_w = int(self.root.winfo_width() or 0)
+                        current_h = int(self.root.winfo_height() or 0)
+                        if current_w < min_w or current_h < min_h:
+                            self.root.geometry(pref_geom)
+                except Exception:
+                    pass
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+            if was_hidden:
+                if not getattr(self, "_window_shown_once", False):
+                    self._hold_resize_guard(110)
+                    self._prewarm_shell_layout()
+                self.root.deiconify()
+                if current_state == "iconic":
+                    self.root.state("normal")
+                try:
+                    self.root.update_idletasks()
                 except Exception:
                     pass
             self.root.lift()
-            self.root.focus_force()
-            if self.root.state() == 'iconic':
-                self.root.state('normal')
-            self._apply_main_container_bounds()
+            if was_hidden:
+                self.root.focus_force()
+            self._window_shown_once = True
+            self._prime_after_visual_transition()
+            if getattr(self, "_resize_guard_visible", False):
+                try:
+                    self.root.after(24, self._hide_resize_guard)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Show window error: {e}")
 
@@ -1863,9 +1603,9 @@ class JarvisApp(
         if threading.current_thread() is not threading.main_thread():
             self._enqueue_ui_task(self.show_window, icon, item)
             return
-        if self._startup_gate_setup and not bool(str(CONFIG_MGR.get_api_key() or "").strip()):
+        if self._startup_gate_setup and not bool(str(self.config_mgr.get_api_key() or "").strip()):
             self.root.after(0, self._show_window_main)
-            self.root.after(0, self._show_embedded_activation_gate)
+            self.root.after(0, lambda: self.run_setup_wizard(True))
             return
         try:
             self.root.after(0, self._show_window_main)
@@ -2269,21 +2009,11 @@ class JarvisApp(
     def _show_tooltip_for_widget(self, widget, text):
         try:
             self._hide_tooltip()
-            self._tooltip = tk.Toplevel(self.root)
-            self._tooltip.wm_overrideredirect(True)
-            label = tk.Label(
-                self._tooltip,
-                text=text,
-                bg=Theme.TOOLTIP_BG,
-                fg=Theme.FG,
-                padx=8,
-                pady=4,
-                font=("Segoe UI", 9),
-            )
-            label.pack()
-            x = widget.winfo_rootx() + 10
-            y = widget.winfo_rooty() + 30
-            self._tooltip.wm_geometry(f"+{x}+{y}")
+            tip = str(text or "").strip()
+            if not tip:
+                return
+            self._tooltip = None
+            self.set_status_temp(tip[:220], "busy", duration_ms=2600)
         except Exception:
             pass
 
@@ -2308,7 +2038,7 @@ class JarvisApp(
                     audio = self.recognizer.listen(source, timeout=4, phrase_time_limit=3)
 
                 raw = audio.get_raw_data() if audio else b""
-                rms = audioop.rms(raw, 2) if raw else 0
+                rms = audio_rms_int16(raw)
                 if raw and len(raw) > 1200 and rms > 0:
                     msg = f"Микрофон работает: {name}"
                     self.root.after(0, lambda: self.set_status(msg, "ok"))
@@ -2377,6 +2107,23 @@ class JarvisApp(
             pass
         sys.exit(0)
 
+    def _stop_tts_engine_quick(self, timeout: float = 0.45):
+        engine = getattr(self, "tts_engine", None)
+        if engine is None:
+            return
+        finished = threading.Event()
+
+        def _worker():
+            try:
+                engine.stop()
+            except Exception:
+                pass
+            finally:
+                finished.set()
+
+        threading.Thread(target=_worker, daemon=True, name="TTSStopThread").start()
+        finished.wait(timeout=max(0.05, float(timeout or 0.45)))
+
     def quit_app(self, icon=None, item=None):
         if threading.current_thread() is not threading.main_thread():
             self._enqueue_ui_task(self.quit_app, icon, item)
@@ -2427,9 +2174,9 @@ class JarvisApp(
             if ElevenLabs is None:
                 return False, "модуль elevenlabs не установлен"
             if not CONFIG_MGR.get_elevenlabs_api_key() and not os.getenv("ELEVENLABS_API_KEY"):
-                return False, "не задан ElevenLabs API key"
+                return False, "не задан API-ключ ElevenLabs"
             if not CONFIG_MGR.get_elevenlabs_voice_id():
-                return False, "не задан ElevenLabs voice_id"
+                return False, "не задан ID голоса ElevenLabs"
             if sd is None and pygame is None and AudioSegment is None and not shutil.which("ffplay"):
                 return False, "нет backend-а воспроизведения (sounddevice/pygame/ffplay/pydub)"
             return True, ""
@@ -2701,17 +2448,7 @@ class JarvisApp(
             raise RuntimeError("pydub is required for non-WAV sounddevice playback")
         if not _compressed_audio_decoder_available():
             raise RuntimeError("compressed audio decoding backend is unavailable")
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Couldn't find ffprobe or avprobe - defaulting to ffprobe, but may not work",
-                category=RuntimeWarning,
-            )
-            warnings.filterwarnings(
-                "ignore",
-                message="Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work",
-                category=RuntimeWarning,
-            )
+        with suppress_pydub_ffmpeg_warnings():
             audio = AudioSegment.from_file(path)
         return self._play_audio_segment_with_sounddevice(audio, device_index=device_index)
 
@@ -2769,17 +2506,7 @@ class JarvisApp(
         last_error = None
         for _ in range(6):
             try:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore",
-                        message="Couldn't find ffprobe or avprobe - defaulting to ffprobe, but may not work",
-                        category=RuntimeWarning,
-                    )
-                    warnings.filterwarnings(
-                        "ignore",
-                        message="Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work",
-                        category=RuntimeWarning,
-                    )
+                with suppress_pydub_ffmpeg_warnings():
                     audio = AudioSegment.from_file(source_path)
                 audio.export(wav_path, format="wav")
                 return
@@ -2914,7 +2641,7 @@ class JarvisApp(
             raise RuntimeError("ElevenLabs is unavailable")
         voice_id = CONFIG_MGR.get_elevenlabs_voice_id().strip()
         if not voice_id:
-            raise RuntimeError("ElevenLabs voice_id is not configured")
+            raise RuntimeError("Для ElevenLabs не настроен ID голоса")
         model_id = CONFIG_MGR.get_elevenlabs_model_id().strip() or "eleven_flash_v2_5"
         td = tempfile.mkdtemp(prefix="jarvis_tts_")
         try:
@@ -3137,7 +2864,10 @@ class JarvisApp(
         user_avatar_custom = str(CONFIG_MGR.get_user_avatar_path() or "").strip()
         user_avatar_path = user_avatar_custom if (user_avatar_custom and os.path.exists(user_avatar_custom)) else "assets/user_avatar.png"
         paths = {
+            "noob2": ("assets/noob2.png", "NOOB"),
             "noob": ("assets/noob.png", "❄️"),
+            "noob_settings": ("assets/noob2.png", "NOOB"),
+            "noob_sidebar": ("assets/noob.png", "❄️"),
             "ai": ("assets/ai_avatar.png", "🤖"),
             "user": (user_avatar_path, "👤"),
             "mic": ("assets/mic_icon.png", "🎤"),
@@ -3154,13 +2884,17 @@ class JarvisApp(
                         mask = Image.new("L", (40,40), 0)
                         ImageDraw.Draw(mask).ellipse((0,0,40,40), fill=255)
                         img.putalpha(mask)
-                    elif key == "noob":
-                        img = img.resize((220,220), Image.LANCZOS)
+                    elif key in {"noob", "noob2"}:
+                        img = img.resize((180,180), Image.LANCZOS)
+                    elif key == "noob_settings":
+                        img = img.resize((148,148), Image.LANCZOS)
+                    elif key == "noob_sidebar":
+                        img = img.resize((112,112), Image.LANCZOS)
                     elif key in ["mic","send"]:
                         img = img.resize((32,32), Image.LANCZOS)
                     elif key == "settings":
                         img = img.resize((18,18), Image.LANCZOS)
-                    self.assets[key] = ImageTk.PhotoImage(img)
+                    self.assets[key] = ImageTk.PhotoImage(img, master=self.root)
                 except Exception as e:
                     logger.error(f"Asset load error {key}: {e}")
                     self.assets[key] = fallback_text
@@ -3168,7 +2902,9 @@ class JarvisApp(
                 self.assets[key] = fallback_text
 
     def setup_ui(self):
-        return self._setup_ui_v2()
+        self.ui_rewrite = None
+        self._setup_ui_v2()
+        return
         self._configure_ttk_styles()
         self._install_global_clipboard_shortcuts()
 
@@ -3529,38 +3265,127 @@ class JarvisApp(
         self.root.bind("<Map>", self._schedule_window_activity_sync, add="+")
         self.root.bind("<Unmap>", self._schedule_window_activity_sync, add="+")
 
-        self._build_embedded_activation_gate()
+        self.activation_gate = None
         self.root.after(40, self._apply_main_container_bounds)
         self.root.after(90, self._schedule_window_activity_sync)
         if not self._startup_gate_setup:
             if not self.safe_mode:
                 self.root.after(620, self.start_bg_anim)
         else:
-            self.root.after(180, self._show_embedded_activation_gate)
+            self.root.after(180, lambda: self.run_setup_wizard(True))
+
+    def _show_entry_placeholder(self):
+        entry = getattr(self, "entry", None)
+        if entry is None:
+            return
+        try:
+            if str(entry.get() or "").strip():
+                self._entry_placeholder_active = False
+                return
+        except Exception:
+            return
+        self._entry_placeholder_active = True
+        self._entry_placeholder_text = "Напишите вопрос, команду или задачу..."
+        try:
+            entry.delete(0, tk.END)
+            entry.insert(0, self._entry_placeholder_text)
+            entry.configure(fg=Theme.FG_SECONDARY)
+        except Exception:
+            pass
+
+    def _clear_entry_placeholder(self):
+        if not bool(getattr(self, "_entry_placeholder_active", False)):
+            return
+        entry = getattr(self, "entry", None)
+        if entry is None:
+            return
+        try:
+            if str(entry.get() or "") == str(getattr(self, "_entry_placeholder_text", "")):
+                entry.delete(0, tk.END)
+            entry.configure(fg=Theme.FG)
+        except Exception:
+            pass
+        self._entry_placeholder_active = False
+
+    def _refresh_chat_empty_state(self):
+        ui = getattr(self, "ui_rewrite", None)
+        if ui is not None:
+            return ui.refresh_chat_empty_state()
+        return None
+
+    def _set_workspace_section(self, section: str = "chat"):
+        return restored_set_workspace_section(self, section)
+
+    def refresh_workspace_layout_mode(self, *_args):
+        return restored_refresh_workspace_layout_mode(self, *_args)
+
+    def _rebuild_workspace_shell_v2(self):
+        ui = getattr(self, "ui_rewrite", None)
+        if ui is None:
+            return None
+        try:
+            current_section = str(getattr(self, "_workspace_section", "chat") or "chat")
+        except Exception:
+            current_section = "chat"
+        self.setup_ui()
+        try:
+            self.ui_rewrite.switch_section(current_section)
+        except Exception:
+            pass
+        return None
 
     def _setup_ui_v2(self):
         self._configure_ttk_styles()
         self._install_global_clipboard_shortcuts()
         self._apply_dpi_scaling()
         metrics = self._workspace_metrics()
+        self.ui_rewrite = None
 
-        self.bg_canvas = tk.Canvas(self.root, bg=Theme.BG, highlightthickness=0)
+        self.bg_canvas = tk.Frame(self.root, bg=Theme.BG_LIGHT, highlightthickness=0, bd=0)
         self.bg_canvas.pack(fill="both", expand=True)
 
         self.main_container = tk.Frame(
             self.bg_canvas,
             bg=Theme.BG_LIGHT,
-            bd=1,
-            highlightbackground=Theme.BORDER,
-            highlightthickness=1,
+            bd=0,
+            highlightthickness=0,
         )
-        self.cont_win = self.bg_canvas.create_window(
-            self.root.winfo_width() // 2,
-            self.root.winfo_height() // 2,
-            window=self.main_container,
-            width=1180,
-            height=820,
-        )
+        self.main_container.pack(fill="both", expand=True)
+        self.cont_win = None
+        self._resize_guard = tk.Frame(self.root, bg=Theme.BG_LIGHT, bd=0, highlightthickness=0)
+        self._resize_guard.place_forget()
+        self._build_workspace_shell_v2(metrics)
+
+        self.root.bind("<F11>", self.toggle_fs)
+        self.root.bind("<Control-k>", self.open_command_palette)
+        self.root.bind("<Configure>", self.on_resize)
+        self.root.bind("<FocusIn>", self._schedule_window_activity_sync, add="+")
+        self.root.bind("<FocusOut>", self._schedule_window_activity_sync, add="+")
+        self.root.bind("<Map>", self._schedule_window_activity_sync, add="+")
+        self.root.bind("<Unmap>", self._schedule_window_activity_sync, add="+")
+        self.root.bind("<Map>", self._handle_window_map, add="+")
+        self.root.bind("<Unmap>", self._handle_window_unmap, add="+")
+
+        old_gate = getattr(self, "activation_gate", None)
+        if old_gate is not None:
+            try:
+                old_gate.destroy()
+            except Exception:
+                pass
+        self.activation_gate = None
+        self._build_embedded_activation_gate()
+        self.root.after(40, self._apply_main_container_bounds)
+        self.root.after(60, self.refresh_workspace_layout_mode)
+        self.root.after(90, self._schedule_window_activity_sync)
+        if not self._startup_gate_setup:
+            if not self.safe_mode:
+                self.root.after(620, self.start_bg_anim)
+        else:
+            self.root.after(180, lambda: self.run_setup_wizard(True))
+
+    def _build_workspace_shell_v2(self, metrics=None):
+        return restored_build_workspace_shell_v2(self, metrics)
+        metrics = metrics or self._workspace_metrics()
 
         self.shell = tk.Frame(self.main_container, bg=Theme.BG_LIGHT)
         self.shell.pack(fill="both", expand=True, padx=metrics["shell_pad"], pady=metrics["shell_pad"])
@@ -3661,6 +3486,7 @@ class JarvisApp(
                     btn.configure(image=icon, text="", width=34, padx=8)
             btn.pack(side="right", padx=(0, 6))
             self._bind_hover_bg(btn, role="button")
+            self._bind_guide_hover(btn, "chat")
             btn.bind("<Enter>", lambda _e, b=btn, t=tip: self._show_tooltip_for_widget(b, t), add="+")
             btn.bind("<Leave>", lambda _e: self._hide_tooltip(), add="+")
             self.header_action_buttons.append(btn)
@@ -3675,7 +3501,7 @@ class JarvisApp(
             highlightbackground=Theme.BORDER,
             highlightthickness=1,
         )
-        self.quick_bar.pack(side="top", fill="x", pady=(12, 12))
+        self.quick_bar.pack(side="top", fill="x", pady=(8, 10))
         self.quick_head = tk.Frame(self.quick_bar, bg=Theme.CARD_BG)
         self.quick_head.pack(fill="x", padx=metrics["card_pad"], pady=(metrics["card_pad"], 8))
         self._build_workspace_overview(metrics)
@@ -3686,98 +3512,147 @@ class JarvisApp(
         self._build_workspace_rail(metrics)
         self._refresh_chat_empty_state()
 
-        self.root.bind("<F11>", self.toggle_fs)
-        self.root.bind("<Control-k>", self.open_command_palette)
-        self.root.bind("<Configure>", self.on_resize)
-        self.root.bind("<FocusIn>", self._schedule_window_activity_sync, add="+")
-        self.root.bind("<FocusOut>", self._schedule_window_activity_sync, add="+")
-        self.root.bind("<Map>", self._schedule_window_activity_sync, add="+")
-        self.root.bind("<Unmap>", self._schedule_window_activity_sync, add="+")
+    def _rebuild_workspace_shell_v2(self):
+        if not hasattr(self, "main_container"):
+            return
+        metrics = self._workspace_metrics()
+        previous_entry = ""
+        try:
+            if getattr(self, "entry", None) is not None and self.entry.winfo_exists():
+                previous_entry = str(self.entry.get() or "")
+        except Exception:
+            previous_entry = ""
+        try:
+            if previous_entry == "Например: открой Steam, сделай потише, что ты запомнил обо мне?":
+                previous_entry = ""
+        except Exception:
+            previous_entry = ""
+        current_section = str(getattr(self, "_workspace_section", "chat") or "chat")
 
-        self._build_embedded_activation_gate()
-        self.root.after(40, self._apply_main_container_bounds)
-        self.root.after(60, self.refresh_workspace_layout_mode)
-        self.root.after(90, self._schedule_window_activity_sync)
-        if not self._startup_gate_setup:
-            if not self.safe_mode:
-                self.root.after(620, self.start_bg_anim)
-        else:
-            self.root.after(180, self._show_embedded_activation_gate)
+        old_shell = getattr(self, "shell", None)
+        if old_shell is not None:
+            try:
+                old_shell.destroy()
+            except Exception:
+                pass
+        self._workspace_layout_signature = None
+        self._workspace_shell_layout_mode = None
+        self._scroll_targets = []
+        self._active_scroll_target = None
+        self._wheel_delta_accum = {}
+
+        self._build_workspace_shell_v2(metrics)
+        try:
+            self._set_workspace_section(current_section)
+        except Exception:
+            pass
+        try:
+            self._refresh_chat_theme()
+        except Exception:
+            pass
+        try:
+            if previous_entry:
+                self.entry.delete(0, tk.END)
+                self.entry.insert(0, previous_entry)
+                self.entry.configure(fg=Theme.FG)
+            else:
+                self._show_entry_placeholder()
+        except Exception:
+            pass
+        try:
+            self.refresh_workspace_layout_mode()
+        except Exception:
+            pass
 
     def _build_workspace_sidebar(self, metrics):
+        restored_build_workspace_sidebar(self, metrics)
+        guide = getattr(self, "guide_panel", None)
+        self.chat_noob_button = getattr(guide, "frame", None)
+        self.chat_noob_message = getattr(guide, "message_label", None)
+        return None
         self.sidebar_action_buttons = []
 
-        top = tk.Frame(self.sidebar, bg=Theme.CARD_BG)
-        top.pack(fill="x", padx=14, pady=(14, 10))
-        tk.Label(top, text=app_brand_name(), bg=Theme.CARD_BG, fg=Theme.FG, font=metrics["brand_font"]).pack(anchor="w")
-        tk.Label(top, text=f"{app_version_badge()} • домашний экран", bg=Theme.CARD_BG, fg=Theme.FG_SECONDARY, font=metrics["small_font"]).pack(anchor="w", pady=(4, 0))
+        # Top branding with more air and rounded corners
+        top = tk.Frame(self.sidebar, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1, bd=0)
+        top.pack(fill="x", padx=18, pady=(22, 18))
+        tk.Label(top, text=app_brand_name(), bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Black", 18)).pack(anchor="w", pady=(0, 2))
+        tk.Label(top, text=f"{app_version_badge()} • домашний экран", bg=Theme.CARD_BG, fg=Theme.FG_SECONDARY, font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 0))
 
+        # Navigation with accent and rounded buttons
         nav = tk.Frame(self.sidebar, bg=Theme.CARD_BG)
-        nav.pack(fill="x", padx=12, pady=(4, 12))
+        nav.pack(fill="x", padx=10, pady=(8, 18))
 
-        def add_nav(text, section, command, accent=False):
+        nav_items = [
+            ("💬 Новая беседа", "chat", self.clear_chat, False),
+            ("🎤 Проверка голоса", "voice", lambda: self.open_full_settings_view("diagnostics"), True),
+            ("🎮 Приложения и игры", "chat", lambda: self.open_full_settings_view("apps"), False),
+            ("⚙️ Настройки", "chat", lambda: self.open_full_settings_view("main"), False),
+            ("🖥️ Система", "release", lambda: self.open_full_settings_view("system"), False),
+        ]
+        for text, section, command, accent in nav_items:
             btn = tk.Button(
                 nav,
                 text=text,
-                command=lambda: (self._update_guide_context(section), command()),
+                command=lambda s=section, c=command: (self._update_guide_context(s), c()),
                 anchor="w",
                 bg=Theme.ACCENT if accent else Theme.BUTTON_BG,
                 fg=Theme.FG,
                 relief="flat",
-                padx=12,
-                pady=10,
+                padx=18,
+                pady=12,
                 highlightbackground=Theme.BORDER,
                 highlightthickness=1,
                 cursor="hand2",
+                font=("Segoe UI Semibold", 12),
+                bd=0,
             )
-            btn.pack(fill="x", pady=(0, 8))
-            self._bind_hover_bg(btn, role="button")
+            btn.pack(fill="x", pady=(0, 12), ipady=2)
+            btn.configure(overrelief="ridge")
+            btn.bind("<Enter>", lambda e, b=btn: b.configure(bg=Theme.ACCENT))
+            btn.bind("<Leave>", lambda e, b=btn, a=accent: b.configure(bg=Theme.ACCENT if a else Theme.BUTTON_BG))
+            self._bind_guide_hover(btn, section)
             self.sidebar_action_buttons.append(btn)
 
-        add_nav("Новая беседа", "chat", self.clear_chat)
-        add_nav("Проверка голоса", "voice", lambda: self.open_full_settings_view("diagnostics"), accent=True)
-        add_nav("Приложения и игры", "chat", lambda: self.open_full_settings_view("apps"))
-        add_nav("Настройки", "chat", lambda: self.open_full_settings_view("main"))
-        add_nav("Система", "release", lambda: self.open_full_settings_view("system"))
-
+        # Note box with more padding and rounded look
         self.sidebar_note_box, self.sidebar_note_label = create_note_box(
             self.sidebar,
-            "По центру остается только рабочее пространство. Диагностика, релиз и обслуживание теперь собраны во вкладке «Система».",
+            "По центру — только рабочее пространство. Диагностика, релиз и обслуживание теперь собраны во вкладке «Система».",
             tone="soft",
         )
-        self.sidebar_note_box.pack_configure(padx=12, pady=(0, 12))
+        self.sidebar_note_box.pack_configure(padx=16, pady=(0, 18))
 
     def _build_workspace_overview(self, metrics):
+        return restored_build_workspace_overview(self, metrics)
         head_row = tk.Frame(self.quick_head, bg=Theme.CARD_BG)
-        head_row.pack(fill="x")
+        head_row.pack(fill="x", pady=(0, 6))
         self.quick_title_label = tk.Label(
             head_row,
-            text="Домашний экран JARVIS",
+            text="✨ Добро пожаловать в JARVIS!",
             bg=Theme.CARD_BG,
-            fg=Theme.FG,
-            font=("Segoe UI Semibold", 12),
+            fg=Theme.ACCENT,
+            font=("Segoe UI Black", 16),
         )
-        self.quick_title_label.pack(side="left")
+        self.quick_title_label.pack(side="left", padx=(0, 8))
         self.workspace_mode_badge = tk.Label(
             head_row,
             textvariable=self.workspace_mode_var,
             bg=Theme.BUTTON_BG,
             fg=Theme.FG_SECONDARY,
-            font=("Segoe UI", 8, "bold"),
-            padx=10,
-            pady=4,
+            font=("Segoe UI", 9, "bold"),
+            padx=12,
+            pady=6,
         )
         self.workspace_mode_badge.pack(side="right")
         self.quick_desc_label = tk.Label(
             self.quick_head,
-            text="По центру живут чат и голос. Всё служебное спрятано по разделам и не перегружает домашний экран.",
+            text="Чат, голос и команды — в центре. Всё служебное и сложное теперь по разделам, чтобы не мешать работе.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
-            font=metrics["body_font"],
+            font=("Segoe UI", 11),
             justify="left",
         )
-        self.quick_desc_label.pack(anchor="w", pady=(6, 0))
-        bind_dynamic_wrap(self.quick_desc_label, self.quick_head, padding=34, minimum=260)
+        self.quick_desc_label.pack(anchor="w", pady=(2, 0))
+        bind_dynamic_wrap(self.quick_desc_label, self.quick_head, padding=40, minimum=280)
 
         self.status_grid = tk.Frame(self.quick_bar, bg=Theme.CARD_BG)
         self.status_grid.pack(fill="x", padx=metrics["card_pad"], pady=(0, 10))
@@ -3833,13 +3708,21 @@ class JarvisApp(
             columns=2,
             bg=Theme.CARD_BG,
         )
+        quick_hover_map = {
+            "Новая беседа": "chat",
+            "Проверка голоса": "voice",
+            "Приложения и игры": "apps",
+            "Система": "system",
+        }
         for btn in self.quick_action_buttons:
             btn.configure(highlightbackground=Theme.BORDER, highlightthickness=1)
             self._bind_hover_bg(btn, role="button")
+            self._bind_guide_hover(btn, quick_hover_map.get(btn.cget("text"), "chat"))
         self.top_divider = tk.Frame(self.workspace, bg=Theme.BORDER, height=1)
         self.top_divider.pack(fill="x", pady=(0, 8))
 
     def _build_workspace_chat(self, metrics):
+        return restored_build_workspace_chat(self, metrics)
         self.chat_shell = tk.Frame(
             self.content_stage,
             bg=Theme.CARD_BG,
@@ -3871,6 +3754,7 @@ class JarvisApp(
         self._register_scroll_target(self.chat_canvas)
 
     def _build_workspace_controls(self, metrics):
+        return restored_build_workspace_controls(self, metrics)
         self.controls_bar = tk.Frame(self.workspace, bg=Theme.BG_LIGHT, height=metrics["entry_height"])
         self.controls_bar.pack(side="bottom", fill="x", pady=(12, 0))
         self.controls_bar.pack_propagate(False)
@@ -3897,55 +3781,101 @@ class JarvisApp(
         self._setup_entry_bindings(self.entry)
         self.entry.bind("<Return>", lambda e: self.send_text())
 
-        self.copy_btn = tk.Label(self.entry_wrap, text="📋", bg=Theme.BUTTON_BG, fg=Theme.FG, font=("Segoe UI", 11), cursor="hand2", padx=9, pady=6)
+        self.copy_btn = tk.Button(
+            self.entry_wrap,
+            text="📋",
+            command=self.copy_chat,
+            bg=Theme.BUTTON_BG,
+            fg=Theme.FG,
+            font=("Segoe UI", 11),
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            activebackground=Theme.ACCENT,
+            activeforeground=Theme.FG,
+            padx=9,
+            pady=6,
+        )
         self.copy_btn.pack(side="right", padx=(6, 0))
-        self.copy_btn.bind("<Button-1>", lambda e: self.copy_chat())
         self._bind_hover_bg(self.copy_btn, role="input_icon")
 
-        self.paste_btn = tk.Label(self.entry_wrap, text="📎", bg=Theme.BUTTON_BG, fg=Theme.FG, font=("Segoe UI", 11), cursor="hand2", padx=9, pady=6)
+        self.paste_btn = tk.Button(
+            self.entry_wrap,
+            text="📎",
+            command=self.paste_text,
+            bg=Theme.BUTTON_BG,
+            fg=Theme.FG,
+            font=("Segoe UI", 11),
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            activebackground=Theme.ACCENT,
+            activeforeground=Theme.FG,
+            padx=9,
+            pady=6,
+        )
         self.paste_btn.pack(side="right", padx=(6, 0))
-        self.paste_btn.bind("<Button-1>", lambda e: self.paste_text())
         self._bind_hover_bg(self.paste_btn, role="input_icon")
 
-        self.send_btn = tk.Label(self.entry_wrap, bg=Theme.BUTTON_BG, cursor="hand2", padx=9, pady=6)
+        self.send_btn = tk.Button(
+            self.entry_wrap,
+            bg=Theme.BUTTON_BG,
+            command=self.send_text,
+            cursor="hand2",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            activebackground=Theme.ACCENT,
+            activeforeground=Theme.FG,
+            padx=9,
+            pady=6,
+            compound="center",
+        )
         self.send_btn.pack(side="right", padx=(6, 0))
         if "send" in self.assets:
             if isinstance(self.assets["send"], ImageTk.PhotoImage):
-                self.send_btn.config(image=self.assets["send"])
+                self.send_btn.config(image=self.assets["send"], text="")
             else:
                 self.send_btn.config(text=self.assets["send"], fg=Theme.MIC_ICON_FG, font=("Segoe UI", 11, "bold"))
         else:
             self.send_btn.config(text="➤", fg=Theme.MIC_ICON_FG, font=("Segoe UI", 11, "bold"))
-        self.send_btn.bind("<Button-1>", lambda e: self.send_text())
         self._bind_hover_bg(self.send_btn, role="input_icon")
 
-        self.mic_btn = tk.Label(
+        self.mic_btn = tk.Button(
             self.controls_bar,
-            bg=Theme.BUTTON_BG,
+            command=self.mic_click,
+            bg=Theme.ACCENT,
+            fg=Theme.FG,
             cursor="hand2",
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            activebackground="#16a34a",
+            activeforeground=Theme.FG,
             padx=14,
             pady=10,
-            highlightbackground=Theme.BORDER,
-            highlightthickness=1,
+            compound="center",
         )
         self.mic_btn.pack(side="right", padx=(8, 0))
         if "mic" in self.assets:
             if isinstance(self.assets["mic"], ImageTk.PhotoImage):
-                self.mic_btn.config(image=self.assets["mic"])
+                self.mic_btn.config(image=self.assets["mic"], text="")
             else:
-                self.mic_btn.config(text=self.assets["mic"], fg=Theme.MIC_ICON_FG, font=("Segoe UI", 16))
+                self.mic_btn.config(text=self.assets["mic"], font=("Segoe UI", 16))
         else:
-            self.mic_btn.config(text="🎤", fg=Theme.MIC_ICON_FG, font=("Segoe UI", 16))
-        self.mic_btn.bind("<Button-1>", self.mic_click)
+            self.mic_btn.config(text="🎤", font=("Segoe UI", 16))
         self._bind_hover_bg(self.mic_btn, role="button")
 
     def _build_workspace_rail(self, metrics):
+        return restored_build_workspace_rail(self, metrics)
         self.rail_action_buttons = []
         self.side_status_labels = []
 
         guide_host = tk.Frame(self.side_panel, bg=Theme.BG_LIGHT)
         guide_host.pack(fill="x")
-        noob_asset = self.assets.get("noob")
+        noob_asset = self.assets.get("noob2") or self.assets.get("noob")
         noob_image = noob_asset if isinstance(noob_asset, ImageTk.PhotoImage) else None
         self.guide_panel = GuideNoobPanel(guide_host, image=noob_image, title="Навигатор JARVIS")
         self._update_guide_context("chat")
@@ -3973,6 +3903,7 @@ class JarvisApp(
         for btn in buttons:
             btn.configure(highlightbackground=Theme.BORDER, highlightthickness=1)
             self._bind_hover_bg(btn, role="button")
+            self._bind_guide_hover(btn, "system" if btn.cget("text") == "Система" else "readiness")
         self.rail_action_buttons.extend(buttons)
 
         _, tip_label = create_note_box(
@@ -3983,6 +3914,7 @@ class JarvisApp(
         self.side_tip_label = tip_label
 
     def _refresh_chat_empty_state(self):
+        return restored_refresh_chat_empty_state(self)
         if not getattr(self, "chat_frame", None):
             return
         has_history = bool(getattr(self, "chat_history", []))
@@ -4027,7 +3959,7 @@ class JarvisApp(
 
     def _build_embedded_activation_gate(self):
         self.activation_gate = tk.Frame(
-            self.main_container,
+            self.root,
             bg=Theme.BG_LIGHT,
         )
         self.activation_gate.place_forget()
@@ -4080,7 +4012,7 @@ class JarvisApp(
         steps_box = tk.Frame(intro, bg=Theme.BUTTON_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
         steps_box.pack(fill="x", padx=22, pady=(0, 14))
         for step in (
-            "1. Вставьте Groq API ключ",
+            "1. Вставьте Groq API-ключ",
             "2. При желании добавьте Telegram",
             "3. Укажите имя и тему",
             "4. Нажмите «Активировать и открыть чат»",
@@ -4095,13 +4027,15 @@ class JarvisApp(
                 font=("Segoe UI", 9, "bold" if step.startswith("1.") else "normal"),
             ).pack(fill="x", padx=14, pady=(10 if step.startswith("1.") else 0, 8))
 
-        noob_card = tk.Frame(intro, bg=Theme.CARD_BG)
-        noob_card.pack(fill="both", expand=True, padx=22, pady=(0, 22))
+        noob_card = tk.Frame(intro, bg=Theme.CARD_BG, width=320, height=260)
+        noob_card.pack(fill="x", padx=22, pady=(0, 22))
+        noob_card.pack_propagate(False)
         self._activation_gate_noob_card = noob_card
-        noob_asset = self.assets.get("noob")
+        noob_asset = self.assets.get("noob2") or self.assets.get("noob")
         if isinstance(noob_asset, ImageTk.PhotoImage):
             self._activation_gate_noob_image_label = tk.Label(noob_card, image=noob_asset, bg=Theme.CARD_BG)
-            self._activation_gate_noob_image_label.pack(anchor="center", pady=(4, 8))
+            self._activation_gate_noob_image_label.image = noob_asset
+            self._activation_gate_noob_image_label.pack(anchor="center", pady=(8, 10))
         else:
             self._activation_gate_noob_image_label = None
         tk.Label(
@@ -4113,7 +4047,7 @@ class JarvisApp(
         ).pack(anchor="center")
         noob_note = tk.Label(
             noob_card,
-            text="Обязателен только API ключ. Остальное можно дописать позже уже внутри настроек.",
+            text="Обязателен только API-ключ. Остальное можно дописать позже уже внутри настроек.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             justify="center",
@@ -4142,7 +4076,7 @@ class JarvisApp(
         ).pack(anchor="w")
         gate_note = tk.Label(
             head,
-            text="Введите ключи и настройки профиля. После активации чат откроется в этом же окне, без лишних всплывающих мастеров.",
+            text="Введите ключи и базовые параметры профиля. После активации чат откроется в этом же окне, без лишних всплывающих мастеров.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             font=("Segoe UI", 10),
@@ -4172,30 +4106,60 @@ class JarvisApp(
             self._setup_entry_bindings(ent)
             return var, ent
 
-        self._gate_groq_var, self._gate_groq_entry = gate_entry("Groq API ключ", CONFIG_MGR.get_api_key(), show="•")
-        self._gate_tg_token_var, _ = gate_entry("Telegram Bot Token (опционально)", CONFIG_MGR.get_telegram_token(), show="•")
-        self._gate_tg_id_var, _ = gate_entry("Telegram user ID (опционально)", str(CONFIG_MGR.get_telegram_user_id() or ""))
-        self._gate_user_name_var, _ = gate_entry("Имя пользователя", CONFIG_MGR.get_user_name())
-        self._gate_user_login_var, _ = gate_entry("Логин пользователя", CONFIG_MGR.get_user_login())
+        self._gate_groq_var, self._gate_groq_entry = gate_entry("Groq API-ключ", self.config_mgr.get_api_key(), show="•")
+        self._gate_tg_token_var, _ = gate_entry("Токен Telegram-бота (необязательно)", self.config_mgr.get_telegram_token(), show="•")
+        self._gate_tg_id_var, _ = gate_entry("ID пользователя Telegram (необязательно)", str(self.config_mgr.get_telegram_user_id() or ""))
+        self._gate_user_name_var, _ = gate_entry("Имя пользователя", self.config_mgr.get_user_name())
+        self._gate_user_login_var, _ = gate_entry("Логин пользователя", self.config_mgr.get_user_login())
 
         mode_row = tk.Frame(body, bg=Theme.CARD_BG)
         mode_row.pack(fill="x", pady=(0, 8))
         tk.Label(mode_row, text="Тема интерфейса", bg=Theme.CARD_BG, fg=Theme.FG).pack(anchor="w")
         self._gate_theme_items = [("Тёмная", "dark"), ("Светлая", "light")]
-        current_theme = str(CONFIG_MGR.get_theme_mode() or "dark").strip().lower()
+        current_theme = str(self.config_mgr.get_theme_mode() or "dark").strip().lower()
         if current_theme not in {"dark", "light"}:
             current_theme = "dark"
         current_theme_label = next((lbl for lbl, key in self._gate_theme_items if key == current_theme), self._gate_theme_items[0][0])
         self._gate_theme_var = tk.StringVar(value=current_theme_label)
-        self._gate_theme_box = ttk.Combobox(
+        theme_shell, theme_button = self._create_settings_choice_control(
             mode_row,
-            textvariable=self._gate_theme_var,
-            values=[x[0] for x in self._gate_theme_items],
-            state="readonly",
-            style="Jarvis.TCombobox",
+            self._gate_theme_var,
+            [x[0] for x in self._gate_theme_items],
+            font=("Segoe UI", 10),
         )
-        self._gate_theme_box.pack(fill="x", ipady=5, pady=(3, 0))
-        self._bind_selector_wheel_guard(self._gate_theme_box)
+        theme_shell.pack(fill="x", pady=(3, 0))
+        self._gate_theme_box = theme_button
+
+        current_dangerous_modes = normalize_permission_modes(self.config_mgr.get_dangerous_action_modes())
+        dangerous_mode_key = "ask"
+        dangerous_values = [
+            str(current_dangerous_modes.get(category, DEFAULT_PERMISSION_MODES[category]) or "").strip().lower()
+            for category in DEFAULT_PERMISSION_MODES
+        ]
+        if dangerous_values and all(value == "trust" for value in dangerous_values):
+            dangerous_mode_key = "trust"
+        elif dangerous_values and all(value == "ask_once" for value in dangerous_values):
+            dangerous_mode_key = "ask_once"
+        self._gate_dangerous_mode_items = [
+            ("Всегда спрашивать", "ask"),
+            ("Разрешать один раз", "ask_once"),
+            ("Всегда выполнять", "trust"),
+        ]
+
+        danger_row = tk.Frame(body, bg=Theme.CARD_BG)
+        danger_row.pack(fill="x", pady=(8, 0))
+        tk.Label(danger_row, text="Опасные действия", bg=Theme.CARD_BG, fg=Theme.FG).pack(anchor="w")
+        self._gate_dangerous_mode_var = tk.StringVar(
+            value=next((lbl for lbl, key in self._gate_dangerous_mode_items if key == dangerous_mode_key), self._gate_dangerous_mode_items[0][0])
+        )
+        danger_shell, danger_button = self._create_settings_choice_control(
+            danger_row,
+            self._gate_dangerous_mode_var,
+            [label for label, _key in self._gate_dangerous_mode_items],
+            font=("Segoe UI", 10),
+        )
+        danger_shell.pack(fill="x", pady=(3, 0))
+        self._gate_dangerous_mode_box = danger_button
 
         controls = tk.Frame(body, bg=Theme.CARD_BG)
         self._activation_gate_controls = controls
@@ -4209,6 +4173,8 @@ class JarvisApp(
             relief="flat",
             padx=14,
             pady=10,
+            cursor="hand2",
+            takefocus=True,
         )
         self._activation_gate_submit_btn.pack(side="right")
         self._activation_gate_clear_btn = tk.Button(
@@ -4225,7 +4191,7 @@ class JarvisApp(
 
         footer_note = tk.Label(
             body,
-            text="Поддерживаются Ctrl+V, Shift+Insert и меню по правой кнопке мыши. Обязательное поле только одно: Groq API ключ.",
+            text="Поддерживаются Ctrl+V, Shift+Insert и вставка мышью. Обязательное поле только одно: Groq API-ключ. Здесь же можно выбрать, как JARVIS должен вести себя с опасными командами.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             font=("Segoe UI", 9),
@@ -4266,6 +4232,11 @@ class JarvisApp(
 
         compact = width < 980 or height < 700
         narrow_buttons = width < 760
+        image_visible = bool(image_label is not None and (not compact) and width >= 1040 and height >= 760)
+        layout_signature = (compact, narrow_buttons, image_visible)
+        if layout_signature == getattr(self, "_activation_gate_layout_signature", None):
+            return
+        self._activation_gate_layout_signature = layout_signature
 
         try:
             if compact:
@@ -4291,7 +4262,6 @@ class JarvisApp(
 
         if image_label is not None:
             try:
-                image_visible = (not compact) and width >= 1040 and height >= 760
                 image_packed = bool(str(image_label.winfo_manager() or "").strip())
             except Exception:
                 image_visible = False
@@ -4321,9 +4291,41 @@ class JarvisApp(
         if not hasattr(self, "activation_gate") or not self.activation_gate.winfo_exists():
             return
         try:
+            for widget_name in ("entry", "send_btn", "mic_btn", "paste_btn", "copy_btn"):
+                widget = getattr(self, widget_name, None)
+                if widget is None:
+                    continue
+                try:
+                    widget.configure(state="disabled")
+                except Exception:
+                    pass
+            first_show = not bool(getattr(self, "_activation_gate_warmed", False))
+            if first_show:
+                self._activation_gate_warmed = True
+                self._hold_resize_guard(120)
+            try:
+                self.root.update_idletasks()
+                self._refresh_activation_gate_layout()
+            except Exception:
+                pass
             self.activation_gate.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.activation_gate.lift()
+            try:
+                self.activation_gate.focus_set()
+            except Exception:
+                pass
+            try:
+                self._activation_gate_submit_btn.focus_set()
+            except Exception:
+                pass
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
             self._schedule_activation_gate_layout_refresh()
+            if first_show:
+                self.root.after(56, self._refresh_activation_gate_layout)
+                self.root.after(96, self._hide_resize_guard)
             self.set_status("Требуется активация", "warn")
             if hasattr(self, "_gate_groq_entry"):
                 self._gate_groq_entry.focus_set()
@@ -4337,6 +4339,14 @@ class JarvisApp(
             self.activation_gate.place_forget()
         except Exception:
             pass
+        for widget_name in ("entry", "send_btn", "mic_btn", "paste_btn", "copy_btn"):
+            widget = getattr(self, widget_name, None)
+            if widget is None:
+                continue
+            try:
+                widget.configure(state="normal")
+            except Exception:
+                pass
 
     def _reset_embedded_activation_gate(self):
         for var_name in (
@@ -4351,63 +4361,153 @@ class JarvisApp(
                 var.set("")
 
     def _submit_embedded_activation_gate(self):
-        gate_groq_var = getattr(self, "_gate_groq_var", None)
-        api_key = str(gate_groq_var.get() if isinstance(gate_groq_var, tk.StringVar) else "").strip()
-        if not api_key:
-            messagebox.showwarning(app_brand_name(), "Введите Groq API ключ, чтобы открыть чат.")
-            self.set_status("Нужен API ключ", "warn")
-            return
-
         try:
-            gate_tg_id_var = getattr(self, "_gate_tg_id_var", None)
-            tg_id_raw = str(gate_tg_id_var.get() if isinstance(gate_tg_id_var, tk.StringVar) else "").strip()
-            tg_id = int(tg_id_raw) if tg_id_raw else 0
-        except Exception:
-            tg_id = 0
+            cfg = self.config_mgr
+            gate_groq_var = getattr(self, "_gate_groq_var", None)
+            api_key = str(gate_groq_var.get() if isinstance(gate_groq_var, tk.StringVar) else "").strip()
+            if not api_key:
+                messagebox.showwarning(app_brand_name(), "Введите Groq API ключ, чтобы открыть чат.")
+                self.set_status("Нужен API ключ", "warn")
+                return
 
-        gate_theme_var = getattr(self, "_gate_theme_var", None)
-        selected_theme_label = str(gate_theme_var.get() if isinstance(gate_theme_var, tk.StringVar) else "").strip()
-        selected_theme_key = next((key for lbl, key in getattr(self, "_gate_theme_items", []) if lbl == selected_theme_label), "dark")
+            try:
+                gate_tg_id_var = getattr(self, "_gate_tg_id_var", None)
+                tg_id_raw = str(gate_tg_id_var.get() if isinstance(gate_tg_id_var, tk.StringVar) else "").strip()
+                tg_id = int(tg_id_raw) if tg_id_raw else 0
+            except Exception:
+                tg_id = 0
 
-        gate_tg_token_var = getattr(self, "_gate_tg_token_var", None)
-        gate_user_name_var = getattr(self, "_gate_user_name_var", None)
-        gate_user_login_var = getattr(self, "_gate_user_login_var", None)
+            gate_theme_var = getattr(self, "_gate_theme_var", None)
+            selected_theme_label = str(gate_theme_var.get() if isinstance(gate_theme_var, tk.StringVar) else "").strip()
+            selected_theme_key = next((key for lbl, key in getattr(self, "_gate_theme_items", []) if lbl == selected_theme_label), "dark")
+            gate_dangerous_mode_var = getattr(self, "_gate_dangerous_mode_var", None)
+            selected_dangerous_label = str(gate_dangerous_mode_var.get() if isinstance(gate_dangerous_mode_var, tk.StringVar) else "").strip()
+            selected_dangerous_key = next((key for lbl, key in getattr(self, "_gate_dangerous_mode_items", []) if lbl == selected_dangerous_label), "ask")
+            dangerous_modes = {category: selected_dangerous_key for category in DEFAULT_PERMISSION_MODES}
 
-        CONFIG_MGR.set_many({
-            "api_key": api_key,
-            "telegram_token": str(gate_tg_token_var.get() if isinstance(gate_tg_token_var, tk.StringVar) else "").strip(),
-            "telegram_user_id": tg_id,
-            "allowed_user_ids": [tg_id] if tg_id else [],
-            "user_name": str(gate_user_name_var.get() if isinstance(gate_user_name_var, tk.StringVar) else "").strip(),
-            "user_login": str(gate_user_login_var.get() if isinstance(gate_user_login_var, tk.StringVar) else "").strip(),
-            "theme_mode": selected_theme_key,
-        })
-        CONFIG_MGR.set_first_run_done()
+            gate_tg_token_var = getattr(self, "_gate_tg_token_var", None)
+            gate_user_name_var = getattr(self, "_gate_user_name_var", None)
+            gate_user_login_var = getattr(self, "_gate_user_login_var", None)
 
-        self._startup_gate_setup = False
-        self.reload_services()
-        self.apply_theme_runtime()
-        self.refresh_mic_status_label()
-        self.refresh_output_status_label()
-        self.refresh_tts_status_label()
-        self._hide_embedded_activation_gate()
-        if not self.safe_mode:
-            self.start_bg_anim()
-        self._start_runtime_services()
-        self.set_status("Готов", "ok")
-        self.add_msg("Активация завершена. Чат готов к работе.", "bot")
+            cfg.set_many({
+                "api_key": api_key,
+                "telegram_token": str(gate_tg_token_var.get() if isinstance(gate_tg_token_var, tk.StringVar) else "").strip(),
+                "telegram_user_id": tg_id,
+                "allowed_user_ids": [tg_id] if tg_id else [],
+                "user_name": str(gate_user_name_var.get() if isinstance(gate_user_name_var, tk.StringVar) else "").strip(),
+                "user_login": str(gate_user_login_var.get() if isinstance(gate_user_login_var, tk.StringVar) else "").strip(),
+                "theme_mode": selected_theme_key,
+                "dangerous_action_modes": dangerous_modes,
+            })
+            cfg.set_first_run_done()
+
+            self._startup_gate_setup = False
+            self.reload_services()
+            self.apply_theme_runtime()
+            self.refresh_mic_status_label()
+            self.refresh_output_status_label()
+            self.refresh_tts_status_label()
+            self._hide_embedded_activation_gate()
+            if not self.safe_mode:
+                self.start_bg_anim()
+            self._start_runtime_services()
+            self.set_status("Готов", "ok")
+        except Exception as exc:
+            log_event(logger, "ui", "activation_submit_failed", level=logging.ERROR, error=str(exc))
+            logger.exception("Activation gate submit failed")
+            try:
+                messagebox.showerror(app_brand_name(), f"Ошибка активации: {exc}")
+            except Exception:
+                pass
+            self.set_status("Ошибка активации", "error")
 
     def on_resize(self, e=None):
-        if not self.is_full:
+        force = e is None
+        widget = getattr(e, "widget", None)
+        if not force and widget not in (None, self.root):
+            return
+        try:
+            state_name = str(self.root.state() or "").lower()
+        except Exception:
+            state_name = "normal"
+        if not force and state_name in {"iconic", "withdrawn"}:
             try:
-                self._normal_geometry = self.root.geometry()
+                self._hide_resize_guard()
+            except Exception:
+                pass
+            self._workspace_resize_in_progress = False
+            try:
+                setattr(self.root, "_jarvis_resize_in_progress", False)
+            except Exception:
+                pass
+            return
+        try:
+            width = int(getattr(e, "width", 0) or self.root.winfo_width() or 0)
+            height = int(getattr(e, "height", 0) or self.root.winfo_height() or 0)
+        except Exception:
+            width = height = 0
+        if not force and (width <= 1 or height <= 1):
+            return
+        if bool(getattr(self, "_is_full_settings_open", lambda: False)()):
+            if not self.is_full:
+                try:
+                    geom = self.root.geometry()
+                    if geom and parse_geometry(geom):
+                        self._normal_geometry = geom
+                except Exception:
+                    pass
+            try:
+                self._sync_control_center_window_to_root()
+            except Exception:
+                pass
+            try:
+                self._schedule_control_center_layout_refresh()
+            except Exception:
+                pass
+            try:
+                self._refresh_control_center_content_scroll()
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_refresh_activation_gate_layout") and getattr(self, "_startup_gate_setup", False):
+                    self._refresh_activation_gate_layout()
+            except Exception:
+                pass
+            return
+        if not force:
+            resize_signature = (width, height, bool(self.is_full), state_name)
+            previous_signature = getattr(self, "_last_resize_signature", None)
+            if resize_signature == previous_signature:
+                return
+            if previous_signature and abs(width - previous_signature[0]) < 4 and abs(height - previous_signature[1]) < 4 and bool(self.is_full) == previous_signature[2] and state_name == previous_signature[3]:
+                return
+            self._last_resize_signature = resize_signature
+            self._workspace_resize_in_progress = True
+            try:
+                setattr(self.root, "_jarvis_resize_in_progress", True)
+            except Exception:
+                pass
+            try:
+                large_resize = (
+                    (previous_signature is not None and abs(width - previous_signature[0]) >= 36)
+                    or (previous_signature is not None and abs(height - previous_signature[1]) >= 36)
+                    or (previous_signature is not None and bool(self.is_full) != bool(previous_signature[2]))
+                    or (previous_signature is not None and state_name != previous_signature[3])
+                    or state_name in {"zoomed"}
+                    or bool(self.is_full)
+                )
+                if large_resize:
+                    self._show_resize_guard()
             except Exception:
                 pass
 
-        try:
-            self._set_bg_animation_paused(True, reason="resize")
-        except Exception:
-            pass
+        if not self.is_full:
+            try:
+                geom = self.root.geometry()
+                if geom and parse_geometry(geom):
+                    self._normal_geometry = geom
+            except Exception:
+                pass
 
         live_after = getattr(self, "_resize_preview_after", None)
         if live_after:
@@ -4415,11 +4515,17 @@ class JarvisApp(
                 self.root.after_cancel(live_after)
             except Exception:
                 pass
-        self._resize_preview_after = self.root.after(60, self._apply_resize_preview)
+        self._resize_preview_after = None
+        try:
+            if hasattr(self, "_close_workspace_section_menu"):
+                self._close_workspace_section_menu()
+        except Exception:
+            pass
 
         if self._resize_timer:
             self.root.after_cancel(self._resize_timer)
-        self._resize_timer = self.root.after(340, self._on_resize_settle)
+        settle_delay = 110 if time.monotonic() < getattr(self, "_startup_resize_freeze_until", 0.0) else 45
+        self._resize_timer = self.root.after(settle_delay, self._on_resize_settle)
 
     def _apply_resize_preview(self):
         self._resize_preview_after = None
@@ -4430,6 +4536,8 @@ class JarvisApp(
 
     def _get_chat_obstacle_rect(self):
         try:
+            if not isinstance(getattr(self, "bg_canvas", None), tk.Canvas):
+                return None
             if not hasattr(self, "chat_shell") or not self.chat_shell.winfo_exists():
                 return None
             cont_bbox = self.bg_canvas.bbox(self.cont_win)
@@ -4456,19 +4564,41 @@ class JarvisApp(
                 pass
             self._resize_preview_after = None
         try:
+            self.root.update_idletasks()
             self._apply_main_container_bounds()
             self._sync_chat_canvas_width()
+        except Exception:
+            pass
+        self._workspace_resize_in_progress = False
+        try:
+            setattr(self.root, "_jarvis_resize_in_progress", False)
         except Exception:
             pass
         try:
             self.refresh_workspace_layout_mode()
         except Exception:
             pass
+        guard_after = getattr(self, "_resize_guard_after_id", None)
+        if guard_after:
+            try:
+                self.root.after_cancel(guard_after)
+            except Exception:
+                pass
+        guard_delay = 8
+        try:
+            remaining_ms = int(max(0.0, float(getattr(self, "_resize_guard_hold_until", 0.0) or 0.0) - time.monotonic()) * 1000)
+            if remaining_ms > guard_delay:
+                guard_delay = remaining_ms
+        except Exception:
+            pass
+        self._resize_guard_after_id = self.root.after(guard_delay, self._hide_resize_guard)
         try:
             if hasattr(self, "_schedule_settings_visual_refresh") and self._is_full_settings_open():
                 self._schedule_settings_visual_refresh()
         except Exception:
             pass
+        if not getattr(self, "dvd_logos", None):
+            return
         current_w = max(self.bg_canvas.winfo_width(), 1)
         current_h = max(self.bg_canvas.winfo_height(), 1)
         old_w, old_h = self._last_bg_canvas_size
@@ -4719,13 +4849,49 @@ class JarvisApp(
 
     def execute_action(self, action: str, arg: Any = None, raw_cmd: str = "", speak: bool = True, reply_callback=None) -> str:
         try:
+            action_executor = getattr(self, "action_executor", None)
+            log_event(
+                logger,
+                "actions",
+                "execute_action",
+                action=str(action or ""),
+                has_arg=bool(str(arg or "").strip()),
+                origin=raw_cmd or "voice/chat",
+            )
+
             def out(msg):
+                if msg and hasattr(self, "_set_live_pipeline_step"):
+                    try:
+                        self._set_live_pipeline_step(executed=msg)
+                    except Exception:
+                        pass
                 if speak and msg:
                     if reply_callback:
                         reply_callback(msg)
                     else:
                         self.speak_msg(msg)
                 return msg
+
+            if hasattr(self, "_set_live_pipeline_step"):
+                try:
+                    label = action_executor.describe(action, arg) if action_executor else permission_action_label(action, arg)
+                    self._set_live_pipeline_step(understood=label)
+                except Exception:
+                    pass
+
+            if action_executor:
+                is_allowed = action_executor.allow(action, arg, origin=raw_cmd or "voice/chat")
+            else:
+                permission_category = permission_category_for_action(action)
+                is_allowed = not permission_category or ask_permission(
+                    self,
+                    action,
+                    arg,
+                    category=permission_category,
+                    origin=raw_cmd or "voice/chat",
+                )
+            if not is_allowed:
+                return out("Действие отменено. Разрешение не выдано.")
 
             if action == "close_app":
                 return out("Выполнено!" if close_app(arg) else "Закрытие не поддерживается.")
@@ -4741,6 +4907,7 @@ class JarvisApp(
                     APP_OPEN_FUNCS[action]()
                     return out("Выполнено!")
                 except Exception as e:
+                    log_event(logger, "actions", "execute_action_failed", level=logging.ERROR, action=action, error=str(e))
                     return self.report_error(f"Ошибка запуска {action}", e, speak=speak)
 
             if action == "shutdown": shutdown_pc(); return out("До встречи.")
@@ -4767,13 +4934,35 @@ class JarvisApp(
                 return out(self.last_ai_reply if self.last_ai_reply else "Нечего повторять.")
             return out("Не понял команду.")
         except Exception as e:
+            log_event(logger, "actions", "execute_action_failed", level=logging.ERROR, action=action, error=str(e))
             return self.report_error(f"Ошибка команды {action}", e, speak=speak)
+
+    def _summarize_multi_action_reply(self, results) -> str:
+        normalized = [str(item or "").strip() for item in (results or []) if str(item or "").strip()]
+        if not normalized:
+            return "Не удалось выполнить команды."
+        lowered = [normalize_text(item) for item in normalized]
+        success = [
+            item
+            for item, low in zip(normalized, lowered)
+            if "не удалось" not in low
+            and "не понял" not in low
+            and "ошибка" not in low
+        ]
+        blocked = [item for item, low in zip(normalized, lowered) if "разрешение не выдано" in low or "отменено" in low]
+        if success and len(success) > 1:
+            return "Готово: выполнил несколько действий."
+        if success:
+            return success[-1]
+        if blocked:
+            return blocked[-1]
+        return normalized[-1]
 
     def on_reminder(self, text):
         msg = f"⏰ Напоминание: {text}"
         self.speak_msg(msg)
-        if self.telegram_bot and CONFIG_MGR.get_telegram_user_id():
-            self.telegram_bot.send_message(CONFIG_MGR.get_telegram_user_id(), msg)
+        if self.telegram_bot and self.config_mgr.get_telegram_user_id():
+            self.telegram_bot.send_message(self.config_mgr.get_telegram_user_id(), msg)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def _ai_call(self, messages):
@@ -4847,6 +5036,11 @@ class JarvisApp(
             parsed = extract_json_block(text)
             if parsed is None:
                 msg = text[:300] if text else "Не понял команду."
+                if hasattr(self, "_set_live_pipeline_step"):
+                    try:
+                        self._set_live_pipeline_step(understood="Свободный ответ", executed=msg[:120])
+                    except Exception:
+                        pass
                 db.save_command(cmd, msg)
                 if reply_callback:
                     reply_callback(msg)
@@ -4918,6 +5112,11 @@ class JarvisApp(
     def dispatch_ai_intents(self, intents, raw_cmd, reply_callback=None):
         if not intents:
             msg = "Не понял команду."
+            if hasattr(self, "_set_live_pipeline_step"):
+                try:
+                    self._set_live_pipeline_step(executed=msg)
+                except Exception:
+                    pass
             if reply_callback:
                 reply_callback(msg)
             else:
@@ -4925,7 +5124,20 @@ class JarvisApp(
             return
         if isinstance(intents, dict):
             intents = [intents]
-        for item in intents[:6]:
+        items = [self._normalize_ai_item(item) for item in (intents or [])[:6]]
+        command_actions = 0
+        for item in items:
+            try:
+                kind = normalize_text(str(item.get("type", "chat") or "chat"))
+                action = str(item.get("action", "chat") or "").strip().lower()
+                is_command = ("command" in kind) or (action in APP_OPEN_FUNCS) or (action in {"close_app", "open_dynamic_app", "search", "reminder", "history", "repeat", "time", "date", "weather", "media_pause", "media_play", "media_next", "media_prev", "volume_up", "volume_down", "shutdown", "restart_pc", "lock"})
+                if is_command and action and action != "chat":
+                    command_actions += 1
+            except Exception:
+                continue
+        multi_command_reply = command_actions > 1
+        multi_results = []
+        for item in items:
             try:
                 kind = normalize_text(str(item.get("type", "chat") or "chat"))
                 action = item.get("action", "chat").strip().lower()
@@ -4933,17 +5145,31 @@ class JarvisApp(
                 reply = item.get("reply", "").strip()
                 is_command = ("command" in kind) or (action in APP_OPEN_FUNCS) or (action in {"close_app", "open_dynamic_app", "search", "reminder", "history", "repeat", "time", "date", "weather", "media_pause", "media_play", "media_next", "media_prev", "volume_up", "volume_down", "shutdown", "restart_pc", "lock"})
                 if is_command and action and action != "chat":
-                    result = self.execute_action(action, arg, raw_cmd, speak=False, reply_callback=reply_callback)
+                    if hasattr(self, "_set_live_pipeline_step"):
+                        try:
+                            self._set_live_pipeline_step(understood=permission_action_label(action, arg))
+                        except Exception:
+                            pass
+                    result = self.execute_action(
+                        action,
+                        arg,
+                        raw_cmd,
+                        speak=False,
+                        reply_callback=None if multi_command_reply else reply_callback,
+                    )
                     if result:
+                        multi_results.append(result)
                         self.last_ai_reply = result
                         db.save_command(raw_cmd, result)
                         self._learn_from_intent(raw_cmd, action, arg, result)
-                    if reply:
+                    if reply and multi_command_reply:
+                        multi_results.append(reply)
+                    elif reply:
                         if reply_callback:
                             reply_callback(reply)
                         else:
                             self.speak_msg(reply)
-                    else:
+                    elif not multi_command_reply:
                         msg = result if result else "Не удалось выполнить команду."
                         if reply_callback:
                             reply_callback(msg)
@@ -4952,18 +5178,87 @@ class JarvisApp(
                 else:
                     if reply:
                         self.last_ai_reply = reply
+                        if hasattr(self, "_set_live_pipeline_step"):
+                            try:
+                                self._set_live_pipeline_step(understood="Свободный ответ", executed=reply[:120])
+                            except Exception:
+                                pass
                         if reply_callback:
                             reply_callback(reply)
                         else:
                             self.speak_msg(reply)
                     else:
                         msg = "Не понял команду."
+                        if hasattr(self, "_set_live_pipeline_step"):
+                            try:
+                                self._set_live_pipeline_step(executed=msg)
+                            except Exception:
+                                pass
                         if reply_callback:
                             reply_callback(msg)
                         else:
                             self.speak_msg(msg)
             except Exception as e:
                 self.report_error("Ошибка обработки ИИ", e, speak=True)
+
+        if multi_command_reply:
+            summary = self._summarize_multi_action_reply(multi_results)
+            if reply_callback:
+                reply_callback(summary)
+            else:
+                self.speak_msg(summary)
+
+    def _normalize_ai_item(self, item):
+        if not isinstance(item, dict):
+            return {"type": "chat", "action": "chat", "arg": "", "reply": ""}
+
+        supported = _supported_ai_actions()
+        action = str(item.get("action", "chat") or "chat").strip().lower()
+        arg = item.get("arg", "")
+        reply = str(item.get("reply", "") or "").strip()
+
+        if action in {"greeting", "answer", "response", "conversation", "message"}:
+            action = "chat"
+
+        if action == "browser":
+            arg_text = str(arg or "").strip()
+            arg_low = arg_text.lower()
+            if "youtube.com" in arg_low or "youtu.be" in arg_low:
+                action, arg = "youtube", ""
+            elif arg_text:
+                action = "search"
+
+        if action == "open_dynamic_app":
+            entry = get_dynamic_entry_by_key(str(arg or "")) or find_dynamic_entry(str(arg or ""))
+            if entry:
+                arg = entry["key"]
+            else:
+                app_key = find_app_key(str(arg or ""))
+                if app_key:
+                    action, arg = app_key, ""
+
+        if action == "close_app":
+            resolved_key = find_app_key(str(arg or ""))
+            if not resolved_key:
+                entry = find_dynamic_entry(str(arg or ""))
+                resolved_key = entry["key"] if entry else ""
+            if resolved_key:
+                arg = resolved_key
+
+        if action not in supported:
+            resolved_action = find_app_key(action)
+            if resolved_action:
+                action = resolved_action
+
+        if action not in supported:
+            action = "chat"
+
+        return {
+            "type": "command" if action in supported and action != "chat" else "chat",
+            "action": action,
+            "arg": arg if arg is not None else "",
+            "reply": reply,
+        }
 
     def _learn_from_intent(self, raw_cmd: str, action: str, arg: Any, result: str):
         if not CONFIG_MGR.get_self_learning_enabled():
@@ -4979,9 +5274,14 @@ class JarvisApp(
         if "не " in result_text and "выполн" not in result_text:
             return
 
-        allowed_actions = set(APP_OPEN_FUNCS.keys()) | {
-            "close_app", "search", "media_pause", "media_play", "media_next", "media_prev",
-            "volume_up", "volume_down", "time", "date", "weather", "open_dynamic_app",
+        allowed_actions = set(SUPPORTED_ACTION_KEYS) - {
+            "shutdown",
+            "restart_pc",
+            "lock",
+            "reminder",
+            "history",
+            "repeat",
+            "timur_son",
         }
         if action not in allowed_actions:
             return
@@ -5001,13 +5301,14 @@ class JarvisApp(
 
     def process_query(self, query: str, reply_callback=None) -> None:
         raw_query = str(query or "").strip()
-        if self._startup_gate_setup and not bool(str(CONFIG_MGR.get_api_key() or "").strip()):
+        self._last_user_query = raw_query
+        if self._startup_gate_setup and not bool(str(self.config_mgr.get_api_key() or "").strip()):
             msg = "Сначала завершите активацию в стартовом окне."
             if reply_callback:
                 reply_callback(msg)
             else:
                 self.root.after(0, lambda: self.add_msg(msg, "bot"))
-                self.root.after(0, self._show_embedded_activation_gate)
+                self.root.after(0, lambda: self.run_setup_wizard(True))
             return
 
         if _is_emoji_message(raw_query):
@@ -5021,6 +5322,11 @@ class JarvisApp(
         text = normalize_text(raw_query)
         if not text:
             return
+        if hasattr(self, "_set_live_pipeline_step"):
+            try:
+                self._set_live_pipeline_step(reset=True, heard=raw_query, recognized=text)
+            except Exception:
+                pass
 
         with self._process_state_lock:
             if self.processing_command:
@@ -5074,6 +5380,11 @@ class JarvisApp(
                 return
 
             for act, arg, cmd in local_actions:
+                if hasattr(self, "_set_live_pipeline_step"):
+                    try:
+                        self._set_live_pipeline_step(understood=permission_action_label(act, arg))
+                    except Exception:
+                        pass
                 res = self.execute_action(act, arg, cmd, speak=True, reply_callback=reply_callback)
                 if res:
                     self.last_ai_reply = res
@@ -5108,6 +5419,24 @@ class JarvisApp(
 
     def toggle_fs(self, e=None):
         self.is_full = not self.is_full
+        first_fullscreen_transition = not bool(getattr(self, "_fullscreen_transition_warmed", False))
+        self._fullscreen_transition_warmed = True
+        self._startup_resize_freeze_until = time.monotonic() + (0.2 if first_fullscreen_transition else 0.12)
+        self._last_resize_signature = None
+        self._workspace_resize_in_progress = True
+        try:
+            setattr(self.root, "_jarvis_resize_in_progress", True)
+        except Exception:
+            pass
+        try:
+            self._hold_resize_guard(180 if first_fullscreen_transition else 80)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_close_workspace_section_menu"):
+                self._close_workspace_section_menu()
+        except Exception:
+            pass
         if self.is_full:
             try:
                 self._normal_geometry = self.root.geometry()
@@ -5121,14 +5450,9 @@ class JarvisApp(
                 self.root.geometry(target)
             except Exception:
                 pass
-        self._apply_main_container_bounds()
-        try:
-            self.refresh_workspace_layout_mode()
-            self._update_guide_context("focus" if self._cfg().get_focus_mode_enabled() else "chat")
-        except Exception:
-            pass
-        self.on_resize()
-        self.root.after(120, lambda: self.restart_bg_anim(animated=True, retire_mode="drop"))
+        self.root.after(12, self.on_resize)
+        self.root.after(52 if first_fullscreen_transition else 36, self._on_resize_settle)
+        self.root.after(86 if first_fullscreen_transition else 52, self._prime_after_visual_transition)
 
     def shutdown(self):
         logger.info("Shutting down...")
@@ -5172,17 +5496,20 @@ class JarvisApp(
             self.telegram_bot.stop()
             self.telegram_bot = None
         if self.executor:
-            self.executor.shutdown(wait=True, cancel_futures=True)
+            self.executor.shutdown(wait=False, cancel_futures=True)
             self.executor = None
         if self.tray_icon:
             self.tray_icon.stop()
             self.tray_icon = None
         if self.tts_engine:
+            self._stop_tts_engine_quick()
+            self.tts_engine = None
+        voice_meter_thread = getattr(self, "_voice_meter_thread", None)
+        if voice_meter_thread and voice_meter_thread.is_alive():
             try:
-                self.tts_engine.stop()
+                voice_meter_thread.join(timeout=0.8)
             except Exception:
                 pass
-            self.tts_engine = None
         with self.speaking_lock:
             self._stop_active_audio_stream_locked()
         if pygame is not None:
@@ -5197,6 +5524,14 @@ class JarvisApp(
                 keyboard.remove_hotkey('win+j')
             except Exception:
                 pass
+            try:
+                keyboard.unhook_all_hotkeys()
+            except Exception:
+                pass
+            try:
+                keyboard.unhook_all()
+            except Exception:
+                pass
         db.shutdown()
         logger.info("Shutdown complete.")
 
@@ -5206,89 +5541,13 @@ class JarvisApp(
 # MAIN
 # =========================================================
 def _supported_ai_actions():
-    return set(APP_OPEN_FUNCS.keys()) | {
-        "close_app", "open_dynamic_app", "search", "reminder", "history", "repeat",
-        "time", "date", "weather", "media_pause", "media_play", "media_next", "media_prev",
-        "volume_up", "volume_down", "shutdown", "restart_pc", "lock", "chat",
-    }
-
-
-def _normalize_ai_item(self, item):
-    if not isinstance(item, dict):
-        return {"type": "chat", "action": "chat", "arg": "", "reply": ""}
-
-    supported = _supported_ai_actions()
-    kind = normalize_text(str(item.get("type", "chat") or "chat"))
-    action = str(item.get("action", "chat") or "chat").strip().lower()
-    arg = item.get("arg", "")
-    reply = str(item.get("reply", "") or "").strip()
-
-    if action in {"greeting", "answer", "response", "conversation", "message"}:
-        action = "chat"
-
-    if action == "browser":
-        arg_text = str(arg or "").strip()
-        arg_low = arg_text.lower()
-        if "youtube.com" in arg_low or "youtu.be" in arg_low:
-            action, arg = "youtube", ""
-        elif arg_text:
-            action = "search"
-
-    if action == "open_dynamic_app":
-        entry = get_dynamic_entry_by_key(str(arg or "")) or find_dynamic_entry(str(arg or ""))
-        if entry:
-            arg = entry["key"]
-        else:
-            app_key = find_app_key(str(arg or ""))
-            if app_key:
-                action, arg = app_key, ""
-
-    if action == "close_app":
-        resolved_key = find_app_key(str(arg or ""))
-        if not resolved_key:
-            entry = find_dynamic_entry(str(arg or ""))
-            resolved_key = entry["key"] if entry else ""
-        if resolved_key:
-            arg = resolved_key
-
-    if action not in supported:
-        resolved_action = find_app_key(action)
-        if resolved_action:
-            action = resolved_action
-
-    if action not in supported:
-        kind = "chat"
-        action = "chat"
-
-    return {
-        "type": "command" if action in supported and action != "chat" else "chat",
-        "action": action,
-        "arg": arg if arg is not None else "",
-        "reply": reply,
-    }
-
-
-def _patched_dispatch_ai_intents(self, intents, raw_cmd, reply_callback=None):
-    if isinstance(intents, dict):
-        intents = [intents]
-    normalized_intents = [self._normalize_ai_item(item) for item in (intents or [])[:6]]
-    return JarvisApp._base_dispatch_ai_intents(self, normalized_intents, raw_cmd, reply_callback=reply_callback)
-
-
-JarvisApp._normalize_ai_item = _normalize_ai_item
-JarvisApp._base_dispatch_ai_intents = JarvisApp.dispatch_ai_intents
-JarvisApp.dispatch_ai_intents = _patched_dispatch_ai_intents
-register_voice_runtime(JarvisApp)
-register_brain_runtime(JarvisApp, emoji_detector=_is_emoji_message)
-register_activity_runtime(JarvisApp)
-register_shell_runtime(JarvisApp)
-register_system_ui(JarvisApp, SettingsUiMixin)
+    return set(SUPPORTED_ACTION_KEYS) | {"chat"}
 
 
 if __name__ == "__main__":
     def is_already_running():
         mutex_name = "JarvisAppSingleInstanceMutex"
-        hMutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+        _mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         return ctypes.windll.kernel32.GetLastError() == 183
 
     if is_already_running():
@@ -5297,16 +5556,19 @@ if __name__ == "__main__":
 
     set_windows_app_id()
     root = tk.Tk()
-    app = JarvisApp(root)
     try:
-        root.deiconify()
-        root.state('normal')
-        root.lift()
+        root.withdraw()
     except Exception:
         pass
-    if not getattr(app, "_startup_gate_setup", False):
+    app = JarvisApp(root)
+    try:
+        root.mainloop()
+    finally:
         try:
-            root.after(100, app._show_window_main)
+            app.shutdown()
         except Exception:
             pass
-    root.mainloop()
+        try:
+            root.destroy()
+        except Exception:
+            pass

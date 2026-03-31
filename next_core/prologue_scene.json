@@ -1,0 +1,86 @@
+{
+  "name": "first_run_prologue",
+  "skippable_after_ms": 4000,
+  "total_duration_ms": 22000,
+  "style": "doors_ps1_control_hub",
+  "scenes": [
+    {
+      "id": "cold_boot",
+      "duration_ms": 2200,
+      "visual": [
+        "dark_screen",
+        "signal_line",
+        "dither_noise"
+      ],
+      "text": [
+        "BOOTING CONTROL HUB",
+        "LINKING CORE",
+        "LOADING USER CHANNEL"
+      ]
+    },
+    {
+      "id": "core_wakeup",
+      "duration_ms": 3400,
+      "visual": [
+        "hub_frame_online",
+        "panel_edges_light_up"
+      ],
+      "voice": [
+        "Связь установлена.",
+        "Я поднимаю ядро доступа и собираю ваш рабочий контур."
+      ]
+    },
+    {
+      "id": "identity",
+      "duration_ms": 4200,
+      "visual": [
+        "product_name_reveal",
+        "low_poly_mascot",
+        "subtle_terminal_noise"
+      ],
+      "voice": [
+        "Я не отдельный бот под одну задачу.",
+        "Я — единое ядро: создавать, воссоздавать, писать код, работать с Roblox, выполнять системные действия и держать проектный контекст."
+      ]
+    },
+    {
+      "id": "modes",
+      "duration_ms": 3600,
+      "visual": [
+        "mode_cards_glow",
+        "create_mode",
+        "roblox_mode",
+        "system_mode"
+      ],
+      "voice": [
+        "Режимы не конкурируют между собой.",
+        "Я поднимаю только тот контур, который нужен вам сейчас."
+      ]
+    },
+    {
+      "id": "access_gate",
+      "duration_ms": 4200,
+      "visual": [
+        "focus_on_access_panel",
+        "rest_of_hub_dimmed"
+      ],
+      "voice": [
+        "Сначала откроем доступ.",
+        "После этого вы сразу войдёте в главный хаб без лишних мастеров и всплывающих окон."
+      ]
+    },
+    {
+      "id": "enter_hub",
+      "duration_ms": 4400,
+      "visual": [
+        "chat_shell_reveal",
+        "voice_meter_online",
+        "composer_online"
+      ],
+      "voice": [
+        "Хаб готов.",
+        "Сформулируйте задачу как цель. Остальное я возьму на себя."
+      ]
+    }
+  ]
+}

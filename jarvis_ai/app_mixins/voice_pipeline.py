@@ -1,4 +1,3 @@
-import audioop
 import json
 import logging
 import re
@@ -9,8 +8,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import speech_recognition as sr
-import tkinter as tk
-from tkinter import messagebox
 
 try:
     import sounddevice as sd
@@ -18,6 +15,7 @@ except Exception:
     sd = None
 
 from ..branding import APP_LOGGER_NAME, APP_USER_AGENT
+from ..audio_runtime import audio_rms_int16
 from ..commands import detect_wake_word, normalize_text, strip_wake_word
 from ..state import CONFIG_MGR
 from ..theme import Theme
@@ -65,8 +63,11 @@ class VoicePipelineMixin:
             values["phrase_threshold"] = max(0.04, float(values.get("phrase_threshold", 0.12)) - 0.02)
             values["non_speaking_duration"] = max(0.08, float(values.get("non_speaking_duration", 0.20)) - 0.02)
         if resolved_kind == "headset" and passive_mode:
-            values["energy_threshold"] = int(max(150, float(values.get("energy_threshold", 900)) * 0.88))
-            values["phrase_threshold"] = max(0.03, float(values.get("phrase_threshold", 0.10)) - 0.01)
+            values["energy_threshold"] = int(max(120, float(values.get("energy_threshold", 900)) * 0.72))
+            values["phrase_threshold"] = max(0.02, float(values.get("phrase_threshold", 0.10)) - 0.02)
+        elif resolved_kind == "usb_mic" and passive_mode:
+            values["energy_threshold"] = int(max(120, float(values.get("energy_threshold", 900)) * 0.76))
+            values["phrase_threshold"] = max(0.02, float(values.get("phrase_threshold", 0.10)) - 0.02)
         if self.proxy_detected:
             values = self.apply_vpn_adaptation(values)
             logger.info("Applied VPN/proxy adaptation to speech recognition profile.")
@@ -142,24 +143,28 @@ class VoicePipelineMixin:
             raw = audio.get_raw_data(convert_rate=16000, convert_width=2) if audio else b""
         except Exception:
             raw = b""
-        rms = audioop.rms(raw, 2) if raw else 0
+        rms = audio_rms_int16(raw)
         duration = len(raw) / 32000.0 if raw else 0.0
         return raw, rms, duration
 
     def _audio_is_too_weak_for_stt(self, audio, manual_mode: bool = False) -> bool:
         _raw, rms, duration = self._audio_signal_stats(audio)
-        min_rms = max(26, min(110, int(float(getattr(self.recognizer, "energy_threshold", 1200) or 1200) * 0.032)))
+        threshold = int(float(getattr(self.recognizer, "energy_threshold", 1200) or 1200))
+        min_rms = max(18, min(96, int(float(threshold) * 0.024)))
         if self._cfg().get_noise_suppression_enabled():
             min_rms = max(12, min_rms - 4)
         if manual_mode:
-            min_rms = max(18, min_rms - 10)
-            min_duration = 0.20
+            min_rms = max(10, min_rms - 8)
+            min_duration = 0.16
         else:
             if self._should_use_wake_word_boost():
-                min_rms = max(14, min_rms - 12)
-            min_duration = 0.14
+                min_rms = max(7, min_rms - 12)
+                min_duration = 0.09
+            else:
+                min_rms = max(12, min_rms - 6)
+                min_duration = 0.12
         if self._cfg().get_vad_enabled():
-            min_duration = max(0.10, min_duration - 0.03)
+            min_duration = max(0.08, min_duration - 0.03)
         return duration < min_duration or rms < min_rms
 
     def _complete_manual_listen_with_status(self, text: str, tone: str = "warn", duration_ms: int = 2400):
@@ -170,7 +175,7 @@ class VoicePipelineMixin:
     def _transcribe_with_groq(self, audio) -> str:
         api_key = str(self._cfg().get_api_key() or "").strip()
         if not api_key:
-            raise sr.RequestError("Groq API key is missing.")
+            raise sr.RequestError("Ключ Groq API не задан.")
 
         wav_data = audio.get_wav_data(convert_rate=16000, convert_width=2) if audio else b""
         if not wav_data:
@@ -263,10 +268,10 @@ class VoicePipelineMixin:
             active = self._is_manual_listen_active()
             if active:
                 self.mic_pulse_state = not self.mic_pulse_state
-                self.mic_btn.config(bg="#16a34a" if self.mic_pulse_state else "#15803d", fg=Theme.MIC_ICON_FG)
+                self.mic_btn.config(bg="#16a34a" if self.mic_pulse_state else "#15803d", fg=Theme.FG)
                 self.refresh_mic_status_label("слушаю")
             else:
-                self.mic_btn.config(bg=Theme.BG_LIGHT, fg=Theme.MIC_ICON_FG)
+                self.mic_btn.config(bg=Theme.ACCENT, fg=Theme.FG)
                 self.refresh_mic_status_label()
         except Exception as e:
             logger.warning(f"mic_pulse_tick error: {e}")
@@ -275,7 +280,10 @@ class VoicePipelineMixin:
     def mic_click(self, e=None):
         if self._startup_gate_setup and not bool(str(self._cfg().get_api_key() or "").strip()):
             self.set_status("Нужна активация", "warn")
-            self._show_embedded_activation_gate()
+            try:
+                self.root.after(0, lambda: self.run_setup_wizard(True))
+            except Exception:
+                pass
             return
         now = time.monotonic()
         if self.processing_command or self._is_manual_listen_active(now) or now < self._mic_click_cooldown_until:

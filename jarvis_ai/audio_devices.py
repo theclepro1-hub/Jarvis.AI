@@ -1,9 +1,9 @@
 import ctypes
 import logging
 import re
-import shutil
 import sys
 import time
+import warnings
 from typing import Any, Dict, List, Optional
 
 try:
@@ -24,11 +24,28 @@ except Exception:
     pyaudio = None
 
 try:
-    from pydub import AudioSegment
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="'audioop' is deprecated and slated for removal in Python 3.13",
+            category=DeprecationWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work",
+            category=RuntimeWarning,
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="Couldn't find ffprobe or avprobe - defaulting to ffprobe, but may not work",
+            category=RuntimeWarning,
+        )
+        from pydub import AudioSegment
 except Exception:
     AudioSegment = None
 
 from .branding import APP_LOGGER_NAME
+from .audio_runtime import compressed_audio_decoder_available
 
 logger = logging.getLogger(APP_LOGGER_NAME)
 
@@ -186,8 +203,7 @@ def _is_secondary_audio_choice(name: str, kind: str = "output") -> bool:
 def _compressed_audio_decoder_available() -> bool:
     if AudioSegment is None:
         return False
-    probes = ("ffmpeg", "ffprobe", "avconv", "avprobe")
-    return any(shutil.which(tool) for tool in probes)
+    return compressed_audio_decoder_available()
 
 
 def _host_api_priority(host_api: str) -> int:
@@ -689,6 +705,15 @@ def pick_output_device():
         logger.warning(f"Output detection error: {e}")
     return None, None
 
+
+audio_device_family_key = _audio_device_family_key
+expand_audio_device_name = _expand_audio_device_name
+find_audio_device_entry_by_name = _find_audio_device_entry_by_name
+get_audio_device_entry = _get_audio_device_entry
+host_api_short_label = _host_api_short_label
+is_audio_garbage_name = _is_audio_garbage_name
+is_secondary_audio_choice = _is_secondary_audio_choice
+
 __all__ = [
     "_audio_device_family_key",
     "_expand_audio_device_name",
@@ -697,6 +722,13 @@ __all__ = [
     "_host_api_short_label",
     "_is_audio_garbage_name",
     "_is_secondary_audio_choice",
+    "audio_device_family_key",
+    "expand_audio_device_name",
+    "find_audio_device_entry_by_name",
+    "get_audio_device_entry",
+    "host_api_short_label",
+    "is_audio_garbage_name",
+    "is_secondary_audio_choice",
     "list_input_device_entries_safe",
     "list_microphone_names_safe",
     "list_output_device_entries_safe",

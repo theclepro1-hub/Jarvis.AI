@@ -1,7 +1,8 @@
-import os
+﻿import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from .action_permissions import DEFAULT_PERMISSION_MODES
 from .branding import app_brand_name, app_title
 from .commands import make_dynamic_key, normalize_text
 from .state import CONFIG_MGR
@@ -21,10 +22,17 @@ class SetupWizard:
         self.parent = parent_app
         self.activation_only = bool(activation_only)
         self.window = tk.Toplevel(parent_app.root)
-        self.window.title(app_title("Первая настройка", with_version=True))
+        try:
+            self.window.withdraw()
+        except Exception:
+            pass
+        self.window.title(
+            app_title("Регистрация и активация" if self.activation_only else "Первая настройка", with_version=True)
+        )
         self.window.configure(bg=Theme.BG_LIGHT)
-        self.window.geometry("760x620" if self.activation_only else "820x800")
-        self.window.resizable(False, False)
+        self.window.geometry("980x720" if self.activation_only else "1120x860")
+        self.window.minsize(940 if self.activation_only else 1040, 700 if self.activation_only else 820)
+        self.window.resizable(True, True)
         self.window.transient(parent_app.root)
         self.window.grab_set()
         self.window.protocol("WM_DELETE_WINDOW", self._on_close_request)
@@ -44,6 +52,11 @@ class SetupWizard:
             ("1 - Базовый", "normal"),
             ("2 - Усиленный", "boost"),
             ("3 - Максимальный", "aggressive"),
+        ]
+        self.dangerous_mode_items = [
+            ("Всегда спрашивать", "ask"),
+            ("Разрешать один раз", "ask_once"),
+            ("Всегда выполнять", "trust"),
         ]
 
         self.groq_var = tk.StringVar(value=CONFIG_MGR.get_api_key())
@@ -84,9 +97,24 @@ class SetupWizard:
         self.active_listening_var = tk.BooleanVar(value=bool(CONFIG_MGR.get("active_listening_enabled", True)))
         self.free_chat_var = tk.BooleanVar(value=bool(CONFIG_MGR.get("free_chat_mode", False)))
         self.test_command_var = tk.StringVar(value="привет")
+        current_dangerous_modes = dict(CONFIG_MGR.get("dangerous_action_modes", {}) or {})
+        dangerous_values = [
+            str(current_dangerous_modes.get(category, DEFAULT_PERMISSION_MODES[category]) or "").strip().lower()
+            for category in DEFAULT_PERMISSION_MODES
+        ]
+        dangerous_mode_key = "ask"
+        if dangerous_values and all(value == "trust" for value in dangerous_values):
+            dangerous_mode_key = "trust"
+        elif dangerous_values and all(value == "ask_once" for value in dangerous_values):
+            dangerous_mode_key = "ask_once"
+        self.dangerous_mode_var = tk.StringVar(
+            value=next((label for label, key in self.dangerous_mode_items if key == dangerous_mode_key), self.dangerous_mode_items[0][0])
+        )
 
         self._create_widgets()
         self._render_step()
+        self._sync_to_parent_geometry()
+        self._show_ready()
 
     def _on_close_request(self):
         if self.parent._startup_gate_setup and not str(self.groq_var.get() or "").strip():
@@ -136,15 +164,52 @@ class SetupWizard:
         except Exception:
             self._wizard_clipboard_bound = False
 
+    def _sync_to_parent_geometry(self):
+        try:
+            self.parent.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            parent_state = str(self.parent.root.state() or "").lower()
+        except Exception:
+            parent_state = "normal"
+        if parent_state == "zoomed":
+            try:
+                self.window.state("zoomed")
+                return
+            except Exception:
+                pass
+        try:
+            geometry = str(self.parent.root.winfo_geometry() or "").strip()
+        except Exception:
+            geometry = ""
+        if geometry and "x" in geometry and "+" in geometry:
+            try:
+                self.window.geometry(geometry)
+            except Exception:
+                pass
+
+    def _show_ready(self):
+        try:
+            self.window.update_idletasks()
+        except Exception:
+            pass
+        try:
+            self.window.deiconify()
+            self.window.lift()
+            self.window.focus_force()
+        except Exception:
+            pass
+
     def _create_widgets(self):
         root = tk.Frame(self.window, bg=Theme.BG_LIGHT)
         root.pack(fill="both", expand=True, padx=18, pady=18)
 
         head = tk.Frame(root, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
         head.pack(fill="x")
-        title_text = f"Активация {app_brand_name()}" if self.activation_only else "Мастер первого запуска"
+        title_text = "Регистрация и активация" if self.activation_only else "Мастер первого запуска"
         subtitle_text = (
-            "Введите ключи и сразу откроется приложение."
+            "Введите ключ и базовые данные, затем приложение откроется без промежуточных экранов."
             if self.activation_only
             else "Пройдем 3 шага и сразу можно работать."
         )
@@ -247,10 +312,19 @@ class SetupWizard:
         tk.Button(row, text="Обзор", command=lambda: self.browse_file(var), bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=10).pack(side="right")
         return entry
 
+    def _row_combo(self, parent, label: str, var: tk.StringVar, values):
+        row = tk.Frame(parent, bg=Theme.CARD_BG)
+        row.pack(fill="x", pady=4)
+        tk.Label(row, text=label, bg=Theme.CARD_BG, fg=Theme.FG, width=24, anchor="w").pack(side="left")
+        box = ttk.Combobox(row, textvariable=var, values=list(values), state="readonly", style="Jarvis.TCombobox")
+        box.pack(side="left", fill="x", expand=True)
+        self.parent._bind_selector_wheel_guard(box)
+        return box
+
     def _render_step(self):
         self._clear_body()
         if self.activation_only:
-            self.step_label.configure(text="Активация")
+            self.step_label.configure(text="Регистрация")
             self.prev_btn.configure(state="disabled")
             self.next_btn.configure(text="Активировать и открыть чат")
             if self.skip_btn.winfo_manager():
@@ -270,12 +344,13 @@ class SetupWizard:
             body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
             self._row_entry(body, "Groq API ключ", self.groq_var, show="•", paste_button=True)
             self._row_entry(body, "Telegram Bot Token", self.tg_token_var, show="•", paste_button=True)
-            self._row_entry(body, "Telegram user ID", self.tg_id_var, paste_button=True)
+            self._row_entry(body, "ID пользователя Telegram", self.tg_id_var, paste_button=True)
             self._row_entry(body, "Имя пользователя", self.user_name_var)
             self._row_entry(body, "Логин пользователя", self.user_login_var)
+            self._row_combo(body, "Опасные действия", self.dangerous_mode_var, [item[0] for item in self.dangerous_mode_items])
             tk.Label(
                 body,
-                text="Вставка работает через Ctrl+V, Shift+Insert и правую кнопку мыши.\nБез API-ключа чат не откроется.",
+                text="Вставка работает через Ctrl+V, Shift+Insert и правую кнопку мыши.\nБез API-ключа чат не откроется. Здесь же можно сразу выбрать, как JARVIS должен вести себя с опасными командами.",
                 bg=Theme.CARD_BG,
                 fg=Theme.FG_SECONDARY,
                 justify="left",
@@ -288,12 +363,13 @@ class SetupWizard:
             body.pack(fill="both", expand=True, padx=10, pady=(0, 10))
             self._row_entry(body, "Groq API ключ", self.groq_var, show="•")
             self._row_entry(body, "Telegram Bot Token", self.tg_token_var, show="•")
-            self._row_entry(body, "Telegram user ID", self.tg_id_var)
+            self._row_entry(body, "ID пользователя Telegram", self.tg_id_var)
             self._row_entry(body, "Имя пользователя", self.user_name_var)
             self._row_entry(body, "Логин пользователя", self.user_login_var)
+            self._row_combo(body, "Опасные действия", self.dangerous_mode_var, [item[0] for item in self.dangerous_mode_items])
             tk.Label(
                 body,
-                text="Telegram можно заполнить позже. Для голоса и чата достаточно API ключа.",
+                text="Telegram можно заполнить позже. Для голоса и чата достаточно API ключа. Режим опасных действий можно оставить безопасным и поменять позже в настройках.",
                 bg=Theme.CARD_BG,
                 fg=Theme.FG_SECONDARY,
                 justify="left",
@@ -379,7 +455,7 @@ class SetupWizard:
 
             note = tk.Label(
                 body,
-                text="Сначала выберите микрофон и прогоните обучение слышимости. Так JARVIS будет заметно лучше реагировать на голос и wake-word.",
+                text="Сначала выберите микрофон и прогоните обучение слышимости. Так JARVIS будет заметно лучше реагировать на голос и слово активации.",
                 bg=Theme.CARD_BG,
                 fg=Theme.FG_SECONDARY,
                 justify="left",
@@ -623,6 +699,8 @@ class SetupWizard:
             "active_listening_enabled": bool(self.active_listening_var.get()),
             "free_chat_mode": bool(self.free_chat_var.get()),
         }
+        dangerous_mode_key = next((key for label, key in self.dangerous_mode_items if label == self.dangerous_mode_var.get().strip()), "ask")
+        updates["dangerous_action_modes"] = {category: dangerous_mode_key for category in DEFAULT_PERMISSION_MODES}
         CONFIG_MGR.set_many(updates)
         if self.sync_games_var.get():
             try:

@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JARVIS NEXT // Control Hub Prototype</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell" id="app" data-scene="cold_boot">
+      <div class="backdrop-grid" aria-hidden="true"></div>
+      <div class="backdrop-glow" aria-hidden="true"></div>
+      <div class="backdrop-noise" aria-hidden="true"></div>
+      <div class="backdrop-scanlines" aria-hidden="true"></div>
+
+      <main class="viewport">
+        <section class="prologue-shell" id="prologue-shell" aria-live="polite">
+          <header class="prologue-header">
+            <div class="identity-block">
+              <p class="eyebrow">JARVIS NEXT // control hub</p>
+              <p class="status-line">
+                <span class="status-dot"></span>
+                <span id="status-label">Холодный запуск</span>
+              </p>
+            </div>
+
+            <div class="header-actions">
+              <div class="timeline-panel">
+                <span class="timeline-label">Пролог</span>
+                <span class="timeline-counter" id="scene-counter">01 / 06</span>
+              </div>
+              <button class="ghost-button skip-button" id="skip-button" hidden>
+                Пропустить
+              </button>
+            </div>
+          </header>
+
+          <section class="prologue-stage">
+            <div class="visual-chamber">
+              <div class="signal-rail" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+
+              <div class="chamber-frame">
+                <div class="core-orb" aria-hidden="true">
+                  <span class="orb-ring orb-ring-a"></span>
+                  <span class="orb-ring orb-ring-b"></span>
+                  <span class="orb-pulse"></span>
+                </div>
+
+                <div class="mode-grid" id="mode-grid" aria-label="Режимы JARVIS">
+                  <article class="mode-card">
+                    <span class="mode-tag">CREATE</span>
+                    <strong>Создание</strong>
+                    <p>Собираю форму, стиль и интерактив.</p>
+                  </article>
+                  <article class="mode-card">
+                    <span class="mode-tag">ROBLOX</span>
+                    <strong>Roblox</strong>
+                    <p>Luau, ассеты, хаб, физика и игровые петли.</p>
+                  </article>
+                  <article class="mode-card">
+                    <span class="mode-tag">SYSTEM</span>
+                    <strong>Система</strong>
+                    <p>Выполняю действия и держу рабочий контур.</p>
+                  </article>
+                </div>
+
+                <div class="mascot-stage" id="mascot-stage">
+                  <div class="mascot-frame">
+                    <img
+                      src="../../assets/noob2.png"
+                      alt="Нубик JARVIS"
+                      class="mascot-image"
+                      id="mascot-image"
+                    >
+                  </div>
+                  <div class="mascot-caption">
+                    <p class="mascot-title">Проводник хаба</p>
+                    <p class="mascot-copy">Появляется в прологе и не забирает себе главный экран.</p>
+                  </div>
+                </div>
+
+                <div class="access-panel" id="access-panel">
+                  <div class="access-head">
+                    <p class="eyebrow">Доступ</p>
+                    <strong>Единый вход без лишнего мастера</strong>
+                  </div>
+                  <div class="access-fields">
+                    <label>
+                      <span>Канал пользователя</span>
+                      <div class="fake-input">PRIMARY-LINK // READY</div>
+                    </label>
+                    <label>
+                      <span>Контур безопасности</span>
+                      <div class="fake-input">SAFE / DRY-RUN / RECOVERY</div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="narrative-column">
+              <div class="story-shell">
+                <p class="eyebrow" id="scene-eyebrow">BOOT SEQUENCE</p>
+                <h1 class="display-title" id="scene-title">Холодный запуск</h1>
+                <p class="lead-copy" id="scene-lead">
+                  Я поднимаю ядро, проверяю канал пользователя и готовлю операторский хаб к работе.
+                </p>
+
+                <div class="scene-log-panel">
+                  <div class="log-head">
+                    <span>Трасса запуска</span>
+                    <span id="scene-id">cold_boot</span>
+                  </div>
+                  <ul class="scene-log" id="scene-log"></ul>
+                </div>
+
+                <div class="voice-panel">
+                  <div class="voice-panel-head">
+                    <span>Голос ядра</span>
+                    <span id="voice-state">Слышу контур</span>
+                  </div>
+                  <div class="voice-meter">
+                    <div class="voice-meter-fill" id="voice-meter-fill"></div>
+                  </div>
+                  <p class="voice-line" id="voice-line">Связь установлена.</p>
+                  <p class="voice-echo" id="voice-echo">
+                    Я поднимаю ядро доступа и собираю ваш рабочий контур.
+                  </p>
+                </div>
+              </div>
+
+              <footer class="prologue-footer">
+                <div class="progress-panel">
+                  <div class="progress-labels">
+                    <span>Статус</span>
+                    <span id="time-left">22.0с</span>
+                  </div>
+                  <div class="progress-track">
+                    <span class="progress-fill" id="progress-fill"></span>
+                  </div>
+                </div>
+                <p class="footer-hint" id="footer-hint">
+                  После пролога хаб откроется сразу в рабочем режиме.
+                </p>
+              </footer>
+            </div>
+          </section>
+        </section>
+
+        <section class="hub-shell" id="hub-shell">
+          <header class="hub-header">
+            <div class="hub-title-block">
+              <p class="eyebrow">JARVIS NEXT // live hub</p>
+              <h2>Контрольный хаб</h2>
+              <p class="hub-intro">
+                Один мозг, один shell, много контуров. Вся тяжёлая механика спрятана под задачей.
+              </p>
+            </div>
+
+            <div class="hub-header-tools">
+              <div class="meter-chip">
+                <span class="meter-chip-label">Голос</span>
+                <div class="voice-meter compact-meter">
+                  <div class="voice-meter-fill" id="hub-voice-meter-fill"></div>
+                </div>
+              </div>
+              <button class="ghost-button menu-button" id="menu-button">Меню</button>
+            </div>
+          </header>
+
+          <section class="hub-workspace">
+            <aside class="mode-rail" aria-label="Контуры">
+              <button class="rail-button rail-active">Чат</button>
+              <button class="rail-button">Roblox</button>
+              <button class="rail-button">Код</button>
+              <button class="rail-button">Система</button>
+              <button class="rail-button">Поиск</button>
+            </aside>
+
+            <section class="chat-pane">
+              <div class="chat-pane-head">
+                <div>
+                  <p class="eyebrow">Главный контур</p>
+                  <h3>Диалог и исполнение</h3>
+                </div>
+                <div class="head-badges">
+                  <span class="head-badge">Asset-first</span>
+                  <span class="head-badge">Dry-run</span>
+                  <span class="head-badge">Recovery</span>
+                </div>
+              </div>
+
+              <div class="chat-feed" id="chat-feed">
+                <article class="message message-system">
+                  <p class="message-role">Система</p>
+                  <p class="message-copy">
+                    Хаб запущен. Катсцена закончена, теперь можно продолжать сценарий и держать весь контекст в одном окне.
+                  </p>
+                </article>
+                <article class="message message-assistant">
+                  <p class="message-role">JARVIS</p>
+                  <p class="message-copy">
+                    Сформулируйте цель. Если задача опасная, я сначала покажу сухой прогон. Если есть готовые ассеты, предложу их раньше генерации.
+                  </p>
+                </article>
+              </div>
+
+              <div class="suggestion-strip">
+                <button class="suggestion-button" data-suggestion="Собери новый хаб для Roblox в стиле DOORS + PS1">
+                  Новый хаб для Roblox
+                </button>
+                <button class="suggestion-button" data-suggestion="Покажи готовые ассеты для лесной сцены и кабины">
+                  Найти ассеты сцены
+                </button>
+                <button class="suggestion-button" data-suggestion="Подготовь системный dry-run перед опасным действием">
+                  Сухой прогон действия
+                </button>
+              </div>
+            </section>
+
+            <aside class="context-pane">
+              <section class="context-block">
+                <p class="eyebrow">Текущий фокус</p>
+                <h4>Пролог готов</h4>
+                <p>
+                  Визуальная рамка зафиксирована: тревожный операторский хаб, низкополигональный проводник и жёсткая рабочая поверхность без визуальной каши.
+                </p>
+              </section>
+
+              <section class="context-block">
+                <p class="eyebrow">Контуры</p>
+                <ul class="context-list">
+                  <li>Создание и воссоздание сцен</li>
+                  <li>Roblox, Luau и игровые петли</li>
+                  <li>Код, поиск, system actions</li>
+                </ul>
+              </section>
+
+              <section class="context-block mascot-context">
+                <img src="../../assets/noob2.png" alt="Нубик JARVIS" class="context-mascot">
+                <div>
+                  <p class="eyebrow">Проводник</p>
+                  <p>Нубик живёт внутри мира продукта и не ломает рабочую ось.</p>
+                </div>
+              </section>
+            </aside>
+          </section>
+
+          <footer class="composer-shell">
+            <form class="composer" id="composer-form">
+              <label class="composer-label" for="composer-input">Цель или команда</label>
+              <div class="composer-row">
+                <textarea
+                  id="composer-input"
+                  rows="3"
+                  placeholder="Например: собери новую сцену для Roblox, найди ассеты деревьев, а потом напиши Luau-каркас."
+                ></textarea>
+                <div class="composer-actions">
+                  <button class="ghost-button" type="button" id="dry-run-demo">Dry-run</button>
+                  <button class="primary-button" type="submit">Отправить</button>
+                </div>
+              </div>
+            </form>
+          </footer>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,61 @@
+{
+  "theme": "doors_ps1_control_hub",
+  "colors": {
+    "bg": "#090b0f",
+    "bg_elevated": "#11161c",
+    "panel": "#151b22",
+    "panel_alt": "#1a232c",
+    "border": "#283241",
+    "text": "#f2f5f7",
+    "text_muted": "#9eacba",
+    "accent_ok": "#4fd68b",
+    "accent_warn": "#e0a84e",
+    "accent_danger": "#c94747",
+    "accent_signal": "#6fdbb8"
+  },
+  "typography": {
+    "display": {
+      "family": "Bahnschrift SemiBold",
+      "size": 34
+    },
+    "title": {
+      "family": "Segoe UI Semibold",
+      "size": 18
+    },
+    "body": {
+      "family": "Segoe UI",
+      "size": 14
+    },
+    "small": {
+      "family": "Segoe UI",
+      "size": 12
+    },
+    "mono": {
+      "family": "Consolas",
+      "size": 12
+    }
+  },
+  "layout": {
+    "shell_padding": 16,
+    "card_padding": 16,
+    "sidebar_width_wide": 236,
+    "chat_min_ratio_wide": 0.68,
+    "compact_threshold": 1320,
+    "compact_exit_threshold": 1380,
+    "composer_height": 104
+  },
+  "shape": {
+    "radius": 4,
+    "border_width": 1
+  },
+  "motion": {
+    "panel_slide_ms": 180,
+    "boot_fade_ms": 240,
+    "status_pulse_ms": 900
+  },
+  "effects": {
+    "dither": true,
+    "scanline_hint": true,
+    "heavy_shadow": false
+  }
+}

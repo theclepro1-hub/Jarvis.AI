@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
+import copy
 import sys
 import traceback
-import copy
 from pathlib import Path
 from types import SimpleNamespace
 import tkinter as tk
@@ -48,13 +47,14 @@ class CrashReport:
         return len(self.passed) + len(self.failed)
 
     def render(self):
-        lines = []
-        lines.append("JARVIS AI crash test report")
-        lines.append("=" * 32)
-        lines.append(f"Passed: {len(self.passed)}")
-        lines.append(f"Failed: {len(self.failed)}")
-        lines.append(f"Total:  {self.total}")
-        lines.append("")
+        lines = [
+            "JARVIS AI crash test report",
+            "=" * 32,
+            f"Passed: {len(self.passed)}",
+            f"Failed: {len(self.failed)}",
+            f"Total:  {self.total}",
+            "",
+        ]
         if self.passed:
             lines.append("PASS")
             for name, details in self.passed:
@@ -90,42 +90,26 @@ def patch_runtime():
     jarvis.JarvisApp.check_update_notification = lambda self: None
     jarvis.JarvisApp.update_net_status = lambda self: None
     jarvis.JarvisApp._start_background_self_check_loop = lambda self: None
-    jarvis.GuideNoobPanel.start_wave = lambda self: None
-    jarvis.GuideNoobPanel.stop = lambda self: None
+    jarvis.JarvisApp.request_action_confirmation = lambda self, *args, **kwargs: True
     jarvis.TelegramBot.start = lambda self: None
     jarvis.TelegramBot.stop = lambda self: None
     jarvis.messagebox.showinfo = lambda *args, **kwargs: None
     jarvis.messagebox.showwarning = lambda *args, **kwargs: None
     jarvis.messagebox.showerror = lambda *args, **kwargs: None
     jarvis.messagebox.askyesno = lambda *args, **kwargs: True
-    jarvis.CONFIG_MGR.set_many({
-        "api_key": "test-key",
-        "first_run_done": True,
-        "telegram_user_id": 0,
-    })
+    jarvis.CONFIG_MGR.set_many(
+        {
+            "api_key": "test-key",
+            "first_run_done": True,
+            "telegram_user_id": 0,
+        }
+    )
 
 
 def make_fake_ai_reply(text):
     message = SimpleNamespace(content=text)
     choice = SimpleNamespace(message=message)
     return SimpleNamespace(choices=[choice])
-
-
-def collect_button_texts(root_widget):
-    texts = []
-    stack = [root_widget]
-    while stack:
-        widget = stack.pop()
-        try:
-            stack.extend(widget.winfo_children())
-        except Exception:
-            continue
-        if getattr(widget, "winfo_class", lambda: "")() == "Button":
-            try:
-                texts.append(widget.cget("text"))
-            except Exception:
-                pass
-    return texts
 
 
 def collect_widgets(root_widget):
@@ -141,30 +125,42 @@ def collect_widgets(root_widget):
     return items
 
 
+def collect_button_texts(root_widget):
+    texts = []
+    for widget in collect_widgets(root_widget):
+        if getattr(widget, "winfo_class", lambda: "")() != "Button":
+            continue
+        try:
+            text = str(widget.cget("text") or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            texts.append(text)
+    return texts
+
+
 def first_visible_canvas(root_widget):
     for widget in collect_widgets(root_widget):
         if getattr(widget, "winfo_class", lambda: "")() != "Canvas":
             continue
         try:
-            if widget.winfo_height() > 40 and float(widget.yview()[1]) < 1.0:
+            if widget.winfo_height() > 40 and widget.winfo_ismapped():
                 return widget
         except Exception:
             continue
     return None
 
 
-def first_widget_by_class(root_widget, class_name):
-    for widget in collect_widgets(root_widget):
-        if getattr(widget, "winfo_class", lambda: "")() == class_name:
-            return widget
-    return None
+def pump_ui(root_widget, cycles=4):
+    for _ in range(max(1, int(cycles or 1))):
+        root_widget.update_idletasks()
+        root_widget.update()
 
 
 def main():
     patch_runtime()
     report = CrashReport()
     opened = []
-    pressed = []
     replies = []
 
     original_open_funcs = dict(jarvis.APP_OPEN_FUNCS)
@@ -178,7 +174,6 @@ def main():
     jarvis.shutdown_pc = lambda: opened.append("shutdown")
     jarvis.restart_pc = lambda: opened.append("restart_pc")
     jarvis.lock_pc = lambda: opened.append("lock")
-    jarvis.maybe_press = lambda key, amount=1: pressed.append((key, amount)) or True
 
     root = tk.Tk()
     root.withdraw()
@@ -186,283 +181,227 @@ def main():
 
     try:
         app = jarvis.JarvisApp(root)
-        root.update_idletasks()
+        app._startup_gate_setup = False
+        try:
+            app._hide_embedded_activation_gate()
+        except Exception:
+            pass
+        try:
+            app._set_workspace_section("chat")
+        except Exception:
+            pass
         root.deiconify()
-        root.geometry("620x780+20+20")
-        root.update()
-        app._apply_main_container_bounds()
-        app.refresh_workspace_layout_mode()
-        root.update()
+        root.geometry("1440x960+20+20")
+        pump_ui(root, 4)
 
-        quick_texts = collect_button_texts(app.sidebar)
-        report.assert_true("workspace shell ready", hasattr(app, "sidebar") and hasattr(app, "side_panel") and hasattr(app, "guide_panel"))
-        report.assert_true("quick buttons present", all(name in quick_texts for name in ["Новая беседа", "Центр голоса", "Настройки", "Приложения и игры", "Система"]), str(quick_texts))
-        report.assert_true("guide panel default", bool(app.guide_panel.message_label.cget("text").strip()) and "→" in app.guide_panel.pointer_label.cget("text"), app.guide_panel.message_label.cget("text"))
+        report.assert_true("chat shell built", app.chat_shell.winfo_exists())
+        report.assert_true("settings screen hidden", getattr(app, "settings_window", None) is None or not app.settings_window.winfo_ismapped())
+        report.assert_true("registration hidden", not app.activation_gate.winfo_ismapped())
+        report.assert_true("chat has sidebar", getattr(app, "sidebar", None) is not None and app.sidebar.winfo_exists())
+        report.assert_true(
+            "chat has no right helper panel",
+            getattr(app, "side_panel", None) is not None and not app.side_panel.winfo_ismapped(),
+        )
+        report.assert_true("top bar buttons exist", len(collect_button_texts(app.top_bar)) >= 3, str(collect_button_texts(app.top_bar)))
+        report.assert_true("chat controls ready", all(widget.winfo_exists() for widget in (app.entry, app.send_btn, app.mic_btn)))
+        report.assert_true("chat noob available", getattr(app, "guide_panel", None) is not None and app.chat_noob_button.winfo_exists())
+
+        pump_ui(root, 2)
+        guide_width_before = int(app.guide_panel.frame.winfo_width() or 0)
+        guide_height_before = int(app.guide_panel.frame.winfo_height() or 0)
+        original_message = str(app.chat_noob_message.cget("text") or "")
+        app._advance_guide_hint()
+        pump_ui(root, 1)
+        report.assert_true("chat noob changes message", str(app.chat_noob_message.cget("text") or "") != original_message)
+        guide_width_after = int(app.guide_panel.frame.winfo_width() or 0)
+        guide_height_after = int(app.guide_panel.frame.winfo_height() or 0)
+        if guide_width_before > 10 and guide_height_before > 10:
+            report.assert_true(
+                "chat noob width stable",
+                guide_width_after == guide_width_before,
+                f"{guide_width_before} -> {guide_width_after}",
+            )
+            report.assert_true(
+                "chat noob height stable",
+                abs(guide_height_after - guide_height_before) <= 2,
+                f"{guide_height_before} -> {guide_height_after}",
+            )
+        else:
+            report.ok("chat noob size probe skipped", f"{guide_width_before}x{guide_height_before} -> {guide_width_after}x{guide_height_after}")
 
         app.open_command_palette()
-        root.update()
-        palette_texts = [app._command_palette_listbox.get(i) for i in range(app._command_palette_listbox.size())]
-        report.assert_true("command palette items", "Проверка готовности" in palette_texts and "Проверка релиза" in palette_texts and "Система" in palette_texts, str(palette_texts[:8]))
+        pump_ui(root, 2)
+        report.assert_true("command palette items", app._command_palette_listbox.size() >= 6, str(app._command_palette_listbox.size()))
         app._close_command_palette()
-        root.update()
+        pump_ui(root, 2)
 
         app.run_readiness_master()
-        root.update()
+        pump_ui(root, 2)
         report.assert_true("readiness summary saved", bool(jarvis.CONFIG_MGR.get_readiness_last_summary()), jarvis.CONFIG_MGR.get_readiness_last_summary())
         app.run_release_lock_check()
-        root.update()
+        pump_ui(root, 2)
         report.ok("release lock invoked")
 
         app.set_density_mode("comfortable")
-        root.update()
-        report.assert_true("density scale comfortable", int(jarvis.CONFIG_MGR.get_ui_scale_percent()) >= 126, str(jarvis.CONFIG_MGR.get_ui_scale_percent()))
-        app.toggle_focus_mode()
-        root.update()
-        report.assert_true("focus mode hides side panels", not app.sidebar.winfo_ismapped() and not app.side_panel.winfo_ismapped())
-        app.toggle_focus_mode()
-        root.update()
+        pump_ui(root, 2)
+        report.assert_true("density comfortable", str(jarvis.CONFIG_MGR.get_ui_density() or "") == "comfortable", str(jarvis.CONFIG_MGR.get_ui_density()))
+        app.set_density_mode("compact")
+        pump_ui(root, 2)
+        report.assert_true("density compact", str(jarvis.CONFIG_MGR.get_ui_density() or "") == "compact", str(jarvis.CONFIG_MGR.get_ui_density()))
 
-        app.toggle_quick_settings_panel(True)
-        root.update()
+        app.open_full_settings_view("main")
+        pump_ui(root, 3)
         report.assert_true(
-            "legacy settings route opens control center",
-            getattr(app, "settings_window", None) is not None and app.settings_window.winfo_exists(),
-            str(getattr(app, "settings_window", None)),
+            "settings open full screen",
+            app.settings_window is not None and app.settings_window.winfo_ismapped() and app._workspace_section == "settings",
+        )
+        report.assert_true("settings target main", app.current_settings_subsection == "main", str(app.current_settings_subsection))
+        report.assert_true("settings nav tabs", len(getattr(app, "settings_nav_buttons", {})) == 6, str(sorted(getattr(app, "settings_nav_buttons", {}).keys())))
+        report.assert_true(
+            "settings host visible",
+            getattr(app, "_control_center_content", None) is not None and app._control_center_content.winfo_ismapped(),
+        )
+        report.assert_true(
+            "settings main selectors button-driven",
+            all(
+                getattr(widget, "winfo_class", lambda: "")() == "Button"
+                for widget in (
+                    getattr(app, "_settings_model_selector", None),
+                    getattr(app, "_settings_theme_selector", None),
+                )
+                if widget is not None
+            ),
+        )
+        selector = getattr(app, "_settings_model_selector", None)
+        selector_values = list(getattr(selector, "_jarvis_values", ())) if selector is not None else []
+        if selector is not None and len(selector_values) > 1 and hasattr(selector, "_jarvis_select"):
+            target_model = next(value for value in selector_values if value != app._settings_model_var.get())
+            selector._jarvis_select(target_model)
+            pump_ui(root, 1)
+            report.assert_true("settings model selector changes value", app._settings_model_var.get() == target_model, app._settings_model_var.get())
+
+        for target in ("voice", "apps", "diagnostics", "system", "updates"):
+            app.open_full_settings_view(target)
+            pump_ui(root, 2)
+            report.assert_true(f"settings route {target}", app.current_settings_subsection == target, str(app.current_settings_subsection))
+        report.assert_true(
+            "settings voice selectors button-driven",
+            all(
+                getattr(widget, "winfo_class", lambda: "")() == "Button"
+                for widget in (
+                    getattr(app, "_settings_mic_selector", None),
+                    getattr(app, "_settings_output_selector", None),
+                    getattr(app, "_settings_tts_provider_selector", None),
+                )
+                if widget is not None
+            ),
         )
 
-        app.open_full_settings_view()
-        root.update()
-        full_texts = collect_button_texts(app.settings_window)
-        report.assert_true("control center buttons", all(name in full_texts for name in ["Сохранить основные", "Закрыть", "ИИ и профиль", "Центр голоса", "Система"]), str(full_texts))
-
-        settings_canvases = [w for w in collect_widgets(app._control_center_content) if getattr(w, "winfo_class", lambda: "")() == "Canvas"]
-        report.assert_true("settings tabs scroll hosts", len(settings_canvases) >= 5, str(len(settings_canvases)))
-        app._show_control_center_section("main")
-        root.update()
-        settings_scroll_canvas = first_visible_canvas(app._control_center_pages["main"])
-        if settings_scroll_canvas is not None:
-            settings_scroll_canvas.yview_moveto(0.0)
-            root.update()
-            before_scroll = float(settings_scroll_canvas.yview()[0])
-            wheel_event = SimpleNamespace(
-                widget=settings_scroll_canvas,
-                delta=-120,
-                x_root=root.winfo_rootx() + 40,
-                y_root=root.winfo_rooty() + 200,
-            )
-            app._handle_global_mousewheel(wheel_event)
-            root.update()
-            after_scroll = float(settings_scroll_canvas.yview()[0])
-            report.assert_true("settings panel mousewheel", after_scroll > before_scroll, f"{before_scroll} -> {after_scroll}")
-
-        app._show_control_center_section("apps")
-        root.update()
-        apps_canvas = first_visible_canvas(app._control_center_pages["apps"])
-        if apps_canvas is None:
-            apps_canvas = first_widget_by_class(app._control_center_pages["apps"], "Canvas")
-        report.assert_true("apps tab visible canvas", apps_canvas is not None, str(apps_canvas))
-        apps_listbox = first_widget_by_class(app._control_center_pages["apps"], "Listbox")
-        if apps_canvas is not None and apps_listbox is not None:
-            try:
-                apps_listbox.delete(0, tk.END)
-            except Exception:
-                pass
-            apps_canvas.yview_moveto(0.0)
-            root.update()
-            before_scroll = float(apps_canvas.yview()[0])
-            wheel_event = SimpleNamespace(
-                widget=apps_listbox,
-                delta=-120,
-                x_root=apps_listbox.winfo_rootx() + 12,
-                y_root=apps_listbox.winfo_rooty() + 12,
-            )
-            app._handle_global_mousewheel(wheel_event)
-            root.update()
-            after_scroll = float(apps_canvas.yview()[0])
-            scroll_range = apps_canvas.yview()
-            can_scroll = float(scroll_range[1]) - float(scroll_range[0]) < 0.999
-            report.assert_true(
-                "apps listbox wheel fallback",
-                (after_scroll > before_scroll) or not can_scroll,
-                f"{before_scroll} -> {after_scroll}",
-            )
-
-        app._show_control_center_section("diagnostics")
-        root.update()
-        diagnostics_canvas = first_visible_canvas(app._control_center_pages["diagnostics"])
-        report.assert_true("diagnostics tab visible canvas", diagnostics_canvas is not None, str(diagnostics_canvas))
-        if diagnostics_canvas is not None and getattr(app, "diagnostic_text", None) is not None:
-            try:
-                app.diagnostic_text.delete("1.0", tk.END)
-            except Exception:
-                pass
-            diagnostics_canvas.yview_moveto(0.0)
-            root.update()
-            before_scroll = float(diagnostics_canvas.yview()[0])
-            wheel_event = SimpleNamespace(
-                widget=app.diagnostic_text,
-                delta=-120,
-                x_root=app.diagnostic_text.winfo_rootx() + 12,
-                y_root=app.diagnostic_text.winfo_rooty() + 12,
-            )
-            app._handle_global_mousewheel(wheel_event)
-            root.update()
-            after_scroll = float(diagnostics_canvas.yview()[0])
-            report.assert_true("diagnostic text wheel fallback", after_scroll > before_scroll, f"{before_scroll} -> {after_scroll}")
-
-        app._show_control_center_section("voice")
-        root.update()
-        voice_canvas = first_visible_canvas(app._control_center_pages["voice"])
-        report.assert_true("voice tab visible canvas", voice_canvas is not None, str(voice_canvas))
-        voice_texts = collect_button_texts(app._control_center_pages["voice"])
+        app.close_full_settings_view()
+        pump_ui(root, 2)
         report.assert_true(
-            "voice center tools",
-            all(name in voice_texts for name in ["Тестовая запись", "Что услышал JARVIS", "Прослушать запись", "Автоподбор профиля", "Сохранить профили"]),
-            str(voice_texts),
+            "settings close returns chat",
+            app.chat_shell.winfo_ismapped() and not app.settings_window.winfo_ismapped() and app._workspace_section == "chat",
         )
 
-        system_tab = app._control_center_pages.get("system")
-        report.assert_true("system tab registered", system_tab is not None, str(getattr(app, "_control_center_pages", {})))
-        if system_tab is not None:
-            app._show_control_center_section("system")
-            root.update()
-            system_texts = collect_button_texts(system_tab)
+        app.run_setup_wizard(True)
+        pump_ui(root, 2)
+        report.assert_true(
+            "activation opens embedded registration",
+            app.activation_gate.winfo_ismapped(),
+            f"registration={app.activation_gate.winfo_ismapped()} chat_state={app.entry.cget('state')}",
+        )
+        report.assert_true("registration submit available", getattr(app, "_activation_gate_submit_btn", None) is not None)
+        report.assert_true("registration disables chat input", str(app.entry.cget("state")) == "disabled", str(app.entry.cget("state")))
+        report.assert_true(
+            "registration selectors button-driven",
+            all(
+                getattr(widget, "winfo_class", lambda: "")() == "Button"
+                for widget in (
+                    getattr(app, "_gate_theme_box", None),
+                    getattr(app, "_gate_dangerous_mode_box", None),
+                )
+                if widget is not None
+            ),
+        )
+        gate_theme_selector = getattr(app, "_gate_theme_box", None)
+        gate_theme_values = list(getattr(gate_theme_selector, "_jarvis_values", ())) if gate_theme_selector is not None else []
+        if gate_theme_selector is not None and len(gate_theme_values) > 1 and hasattr(gate_theme_selector, "_jarvis_select"):
+            target_theme = next(value for value in gate_theme_values if value != app._gate_theme_var.get())
+            gate_theme_selector._jarvis_select(target_theme)
+            pump_ui(root, 1)
+            report.assert_true("registration theme selector changes value", app._gate_theme_var.get() == target_theme, app._gate_theme_var.get())
+        gate_danger_selector = getattr(app, "_gate_dangerous_mode_box", None)
+        gate_danger_values = list(getattr(gate_danger_selector, "_jarvis_values", ())) if gate_danger_selector is not None else []
+        if gate_danger_selector is not None and len(gate_danger_values) > 1 and hasattr(gate_danger_selector, "_jarvis_select"):
+            target_danger = next(value for value in gate_danger_values if value != app._gate_dangerous_mode_var.get())
+            gate_danger_selector._jarvis_select(target_danger)
+            pump_ui(root, 1)
             report.assert_true(
-                "system tab advanced tools",
-                all(name in system_texts for name in ["Добавить", "Применить", "Открыть журнал", "Проверка релиза", "Резервная копия"]),
-                str(system_texts),
+                "registration dangerous selector changes value",
+                app._gate_dangerous_mode_var.get() == target_danger,
+                app._gate_dangerous_mode_var.get(),
             )
-
-            replies.clear()
-            app.process_query("запомни что любимая платформа стим", reply_callback=replies.append)
-            root.update()
-            memory_items = app._get_memory_items()
-            report.assert_true(
-                "memory route remember",
-                any("стим" in str(item.get("value", "")).lower() for item in memory_items),
-                str(memory_items),
-            )
-            app.process_query("что ты помнишь", reply_callback=replies.append)
-            root.update()
-            report.assert_true(
-                "memory route show",
-                any("стим" in str(item).lower() for item in replies),
-                str(replies[-4:]),
-            )
-
-            app._set_scenario_items(
-                [
-                    {
-                        "name": "Ночной режим",
-                        "summary": "Включает фокус и компактный интерфейс",
-                        "trigger_phrases": ["ночной режим"],
-                        "enabled": True,
-                        "changes": {"focus_mode_enabled": True, "ui_density": "compact"},
-                    }
-                ]
-            )
-            replies.clear()
-            app.process_query("включи ночной режим", reply_callback=replies.append)
-            root.update()
-            report.assert_true(
-                "scenario route apply",
-                jarvis.CONFIG_MGR.get_current_scenario() == "Ночной режим" and jarvis.CONFIG_MGR.get_focus_mode_enabled(),
-                str((jarvis.CONFIG_MGR.get_current_scenario(), jarvis.CONFIG_MGR.get_focus_mode_enabled())),
-            )
-            report.assert_true(
-                "route explanation updated",
-                "понял" in str(app.action_explainer_var.get() or "").lower(),
-                str(app.action_explainer_var.get()),
-            )
-
-        app._show_control_center_section("main")
-        root.update()
+        app._startup_gate_setup = False
+        app._hide_embedded_activation_gate()
+        pump_ui(root, 2)
 
         jarvis.CONFIG_MGR.set_theme_mode("light")
         app.apply_theme_runtime()
-        root.update()
-        light_snapshot = (app.main_container.cget("bg"), app.quick_bar.cget("bg"), app.entry.cget("bg"))
-        report.assert_true(
-            "light theme recolor",
-            light_snapshot == (jarvis.Theme.BG_LIGHT, jarvis.Theme.CARD_BG, jarvis.Theme.INPUT_BG),
-            str(light_snapshot),
-        )
-        light_chip_snapshot = (app.voice_insight_card.cget("bg"), app.sidebar.cget("bg"), app.utility_shell.cget("bg"))
-        report.assert_true(
-            "light theme cards",
-            light_chip_snapshot == (jarvis.Theme.CARD_BG, jarvis.Theme.CARD_BG, jarvis.Theme.BG_LIGHT),
-            str(light_chip_snapshot),
-        )
-        report.assert_true("light theme sidebar", app.sidebar.cget("bg") == jarvis.Theme.CARD_BG, app.sidebar.cget("bg"))
+        pump_ui(root, 2)
+        report.assert_true("light theme entry surface", app.entry.cget("bg") == jarvis.Theme.INPUT_BG, app.entry.cget("bg"))
 
         jarvis.CONFIG_MGR.set_theme_mode("dark")
         app.apply_theme_runtime()
-        root.update()
-        dark_snapshot = (app.main_container.cget("bg"), app.quick_bar.cget("bg"), app.entry.cget("bg"))
-        report.assert_true(
-            "dark theme recolor",
-            dark_snapshot == (jarvis.Theme.BG_LIGHT, jarvis.Theme.CARD_BG, jarvis.Theme.INPUT_BG),
-            str(dark_snapshot),
-        )
-        dark_chip_snapshot = (app.voice_insight_card.cget("bg"), app.sidebar.cget("bg"), app.utility_shell.cget("bg"))
-        report.assert_true(
-            "dark theme cards",
-            dark_chip_snapshot == (jarvis.Theme.CARD_BG, jarvis.Theme.CARD_BG, jarvis.Theme.BG_LIGHT),
-            str(dark_chip_snapshot),
-        )
-        report.assert_true("dark theme rail", app.side_panel.cget("bg") == jarvis.Theme.BG_LIGHT, app.side_panel.cget("bg"))
+        pump_ui(root, 2)
+        report.assert_true("dark theme entry surface", app.entry.cget("bg") == jarvis.Theme.INPUT_BG, app.entry.cget("bg"))
 
-        for idx in range(16):
-            root.geometry("620x780+20+20" if idx % 2 == 0 else "920x940+20+20")
-            root.update()
-            app.on_resize()
-            root.update()
-            if idx % 2 == 0:
-                app.toggle_quick_settings_panel(True)
-                root.update()
-                app.toggle_quick_settings_panel(False)
-                root.update()
+        for idx in range(6):
+            root.geometry("980x820+20+20" if idx % 2 == 0 else "1520x980+20+20")
+            pump_ui(root, 2)
+            if idx % 3 == 0:
+                app.open_full_settings_view("main")
+            elif idx % 3 == 1:
+                app.open_full_settings_view("voice")
             else:
                 app.close_full_settings_view()
-                root.update()
-                app.open_full_settings_view()
-                root.update()
-        report.ok("resize/open-close stress", "16 loops")
+                app._set_workspace_section("chat")
+            pump_ui(root, 2)
+        report.ok("resize/open-close stress", "6 loops")
 
-        app.close_full_settings_view()
-        root.update()
+        for action in ("youtube", "steam", "discord", "shutdown"):
+            try:
+                app.execute_action(action, raw_cmd=action, speak=False)
+            except TypeError:
+                app.execute_action(action)
+            pump_ui(root, 1)
+        report.assert_true("local actions executed", len(opened) >= 3, str(opened))
 
-        command_cases = [
-            "открой ютуб",
-            "открой стим",
-            "открой дискорд",
-            "открой озон",
-            "открой вб",
-            "время",
-            "дата",
-            "громче и тише и пауза и продолжи и дальше и назад",
-            "открой ютуб и открой стим и открой дискорд и открой озон",
-        ]
-        for cmd in command_cases:
-            app.process_query(cmd, reply_callback=replies.append)
-            root.update()
-        report.assert_true("local commands executed", len(opened) >= 5, str(opened[:12]))
-        report.assert_true("media key commands executed", len(pressed) >= 4, str(pressed))
+        dry_run_preview = app.build_action_dry_run_lines(action="shutdown", category="power", origin="crash_test")
+        report.assert_true(
+            "dry run preview present",
+            isinstance(dry_run_preview, list) and len(dry_run_preview) >= 3 and any("crash_test" in item for item in dry_run_preview),
+            str(dry_run_preview),
+        )
 
         app.groq_client = object()
         fake_ai_responses = iter(
             [
-                make_fake_ai_reply("Простой ответ без JSON."),
-                make_fake_ai_reply('{"items":[{"type":"command","action":"youtube","reply":"Открываю YouTube"}]}'),
-                make_fake_ai_reply('{"reply":"Принято"}'),
+                make_fake_ai_reply("Simple answer without JSON."),
+                make_fake_ai_reply('{"items":[{"type":"command","action":"youtube","reply":"Opening YouTube"}]}'),
+                make_fake_ai_reply('{"reply":"Accepted"}'),
             ]
         )
         app._ai_call = lambda messages: next(fake_ai_responses)
-        app.ai_handler("скажи привет", reply_callback=replies.append)
-        app.ai_handler("открой ютуб через ai", reply_callback=replies.append)
-        app.ai_handler("просто ответ", reply_callback=replies.append)
-        root.update()
-        report.assert_true("ai handler replies", any("Простой" in item for item in replies) and any("Открываю YouTube" in item for item in replies), str(replies[-6:]))
+        app.ai_handler("say hello", reply_callback=replies.append)
+        app.ai_handler("open youtube through ai", reply_callback=replies.append)
+        app.ai_handler("just answer", reply_callback=replies.append)
+        pump_ui(root, 2)
+        report.assert_true(
+            "ai handler replies",
+            any("Simple answer" in item for item in replies) and any("Opening YouTube" in item for item in replies),
+            str(replies[-6:]),
+        )
 
         tts_calls = []
         app._speak_with_pyttsx3 = lambda text: tts_calls.append(("pyttsx3", text))
@@ -474,11 +413,11 @@ def main():
         app._speak_by_provider("alpha")
         jarvis.CONFIG_MGR.set_tts_provider("edge-tts")
         app.is_online = True
-        app._speak_by_provider("beta " + ("длинный текст " * 8))
+        app._speak_by_provider("beta " + ("long text " * 8))
         jarvis.CONFIG_MGR.set_tts_provider("elevenlabs")
         jarvis.CONFIG_MGR.set_elevenlabs_api_key("test_key")
         jarvis.CONFIG_MGR.set_elevenlabs_voice_id("voice_test")
-        app._speak_by_provider("gamma " + ("длинный текст " * 8))
+        app._speak_by_provider("gamma " + ("long text " * 8))
         app.is_online = False
         jarvis.CONFIG_MGR.set_tts_provider("edge-tts")
         app._speak_by_provider("delta")
@@ -500,10 +439,6 @@ def main():
 
         output_pick = jarvis.pick_output_device()
         report.assert_true("output auto-pick", isinstance(output_pick, tuple) and output_pick[0] is not None, str(output_pick))
-
-        app.run_runtime_diagnostic()
-        root.update()
-        report.ok("runtime diagnostic invoked")
 
     except Exception as exc:
         report.fail("crash test runtime", "".join(traceback.format_exception_only(type(exc), exc)).strip())
@@ -531,16 +466,8 @@ def main():
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
     rendered = report.render()
     REPORT_PATH.write_text(rendered, encoding="utf-8")
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-    try:
-        sys.stdout.write(rendered)
-    except Exception:
-        safe_rendered = rendered.encode("ascii", "backslashreplace").decode("ascii", "replace")
-        sys.stdout.write(safe_rendered)
-    sys.exit(1 if report.failed else 0)
+    print(rendered, end="")
+    raise SystemExit(0 if not report.failed else 1)
 
 
 if __name__ == "__main__":

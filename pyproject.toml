@@ -1,0 +1,14 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+  "build",
+  "dist",
+  "_installer_out",
+  "next_core",
+  "publish_tools/github_bundle",
+  "release",
+]
+
+[tool.ruff.lint]
+select = ["E722", "F401", "F811", "F821", "F841"]

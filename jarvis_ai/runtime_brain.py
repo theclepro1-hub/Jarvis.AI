@@ -1,8 +1,9 @@
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from tkinter import messagebox
 
 from .brain_router import build_action_explanation, route_query
 from .commands import SIMPLE_BATCH_ACTIONS, SPLIT_PATTERN, normalize_text
-from .scenario_engine import apply_scenario_changes, normalize_scenarios, scenario_digest
+from .scenario_engine import apply_scenario_changes, find_auto_scenarios, normalize_scenarios, scenario_digest
 from .smart_memory import (
     find_memory_items,
     format_memory_summary,
@@ -100,22 +101,43 @@ def _handle_memory_route(self, route, raw_text: str = "") -> str:
     items = self._get_memory_items()
     intent = str(route.get("intent", "") or "").strip().lower()
     if intent == "remember":
+        write_mode = str(self._cfg().get_memory_write_mode() or "always").strip().lower()
+        scope = str(route.get("scope") or "").strip().lower()
+        combined_text = normalize_text(" ".join([str(route.get("title") or ""), str(route.get("value") or raw_text)]))
+        memory_avoid_patterns = [normalize_text(item) for item in (self._cfg().get_memory_avoid_patterns() or []) if str(item or "").strip()]
+        if combined_text and any(pattern and pattern in combined_text for pattern in memory_avoid_patterns):
+            return "Пропустил запись: пользователь запретил запоминать такие формулировки."
         payload = {
             "title": route.get("title") or raw_text[:80],
             "value": route.get("value") or raw_text,
-            "scope": route.get("scope") or "personal",
+            "scope": scope or ("temporary" if write_mode == "temporary_first" else "personal"),
             "kind": route.get("kind") or "fact",
             "tags": route.get("tags") or [],
-            "pinned": str(route.get("scope") or "").strip().lower() == "pinned",
+            "pinned": scope == "pinned",
+            "why": route.get("why") or "Пользователь явно попросил сохранить это в память.",
+            "source": route.get("source") or "chat",
         }
+        if write_mode == "ask":
+            title = str(payload.get("title") or "new item").strip()
+            detail = str(payload.get("value") or "").strip()
+            preview = detail[:180] + ("..." if len(detail) > 180 else "")
+            allowed = messagebox.askyesno(
+                "Память JARVIS",
+                f"Сохранить в память: {title}?\n\n{preview}",
+                parent=getattr(self, "root", None),
+            )
+            if not allowed:
+                return "Сохранение памяти отменено."
         updated = upsert_memory_item(items, payload)
         self._set_memory_items(updated)
-        return "Запомнил."
+        if payload.get("scope") == "temporary":
+            return "Сохранил во временную память."
+        return "Сохранил в память."
     if intent == "forget":
         query = str(route.get("query", "") or "").strip()
         matches = find_memory_items(items, query)
         if not matches:
-            return "Не нашел такой записи в памяти."
+            return "Подходящая запись памяти не найдена."
         updated = items
         for item in matches[:1]:
             updated = remove_memory_item(updated, item.get("id"))
@@ -146,6 +168,29 @@ def _handle_scenario_route(self, route) -> str:
     return message
 
 
+def _auto_apply_matching_scenarios(self):
+    items = self._get_scenario_items()
+    matches = find_auto_scenarios(self, items)
+    if not matches:
+        self._last_auto_scenario_id = ""
+        return
+    target = matches[0]
+    target_id = str(target.get("id", "") or "").strip()
+    current_name = str(self._cfg().get_current_scenario() or "").strip()
+    if target_id and getattr(self, "_last_auto_scenario_id", "") == target_id and current_name == str(target.get("name", "") or "").strip():
+        return
+    result = self._handle_scenario_route({"scenario": target})
+    self._last_auto_scenario_id = target_id
+    try:
+        self.set_status_temp(f"Авто-сценарий: {target.get('name')}", "ok", duration_ms=2400)
+    except Exception:
+        pass
+    try:
+        self.add_msg(result, "bot")
+    except Exception:
+        pass
+
+
 def _compose_ai_query(self, cmd: str) -> str:
     chunks = []
     memory_text = memory_digest(self._get_memory_items(), limit=6)
@@ -169,12 +214,12 @@ def make_process_query(emoji_detector):
     def _patched_process_query(self, query: str, reply_callback=None) -> None:
         raw_query = str(query or "").strip()
         if self._startup_gate_setup and not bool(str(CONFIG_MGR.get_api_key() or "").strip()):
-            msg = "Сначала завершите активацию в стартовом окне."
+            msg = "Сначала завершите активацию в разделе «Основное»."
             if reply_callback:
                 reply_callback(msg)
             else:
                 self.root.after(0, lambda: self.add_msg(msg, "bot"))
-                self.root.after(0, self._show_embedded_activation_gate)
+                self.root.after(0, lambda: self.open_full_settings_view("main"))
             return
 
         if emoji_detector and emoji_detector(raw_query):
@@ -209,18 +254,18 @@ def make_process_query(emoji_detector):
                     self.executor.submit(self.execute_action, route.get("action"), route.get("arg"), cmd, False, None)
                     for cmd, route in routed
                 ]
-                any_ok = False
+                results = []
                 for fut in futures:
                     try:
                         res = fut.result(timeout=7)
                         if res:
-                            any_ok = True
+                            results.append(res)
                             self.last_ai_reply = res
                     except FutureTimeoutError:
                         pass
                     except Exception as exc:
                         self.report_error("Ошибка пакетной команды", exc, speak=True)
-                msg = "Выполнено!" if any_ok else "Не удалось выполнить команды."
+                msg = self._summarize_multi_action_reply(results)
                 if reply_callback:
                     reply_callback(msg)
                 else:
@@ -228,12 +273,22 @@ def make_process_query(emoji_detector):
                 self.set_status("Готов", "ok")
                 return
 
+            local_only_multi = len(routed) > 1 and all(str(route.get("route", "") or "").strip().lower() == "local" for _, route in routed)
+            local_only_results = []
             for cmd, route in routed:
                 route_name = str(route.get("route", "") or "").strip().lower()
-                self._announce_route_explanation(route, reply_callback=reply_callback)
+                if not local_only_multi:
+                    self._announce_route_explanation(route, reply_callback=reply_callback)
                 if route_name == "local":
-                    res = self.execute_action(route.get("action"), route.get("arg"), cmd, speak=True, reply_callback=reply_callback)
+                    res = self.execute_action(
+                        route.get("action"),
+                        route.get("arg"),
+                        cmd,
+                        speak=not local_only_multi,
+                        reply_callback=None if local_only_multi else reply_callback,
+                    )
                     if res:
+                        local_only_results.append(res)
                         self.last_ai_reply = res
                         db.save_command(cmd, res)
                     continue
@@ -260,6 +315,12 @@ def make_process_query(emoji_detector):
 
                 self.ai_handler(self._compose_ai_query(cmd), reply_callback=reply_callback)
 
+            if local_only_multi:
+                msg = self._summarize_multi_action_reply(local_only_results)
+                if reply_callback:
+                    reply_callback(msg)
+                else:
+                    self.speak_msg(msg)
             self.set_status("Готов", "ok")
         finally:
             with self._process_state_lock:
@@ -276,6 +337,7 @@ def register_brain_runtime(app_cls, emoji_detector=None):
     app_cls._set_scenario_items = _set_scenario_items
     app_cls._handle_memory_route = _handle_memory_route
     app_cls._handle_scenario_route = _handle_scenario_route
+    app_cls._auto_apply_matching_scenarios = _auto_apply_matching_scenarios
     app_cls._compose_ai_query = _compose_ai_query
     app_cls.process_query = make_process_query(emoji_detector)
 

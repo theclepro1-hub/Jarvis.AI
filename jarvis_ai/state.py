@@ -7,12 +7,13 @@ import threading
 import time
 from typing import Any, Dict, List
 
+from .action_permissions import DEFAULT_PERMISSION_MODES, normalize_permission_modes
 from .branding import APP_LOGGER_NAME
 from .release_meta import DEFAULT_GITHUB_REPO, DEFAULT_RELEASE_API_URL
 from .storage import config_path, db_path, prompts_dir
 
 logger = logging.getLogger(APP_LOGGER_NAME)
-CONFIG_SCHEMA_VERSION = 4
+CONFIG_SCHEMA_VERSION = 5
 
 LOCAL_APPDATA = os.getenv("LOCALAPPDATA", os.path.expanduser("~\\AppData\\Local"))
 ROAMING_APPDATA = os.getenv("APPDATA", os.path.expanduser("~\\AppData\\Roaming"))
@@ -149,6 +150,7 @@ class ConfigManager:
             "theme_mode": "dark",
             "ui_density": "comfortable",
             "focus_mode_enabled": False,
+            "workspace_view_mode": "normal",
             "advanced_tabs_enabled": True,
             "empty_state_hints_enabled": True,
             "helper_guides_enabled": True,
@@ -193,6 +195,9 @@ class ConfigManager:
             "last_control_center_section": "main",
             "human_log_entries": [],
             "action_history_entries": [],
+            "dangerous_action_modes": dict(DEFAULT_PERMISSION_MODES),
+            "memory_write_mode": "always",
+            "memory_avoid_patterns": [],
             "plugin_pack_last_path": "",
             "fullscreen_layout": "mission_control",
             "update_trusted_hosts": [
@@ -292,6 +297,10 @@ class ConfigManager:
 
         if not isinstance(cfg.get("focus_mode_enabled"), bool):
             cfg["focus_mode_enabled"] = bool(cfg.get("focus_mode_enabled", False))
+        workspace_view_mode = str(cfg.get("workspace_view_mode", "normal") or "normal").strip().lower()
+        if workspace_view_mode not in {"normal", "diagnostic", "focus"}:
+            workspace_view_mode = "normal"
+        cfg["workspace_view_mode"] = workspace_view_mode
         if not isinstance(cfg.get("advanced_tabs_enabled"), bool):
             cfg["advanced_tabs_enabled"] = bool(cfg.get("advanced_tabs_enabled", True))
         if not isinstance(cfg.get("empty_state_hints_enabled"), bool):
@@ -617,6 +626,26 @@ class ConfigManager:
         if not isinstance(cfg.get("self_learning_enabled"), bool):
             cfg["self_learning_enabled"] = bool(cfg.get("self_learning_enabled", True))
 
+        cfg["dangerous_action_modes"] = normalize_permission_modes(cfg.get("dangerous_action_modes", {}))
+
+        memory_write_mode = str(cfg.get("memory_write_mode", "always") or "always").strip().lower()
+        if memory_write_mode not in {"always", "ask", "temporary_first"}:
+            memory_write_mode = "always"
+        cfg["memory_write_mode"] = memory_write_mode
+
+        raw_memory_avoid = cfg.get("memory_avoid_patterns", [])
+        if not isinstance(raw_memory_avoid, list):
+            raw_memory_avoid = []
+        seen_patterns = set()
+        normalized_patterns = []
+        for item in raw_memory_avoid:
+            pattern = str(item or "").strip().lower()
+            if not pattern or pattern in seen_patterns:
+                continue
+            seen_patterns.add(pattern)
+            normalized_patterns.append(pattern[:120])
+        cfg["memory_avoid_patterns"] = normalized_patterns[-80:]
+
         cfg["config_version"] = CONFIG_SCHEMA_VERSION
 
     def save(self):
@@ -741,6 +770,12 @@ class ConfigManager:
     def set_ui_density(self, mode): self.set("ui_density", str(mode or "comfortable").strip().lower())
     def get_focus_mode_enabled(self): return bool(self.get("focus_mode_enabled", False))
     def set_focus_mode_enabled(self, enabled): self.set("focus_mode_enabled", bool(enabled))
+    def get_workspace_view_mode(self): return self.get("workspace_view_mode", "normal")
+    def set_workspace_view_mode(self, value):
+        raw = str(value or "normal").strip().lower()
+        if raw not in {"normal", "diagnostic", "focus"}:
+            raw = "normal"
+        self.set("workspace_view_mode", raw)
     def get_advanced_tabs_enabled(self): return bool(self.get("advanced_tabs_enabled", True))
     def set_advanced_tabs_enabled(self, enabled): self.set("advanced_tabs_enabled", bool(enabled))
     def get_empty_state_hints_enabled(self): return bool(self.get("empty_state_hints_enabled", True))
@@ -822,6 +857,26 @@ class ConfigManager:
     def set_human_log_entries(self, items): self.set("human_log_entries", items if isinstance(items, list) else [])
     def get_action_history_entries(self): return self.get("action_history_entries", [])
     def set_action_history_entries(self, items): self.set("action_history_entries", items if isinstance(items, list) else [])
+    def get_dangerous_action_modes(self): return normalize_permission_modes(self.get("dangerous_action_modes", dict(DEFAULT_PERMISSION_MODES)))
+    def set_dangerous_action_modes(self, value): self.set("dangerous_action_modes", normalize_permission_modes(value))
+    def get_memory_write_mode(self): return self.get("memory_write_mode", "always")
+    def set_memory_write_mode(self, value):
+        raw = str(value or "always").strip().lower()
+        if raw not in {"always", "ask", "temporary_first"}:
+            raw = "always"
+        self.set("memory_write_mode", raw)
+    def get_memory_avoid_patterns(self): return self.get("memory_avoid_patterns", [])
+    def set_memory_avoid_patterns(self, items):
+        raw_items = items if isinstance(items, list) else []
+        cleaned = []
+        seen = set()
+        for item in raw_items:
+            pattern = str(item or "").strip().lower()
+            if not pattern or pattern in seen:
+                continue
+            seen.add(pattern)
+            cleaned.append(pattern[:120])
+        self.set("memory_avoid_patterns", cleaned[-80:])
     def get_device_profile_mode(self): return self.get("device_profile_mode", "auto")
     def set_device_profile_mode(self, value): self.set("device_profile_mode", str(value or "auto").strip().lower())
     def get_device_profile_overrides(self): return self.get("device_profile_overrides", dict(self.default_config["device_profile_overrides"]))

@@ -38,6 +38,8 @@ def normalize_memory_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "scope": scope,
                 "pinned": bool(item.get("pinned", False) or scope == "pinned"),
                 "tags": tags[:8],
+                "why": str(item.get("why", "") or "").strip()[:220],
+                "source": str(item.get("source", "") or "chat").strip()[:48],
                 "created_at": str(item.get("created_at", "") or _stamp()).strip()[:32],
                 "last_used_at": str(item.get("last_used_at", "") or "").strip()[:32],
             }
@@ -130,6 +132,8 @@ def parse_memory_command(text: str) -> Optional[Dict[str, Any]]:
                 "value": value[:400],
                 "scope": scope,
                 "kind": "fact",
+                "why": "Пользователь попросил запомнить это в чате.",
+                "source": "chat",
             }
     return None
 

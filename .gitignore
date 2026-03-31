@@ -2,6 +2,12 @@ __pycache__/
 *.pyc
 *.pyo
 *.log
+*.tmp
+probe_*.png
+tmp_*.png
+win_*_region.png
+after_patch_*.png
+.codex_close_probe.*
 
 .codex/
 build/
@@ -9,5 +15,6 @@ dist/
 _installer_out/
 release/
 publish_tools/github_bundle/
+output/playwright/
 
 jarvis_ai_2.exe

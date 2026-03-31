@@ -81,12 +81,12 @@ def apply_device_listening_tuning(
         tuned["non_speaking_duration"] = max(0.10, float(tuned.get("non_speaking_duration", 0.2)) - 0.02)
 
     if passive_mode:
-        tuned["energy_threshold"] = int(max(220, float(tuned.get("energy_threshold", 1200)) * 0.66))
+        tuned["energy_threshold"] = int(max(170, float(tuned.get("energy_threshold", 1200)) * 0.58))
         tuned["dynamic_energy_adjustment_damping"] = max(0.015, float(tuned.get("dynamic_energy_adjustment_damping", 0.05)) - 0.015)
-        tuned["dynamic_energy_ratio"] = max(1.0, float(tuned.get("dynamic_energy_ratio", 1.5)) - 0.20)
+        tuned["dynamic_energy_ratio"] = max(1.0, float(tuned.get("dynamic_energy_ratio", 1.5)) - 0.24)
         tuned["pause_threshold"] = min(0.38, float(tuned.get("pause_threshold", 0.35)) + 0.01)
-        tuned["phrase_threshold"] = max(0.04, float(tuned.get("phrase_threshold", 0.15)) - 0.05)
-        tuned["non_speaking_duration"] = max(0.08, float(tuned.get("non_speaking_duration", 0.2)) - 0.05)
+        tuned["phrase_threshold"] = max(0.03, float(tuned.get("phrase_threshold", 0.15)) - 0.06)
+        tuned["non_speaking_duration"] = max(0.07, float(tuned.get("non_speaking_duration", 0.2)) - 0.06)
 
     return tuned
 
@@ -107,13 +107,13 @@ def device_adaptation_tags(
     elif kind == "built_in":
         tags.append("встроенный микрофон")
     if passive_mode and wake_word_boost:
-        tags.append("wake boost")
+        tags.append("усиление слова активации")
     elif passive_mode:
-        tags.append("passive listen")
+        tags.append("пассивное прослушивание")
     if proxy_detected:
         tags.append("VPN/Proxy")
     if safe_mode:
-        tags.append("safe mode")
+        tags.append("безопасный режим")
     return tags or ["базовый профиль"]
 
 

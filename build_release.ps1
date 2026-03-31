@@ -5,6 +5,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+try {
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = $utf8NoBom
+    [Console]::OutputEncoding = $utf8NoBom
+    $OutputEncoding = $utf8NoBom
+    chcp 65001 > $null
+}
+catch {
+}
 
 function Step([string]$Message) {
     Write-Host "[build-2.0] $Message" -ForegroundColor Cyan
@@ -125,11 +134,14 @@ try {
     $issPath = Join-Path $root "JarvisAI.iss"
     $changelogPath = Join-Path $root "CHANGELOG.md"
     $notesScript = Join-Path $root "scripts\sync_release_notes.py"
+    $versionCheckScript = Join-Path $root "scripts\check_version_consistency.py"
     $unitChecksScript = Join-Path $root "scripts\unit_checks.py"
     $crashTestScript = Join-Path $root "scripts\crash_test.py"
     $smokeCheckScript = Join-Path $root "scripts\release_smoke_check.py"
     $updatesJsonPath = Join-Path $root "updates.json"
     $releaseDir = Join-Path $root "release"
+    $distDir = Join-Path $root "dist"
+    $buildDir = Join-Path $root "build"
     $installerBuildDir = Join-Path $root "_installer_out"
     $readmePath = Join-Path $root "README.md"
 
@@ -155,9 +167,38 @@ try {
     $portableStageDir = Join-Path $releaseDir ("portable\" + $portableBaseName)
     $portableZipName = "$portableBaseName.zip"
     $portableZipPath = Join-Path $releaseDir $portableZipName
+    $portableStageRoot = Join-Path $releaseDir "portable"
 
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     New-Item -ItemType Directory -Path $installerBuildDir -Force | Out-Null
+    foreach ($staleDir in @($distDir, $buildDir)) {
+        if (Test-Path $staleDir) {
+            Step "Remove stale build directory: $staleDir"
+            Remove-Item $staleDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    foreach ($staleFile in @(
+        (Join-Path $releaseDir $exeName),
+        (Join-Path $releaseDir $installerName),
+        $portableZipPath
+    )) {
+        if (Test-Path $staleFile) {
+            Step "Remove stale release artifact: $staleFile"
+            Remove-Item $staleFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if (Test-Path $portableStageRoot) {
+        Get-ChildItem -Path $portableStageRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne $portableBaseName } |
+            ForEach-Object {
+                Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            }
+    }
+    Get-ChildItem -Path $releaseDir -Filter "JARVIS_AI_2_portable_v*.zip" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne $portableZipName } |
+        ForEach-Object {
+            Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+        }
 
     Step "Detected version: $version"
     Step "Executable: $exeName"
@@ -181,8 +222,14 @@ try {
     Update-InnoSetupVersion -IssPath $issPath -Version $version
     $env:PYGAME_HIDE_SUPPORT_PROMPT = "1"
     $env:PYTHONWARNINGS = "ignore::RuntimeWarning"
+    $env:PYTHONUTF8 = "1"
+    $env:PYTHONIOENCODING = "utf-8"
 
-& $pythonExe -B @pythonPrefixArgs -m py_compile $jarvisPy $brandingPath $crashTestScript $unitChecksScript $smokeCheckScript
+    Step "Check version consistency"
+    & $pythonExe -B @pythonPrefixArgs $versionCheckScript
+    if ($LASTEXITCODE -ne 0) { throw "Version consistency check failed." }
+
+    & $pythonExe -B @pythonPrefixArgs -m py_compile $jarvisPy $brandingPath $crashTestScript $unitChecksScript $smokeCheckScript
     if ($LASTEXITCODE -ne 0) { throw "Python compile check failed." }
 
     Step "Run unit checks"
@@ -230,7 +277,7 @@ try {
     $existingUpdates["executable_name"] = $exeName
     $existingUpdates["build_utc"] = $nowUtc
     if (-not $existingUpdates.Contains("notes") -or [string]::IsNullOrWhiteSpace([string]$existingUpdates["notes"])) {
-        $existingUpdates["notes"] = "Независимый релиз JARVIS AI 2.0: отдельные данные пользователя, новый release-контур и дополнительный модульный распил."
+        $existingUpdates["notes"] = "Release ${version}: shell, voice, settings and release metadata were rebuilt for the current publish cycle."
     }
 
     $existingUpdates | ConvertTo-Json -Depth 12 | Set-Content $updatesJsonPath -Encoding UTF8
@@ -241,6 +288,17 @@ try {
         & $pythonExe -B @pythonPrefixArgs $notesScript --version $version --changelog $changelogPath --updates-json $updatesJsonPath --release-notes $releaseNotesPath
         if ($LASTEXITCODE -ne 0) {
             Warn "Release notes sync failed, but build continues."
+        }
+        elseif (Test-Path $updatesJsonPath) {
+            try {
+                $syncedUpdates = Get-Content $updatesJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($syncedUpdates -and $syncedUpdates.PSObject.Properties.Name -contains "notes") {
+                    $existingUpdates["notes"] = [string]$syncedUpdates.notes
+                }
+            }
+            catch {
+                Warn "Could not reload synced release notes from updates.json."
+            }
         }
     }
 
@@ -376,11 +434,13 @@ try {
             url = "https://github.com/$RepoSlug/releases/download/v$version/$installerName"
         }
     }
-    $releaseFiles += [ordered]@{
-        name = $portableZipName
-        path = $portableZipName
-        size = if (Test-Path $portableZipPath) { [int64](Get-Item $portableZipPath).Length } else { 0 }
-        url = "https://github.com/$RepoSlug/releases/download/v$version/$portableZipName"
+    if (-not ($releaseFiles | Where-Object { $_.name -eq $portableZipName })) {
+        $releaseFiles += [ordered]@{
+            name = $portableZipName
+            path = $portableZipName
+            size = if (Test-Path $portableZipPath) { [int64](Get-Item $portableZipPath).Length } else { 0 }
+            url = "https://github.com/$RepoSlug/releases/download/v$version/$portableZipName"
+        }
     }
 
     $existingUpdates["manifest_url"] = "https://github.com/$RepoSlug/releases/download/v$version/manifest.json"

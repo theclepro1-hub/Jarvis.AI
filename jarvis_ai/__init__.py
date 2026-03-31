@@ -1,3 +1,27 @@
+import warnings
+
+
+warnings.filterwarnings(
+    "ignore",
+    message="'audioop' is deprecated and slated for removal in Python 3.13",
+    category=DeprecationWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="'aifc' is deprecated and slated for removal in Python 3.13",
+    category=DeprecationWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work",
+    category=RuntimeWarning,
+)
+warnings.filterwarnings(
+    "ignore",
+    message="Couldn't find ffprobe or avprobe - defaulting to ffprobe, but may not work",
+    category=RuntimeWarning,
+)
+
 from .app_mixins import (
     ChatUiMixin,
     ClipboardMixin,
@@ -8,10 +32,10 @@ from .app_mixins import (
     VoicePipelineMixin,
 )
 from .audio_devices import (
-    _expand_audio_device_name,
-    _find_audio_device_entry_by_name,
-    _get_audio_device_entry,
-    _is_audio_garbage_name,
+    expand_audio_device_name as _expand_audio_device_name,
+    find_audio_device_entry_by_name as _find_audio_device_entry_by_name,
+    get_audio_device_entry as _get_audio_device_entry,
+    is_audio_garbage_name as _is_audio_garbage_name,
     list_input_device_entries_safe,
     list_microphone_names_safe,
     list_output_device_entries_safe,
@@ -48,6 +72,7 @@ from .commands import (
     normalize_text,
     strip_wake_word,
 )
+from .controllers import ActionExecutor, AppControllers, ConversationController, UiShell, VoiceController, WindowController, build_app_controllers
 from .custom_actions import custom_actions_example, load_custom_action_entries
 from .diagnostics import DiagnosticAssistant
 from .effects import DvdLogoBouncer
@@ -109,6 +134,9 @@ __all__ = [
     "CommandParser",
     "CONFIG",
     "CONFIG_MGR",
+    "ActionExecutor",
+    "AppControllers",
+    "ConversationController",
     "DEFAULT_GITHUB_REPO",
     "DEFAULT_RELEASES_URL",
     "DEFAULT_RELEASE_API_URL",
@@ -127,9 +155,12 @@ __all__ = [
     "SetupWizard",
     "TelegramBot",
     "Theme",
+    "UiShell",
     "USER_PROFILE",
     "UpdateFlowMixin",
     "VoicePipelineMixin",
+    "VoiceController",
+    "WindowController",
     "LISTENING_PROFILES",
     "_expand_audio_device_name",
     "_find_audio_device_entry_by_name",
@@ -144,6 +175,7 @@ __all__ = [
     "app_title",
     "app_version_badge",
     "build_service_hub",
+    "build_app_controllers",
     "config_path",
     "custom_actions_example",
     "custom_actions_path",

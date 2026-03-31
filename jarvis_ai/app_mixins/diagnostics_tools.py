@@ -367,7 +367,7 @@ class DiagnosticsToolsMixin:
             if not CONFIG_MGR.get_elevenlabs_api_key() and not os.getenv("ELEVENLABS_API_KEY"):
                 findings.append("TTS: для ElevenLabs не задан API-ключ.")
             if not CONFIG_MGR.get_elevenlabs_voice_id():
-                findings.append("TTS: для ElevenLabs не задан voice_id.")
+                findings.append("TTS: для ElevenLabs не задан ID голоса.")
             if sd is None and pygame is None and not shutil.which("ffplay") and AudioSegment is None:
                 findings.append("TTS: для ElevenLabs нужен хотя бы один backend воспроизведения (sounddevice, pygame, ffplay или pydub/ffmpeg).")
 

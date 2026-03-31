@@ -1,4 +1,3 @@
-import audioop
 import logging
 import os
 import tempfile
@@ -20,6 +19,7 @@ except Exception:
     winsound = None
 
 from .audio_devices import _find_audio_device_entry_by_name, pick_microphone_device
+from .audio_runtime import audio_rms_int16
 from .branding import APP_LOGGER_NAME, app_title
 from .commands import detect_wake_word, normalize_text, strip_wake_word
 from .state import CONFIG_MGR
@@ -29,6 +29,10 @@ from .voice_profiles import device_profile_kind
 
 
 logger = logging.getLogger(APP_LOGGER_NAME)
+
+WAKE_DEBUG_PREFIX = "Слово активации"
+WAKE_IDLE_TEXT = f"{WAKE_DEBUG_PREFIX}: жду «джарвис»."
+WAKE_DISABLED_TEXT = "Отладка слова активации выключена."
 
 
 def _voice_device_bucket(device_name: str = "") -> str:
@@ -118,7 +122,7 @@ def _resolve_meter_stream_config(device_entry=None, device_index=None):
     return None, "; ".join(errors[:2]).strip() or "не удалось подобрать совместимый режим"
 
 
-def _ensure_voice_debug_state(self):
+def _ensure_voice_debug_state(self, render: bool = True):
     if not hasattr(self, "_voice_meter_level"):
         self._voice_meter_level = 0
     if not hasattr(self, "_voice_meter_rms"):
@@ -128,7 +132,7 @@ def _ensure_voice_debug_state(self):
     if not hasattr(self, "_voice_meter_device_name"):
         self._voice_meter_device_name = ""
     if not hasattr(self, "_wake_debug_text"):
-        self._wake_debug_text = "Wake-word: жду слово 'джарвис'."
+        self._wake_debug_text = WAKE_IDLE_TEXT
     if not hasattr(self, "_voice_meter_stop"):
         self._voice_meter_stop = False
     if not hasattr(self, "_voice_meter_thread"):
@@ -145,7 +149,8 @@ def _ensure_voice_debug_state(self):
         self._voice_test_audio_path = ""
     if not hasattr(self, "_voice_test_recording"):
         self._voice_test_recording = False
-    self._apply_voice_insight_widgets()
+    if render and threading.current_thread() is threading.main_thread():
+        self._apply_voice_insight_widgets()
 
 
 def _apply_voice_insight_widgets(self):
@@ -167,7 +172,18 @@ def _apply_voice_insight_widgets(self):
             f"{_friendly_bucket_label(bucket)}  •  профиль {_friendly_profile_label(profile_name)}"
         )
     if wake_var is not None:
-        wake_var.set(str(getattr(self, "_wake_debug_text", "Wake-word: жду слово 'джарвис'.") or "").strip())
+        wake_text = str(getattr(self, "_wake_debug_text", WAKE_IDLE_TEXT) or "").strip()
+        if bool(getattr(self, "_workspace_compact_voice_debug", False)):
+            wake_text = (
+                wake_text
+                .replace(f"{WAKE_DEBUG_PREFIX}: ", "")
+                .replace("речь не распознана", "нет фразы")
+                .replace("жду слово «джарвис»", "жду «джарвис»")
+                .replace("жду слово 'джарвис'", "жду «джарвис»")
+            )
+            if len(wake_text) > 72:
+                wake_text = wake_text[:69].rstrip() + "…"
+        wake_var.set(wake_text)
     if explainer_var is not None and not str(explainer_var.get() or "").strip():
         explainer_var.set("JARVIS коротко покажет, что понял, перед сложным действием.")
     if last_heard_var is not None:
@@ -175,7 +191,10 @@ def _apply_voice_insight_widgets(self):
     if corner_var is not None:
         corner_var.set(f"Микрофон {level}%")
     if corner_stats_var is not None:
-        corner_stats_var.set(f"RMS {rms}  •  порог {threshold}")
+        if bool(getattr(self, "_workspace_compact_voice_debug", False)):
+            corner_stats_var.set(f"RMS {rms} / {threshold}")
+        else:
+            corner_stats_var.set(f"RMS {rms}  •  порог {threshold}")
 
     for canvas_name in ("voice_meter_canvas", "voice_meter_canvas_secondary", "corner_voice_meter_canvas"):
         canvas = getattr(self, canvas_name, None)
@@ -201,17 +220,64 @@ def _apply_voice_insight_widgets(self):
 
 
 def _set_last_heard_text(self, text: str = ""):
-    _ensure_voice_debug_state(self)
+    _ensure_voice_debug_state(self, render=False)
     message = str(text or "").strip() or "Пока нет распознанных фраз."
     self._voice_last_heard_text = message[:280]
-    try:
-        self.root.after(0, self._apply_voice_insight_widgets)
-    except Exception:
-        pass
+    if threading.current_thread() is threading.main_thread():
+        self._apply_voice_insight_widgets()
 
 
 def _voice_test_target_path() -> str:
     return os.path.join(tempfile.gettempdir(), "jarvis_ai_2_voice_test.wav")
+
+
+def _default_profile_for_bucket(bucket: str) -> str:
+    key = str(bucket or "").strip().lower()
+    return "boost" if key in {"headset", "usb_mic"} else "normal"
+
+
+def _recommended_profile_from_signal(bucket: str, peak_rms: int, threshold: int) -> str:
+    base = _default_profile_for_bucket(bucket)
+    peak = int(max(0, peak_rms or 0))
+    limit = int(max(80, threshold or 0))
+    if peak < 16:
+        return base
+    ratio = float(peak) / float(limit or 1)
+    if str(bucket or "").strip().lower() in {"headset", "usb_mic"}:
+        if ratio < 0.14:
+            return "aggressive"
+        if ratio < 0.30:
+            return "boost"
+        return "normal"
+    if ratio < 0.12:
+        return "aggressive"
+    if ratio < 0.26:
+        return "boost"
+    return "normal"
+
+
+def _capture_voice_profile_signal(self, seconds: float = 1.8):
+    if sd is None:
+        return 0, "sounddevice is unavailable"
+    device_name = str(self.get_selected_microphone_name() or "").strip()
+    entry = _find_audio_device_entry_by_name(device_name, kind="input", refresh=False)
+    device_index = entry.get("index") if isinstance(entry, dict) else None
+    stream_kwargs, stream_error = _resolve_meter_stream_config(entry, device_index)
+    if not stream_kwargs:
+        return 0, stream_error or "failed to resolve input stream"
+    rate = int(stream_kwargs.get("samplerate") or 16000)
+    frames = max(int(rate * max(1.0, float(seconds or 0))), rate)
+    record_kwargs = {
+        "samplerate": rate,
+        "channels": 1,
+        "dtype": "int16",
+        "frames": frames,
+    }
+    if device_index is not None:
+        record_kwargs["device"] = int(device_index)
+    data = sd.rec(**record_kwargs)
+    sd.wait()
+    return int(audio_rms_int16(data.tobytes())), ""
 
 
 def run_voice_recording_test(self):
@@ -332,8 +398,8 @@ def show_last_voice_capture_summary(self):
         self.set_status_temp(heard[:90], "ok", duration_ms=2800)
 
 
-def _update_audio_signal_snapshot(self, rms: int = 0, device_name: str = ""):
-    self._ensure_voice_debug_state()
+def _update_audio_signal_snapshot(self, rms: int = 0, device_name: str = "", render: bool = True):
+    self._ensure_voice_debug_state(render=False)
     raw_threshold = int(float(getattr(self.recognizer, "energy_threshold", 1200) or 1200))
     threshold = max(80, raw_threshold)
     level = int(min(100, max(0, (float(rms or 0) / float(threshold)) * 210.0)))
@@ -343,20 +409,18 @@ def _update_audio_signal_snapshot(self, rms: int = 0, device_name: str = ""):
     if device_name:
         self._voice_meter_device_name = str(device_name or "").strip()
     self._voice_training_peak = max(int(getattr(self, "_voice_training_peak", 0) or 0), level)
-    try:
-        self.root.after(0, self._apply_voice_insight_widgets)
-    except Exception:
-        pass
+    if render and threading.current_thread() is threading.main_thread():
+        self._apply_voice_insight_widgets()
 
 
 def _set_wake_debug(self, reason: str = "", heard_text: str = "", matched_word: str = "", rms: int = 0, threshold: int = 0):
     if not self._cfg().get_wake_debug_enabled():
-        self._wake_debug_text = "Wake-word debug выключен."
+        self._wake_debug_text = WAKE_DISABLED_TEXT
     else:
         reason_text = str(reason or "").strip() or "ожидание"
         heard = str(heard_text or "").strip()
         matched = str(matched_word or "").strip()
-        pieces = [f"Wake-word: {reason_text}"]
+        pieces = [f"{WAKE_DEBUG_PREFIX}: {reason_text}"]
         if matched:
             pieces.append(f"слово: {matched}")
         if heard:
@@ -364,10 +428,8 @@ def _set_wake_debug(self, reason: str = "", heard_text: str = "", matched_word: 
         if rms or threshold:
             pieces.append(f"rms {int(rms or 0)} / порог {int(max(80, threshold or 0))}")
         self._wake_debug_text = "  •  ".join(pieces)
-    try:
-        self.root.after(0, self._apply_voice_insight_widgets)
-    except Exception:
-        pass
+    if threading.current_thread() is threading.main_thread():
+        self._apply_voice_insight_widgets()
 
 
 def _maybe_auto_switch_device_profile(self, device_name: str = ""):
@@ -473,14 +535,13 @@ def _audio_meter_task(self):
             def _callback(indata, _frames, _time_info, status):
                 try:
                     raw = bytes(indata or b"")
-                    rms = audioop.rms(raw, 2) if raw else 0
+                    rms = audio_rms_int16(raw)
                     last_rms["value"] = int(rms or 0)
-                    self._update_audio_signal_snapshot(rms, device_name)
+                    self._update_audio_signal_snapshot(rms, device_name, render=False)
                     if status:
-                        self._set_wake_debug(
-                            "монитор микрофона сообщил о состоянии",
-                            rms=rms,
-                            threshold=getattr(self.recognizer, "energy_threshold", 0),
+                        self._wake_debug_text = (
+                            f"{WAKE_DEBUG_PREFIX}: монитор микрофона сообщил о состоянии"
+                            f"  •  rms {int(rms or 0)} / порог {int(max(80, getattr(self.recognizer, 'energy_threshold', 0) or 0))}"
                         )
                 except Exception:
                     pass
@@ -563,7 +624,7 @@ def _patched_listen_task(self):
                     raise RuntimeError("Microphone stream is not initialized.")
                 passive_mode = self._should_use_wake_word_boost()
                 self._apply_listening_values(self._compose_listening_values(self._cfg().get_listening_profile(), passive_mode=passive_mode))
-                self.recognizer.adjust_for_ambient_noise(mic_source, duration=0.42 if passive_mode else 0.60)
+                self.recognizer.adjust_for_ambient_noise(mic_source, duration=0.28 if passive_mode else 0.60)
                 self._clamp_energy_after_adjust(passive_mode=passive_mode)
                 self._maybe_auto_switch_device_profile(current_device_name)
                 last_passive_mode = passive_mode
@@ -595,7 +656,7 @@ def _patched_listen_task(self):
                 recalibrate_after = 24.0 if passive_mode else 36.0
                 if (now - last_ambient_adjust) > recalibrate_after:
                     try:
-                        self.recognizer.adjust_for_ambient_noise(mic_source, duration=0.12 if passive_mode else 0.18)
+                        self.recognizer.adjust_for_ambient_noise(mic_source, duration=0.10 if passive_mode else 0.18)
                         self._clamp_energy_after_adjust(passive_mode=passive_mode)
                         last_ambient_adjust = now
                     except Exception:
@@ -677,7 +738,7 @@ def _patched_listen_task(self):
                 detected, matched_word = detect_wake_word(norm)
                 if detected:
                     command_text = strip_wake_word(norm)
-                    self._set_wake_debug("wake-word сработал", heard_text=text, matched_word=matched_word, rms=getattr(self, "_voice_meter_rms", 0), threshold=getattr(self.recognizer, "energy_threshold", 0))
+                    self._set_wake_debug("слово активации сработало", heard_text=text, matched_word=matched_word, rms=getattr(self, "_voice_meter_rms", 0), threshold=getattr(self.recognizer, "energy_threshold", 0))
                     if command_text:
                         self.root.after(0, lambda t=command_text: self.add_msg(t, "user"))
                         self.executor.submit(self.process_query, command_text)
@@ -822,6 +883,89 @@ def run_voice_training_wizard(self):
     tk.Button(actions, text="Закрыть", command=_close, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(side="right", padx=(0, 8))
 
 
+def play_last_voice_capture(self):
+    path = str(getattr(self, "_voice_test_audio_path", "") or "").strip()
+    if not path or not os.path.exists(path):
+        self.set_status_temp("Сначала сделайте тестовую запись", "warn", duration_ms=2400)
+        return
+    self.set_status_temp("Воспроизвожу последнюю тестовую запись", "busy", duration_ms=1800)
+
+    def _worker():
+        try:
+            player = getattr(self, "_play_audio_file", None)
+            if callable(player):
+                player(path)
+            elif winsound is not None:
+                winsound.PlaySound(path, winsound.SND_FILENAME)
+            else:
+                raise RuntimeError("no playback backend")
+            self.root.after(0, lambda: self.set_status_temp("Тестовая запись воспроизведена", "ok", duration_ms=2400))
+        except Exception as exc:
+            self.root.after(0, lambda: self.set_status_temp("Не удалось воспроизвести запись", "warn", duration_ms=2800))
+            if hasattr(self, "_record_human_log"):
+                try:
+                    self._record_human_log(
+                        "Прослушивание записи",
+                        "Не получилось воспроизвести тестовый файл микрофона.",
+                        "Повторите тестовую запись и проверьте устройство вывода.",
+                        level="warn",
+                    )
+                except Exception:
+                    pass
+            logger.warning(f"Voice playback error: {exc}")
+
+    threading.Thread(target=_worker, daemon=True, name="VoiceTestPlayback").start()
+
+
+def run_voice_profile_autotune(self):
+    _ensure_voice_debug_state(self)
+    if getattr(self, "_voice_profile_autotuning", False):
+        self.set_status_temp("Автоподбор профиля уже идет", "warn", duration_ms=2200)
+        return
+    self._voice_profile_autotuning = True
+    self.set_status_temp("Автоподбор профиля: скажите «джарвис» 2 секунды", "busy", duration_ms=2400)
+    self._set_last_heard_text("Автоподбор профиля активен. Скажите «джарвис» обычным голосом.")
+
+    def _worker():
+        try:
+            cfg = self._cfg()
+            device_name = str(self.get_selected_microphone_name() or "").strip()
+            bucket = _voice_device_bucket(device_name)
+            threshold = int(max(80, getattr(self.recognizer, "energy_threshold", 0) or 0))
+            peak_rms, sample_error = _capture_voice_profile_signal(self, seconds=1.8)
+            target = _recommended_profile_from_signal(bucket, peak_rms, threshold)
+            if sample_error:
+                target = _default_profile_for_bucket(bucket)
+
+            overrides = dict(cfg.get_device_profile_overrides() or {})
+            overrides[bucket] = target
+            cfg.set_device_profile_mode("auto")
+            cfg.set_device_profile_overrides(overrides)
+            cfg.set_listening_profile(target)
+            self._last_auto_profile_bucket = ""
+            self._last_auto_profile_name = ""
+            self.apply_listening_profile(target)
+
+            detail = f"Автоподбор: {_friendly_bucket_label(bucket)} -> {_friendly_profile_label(target)}"
+            heard = detail
+            if peak_rms > 0:
+                detail = f"{detail} • RMS {int(peak_rms)}"
+                heard = f"{heard}. Уровень сигнала: RMS {int(peak_rms)}."
+            elif sample_error:
+                heard = f"{heard}. Сигнал не удалось снять, оставлен безопасный профиль."
+            self.root.after(0, lambda: self._set_last_heard_text(heard))
+            self.root.after(0, lambda: self.set_status_temp(detail, "ok", duration_ms=3200))
+            self.root.after(0, lambda: self._update_audio_signal_snapshot(int(peak_rms), device_name))
+        except Exception as exc:
+            detail = short_exc(exc)
+            self.root.after(0, lambda: self._set_last_heard_text("Автоподбор профиля не удался: " + detail))
+            self.root.after(0, lambda: self.set_status_temp("Автоподбор профиля не удался", "warn", duration_ms=3200))
+        finally:
+            self._voice_profile_autotuning = False
+
+    threading.Thread(target=_worker, daemon=True, name="VoiceProfileAutotune").start()
+
+
 def register_voice_runtime(app_cls):
     app_cls._ensure_voice_debug_state = _ensure_voice_debug_state
     app_cls._apply_voice_insight_widgets = _apply_voice_insight_widgets
@@ -832,6 +976,7 @@ def register_voice_runtime(app_cls):
     app_cls._start_audio_meter_monitor = _start_audio_meter_monitor
     app_cls._audio_meter_task = _audio_meter_task
     app_cls._set_last_heard_text = _set_last_heard_text
+    app_cls.run_voice_profile_autotune = run_voice_profile_autotune
     app_cls.run_voice_recording_test = run_voice_recording_test
     app_cls.play_last_voice_capture = play_last_voice_capture
     app_cls.show_last_voice_capture_summary = show_last_voice_capture_summary

@@ -6,6 +6,7 @@ pyTelegramBotAPI
 appdirs
 PyAudio==0.2.14
 groq
+httpx<0.28
 psutil
 apscheduler
 tenacity

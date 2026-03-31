@@ -90,6 +90,21 @@ class ScrollingMixin:
                     continue
                 ordered.append(target)
                 seen.add(key)
+        if not ordered:
+            visible = []
+            for target in self._scroll_targets:
+                try:
+                    if target.winfo_ismapped():
+                        visible.append(target)
+                except Exception:
+                    continue
+            preferred = getattr(self, "_preferred_scroll_target", None)
+            if preferred is not None:
+                for target in visible:
+                    if target == preferred:
+                        return [preferred] + [item for item in visible if item != preferred]
+            if len(visible) == 1:
+                return visible
         return ordered
 
     def _resolve_scroll_target(self, event):
@@ -201,12 +216,16 @@ class ScrollingMixin:
             self._scroll_targets.append(widget)
         try:
             widget.bind("<Enter>", lambda _e, w=widget: setattr(self, "_active_scroll_target", w), add="+")
-            widget.bind(
-                "<Leave>",
-                lambda _e, w=widget: setattr(self, "_active_scroll_target", None)
-                if self._active_scroll_target == w else None,
-                add="+",
-            )
+            def _leave(_e, w=widget):
+                try:
+                    hovered = self.root.winfo_containing(self.root.winfo_pointerx(), self.root.winfo_pointery())
+                except Exception:
+                    hovered = None
+                if hovered is not None and self._is_descendant_of(hovered, w):
+                    return
+                if getattr(self, "_active_scroll_target", None) == w:
+                    self._active_scroll_target = None
+            widget.bind("<Leave>", _leave, add="+")
         except Exception:
             pass
         self._ensure_mousewheel_bindings()
@@ -231,15 +250,6 @@ class ScrollingMixin:
             widget.bind("<Shift-MouseWheel>", _guard, add="+")
             widget.bind("<Shift-Button-4>", _guard, add="+")
             widget.bind("<Shift-Button-5>", _guard, add="+")
-        except Exception:
-            pass
-
-        try:
-            if widget.winfo_class() == "TCombobox":
-                popdown = widget.tk.call("ttk::combobox::PopdownWindow", str(widget))
-                listbox_path = f"{popdown}.f.l"
-                for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>", "<Shift-MouseWheel>", "<Shift-Button-4>", "<Shift-Button-5>"):
-                    widget.tk.call("bind", listbox_path, seq, "break")
         except Exception:
             pass
 

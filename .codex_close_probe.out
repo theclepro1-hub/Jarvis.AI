@@ -1,5 +1,0 @@
-creating
-created
-quit_app
-mainloop_returned 7.15
-finally_threads [('MainThread', False), ('Thread-1 (flush_loop)', True), ('TelegramBotThread', True), ('WorkerThread1', True), ('WorkerThread2', True), ('Thread-2 (listen)', True), ('Thread-3 (process)', True), ('TTS-Thread', True), ('VoiceMeterThread', True)]

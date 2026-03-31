@@ -9,6 +9,7 @@ class AppContext:
     config_mgr: Any
     prompt_mgr: Any
     db: Any
+    controllers: Any = None
 
 
 def build_app_context(config_mgr=None, prompt_mgr=None, db_manager=None) -> AppContext:

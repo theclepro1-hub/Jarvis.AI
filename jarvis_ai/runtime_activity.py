@@ -15,6 +15,21 @@ from .utils import short_exc
 
 logger = logging.getLogger(APP_LOGGER_NAME)
 
+ACTION_ROUTE_FILTERS = (
+    ("Все действия", "*"),
+    ("Команды", "command"),
+    ("Сценарии", "scenario"),
+    ("Память", "memory"),
+    ("Откаты", "undo"),
+)
+
+LOG_LEVEL_FILTERS = (
+    ("Все события", "*"),
+    ("Ошибки", "error"),
+    ("Предупреждения", "warn"),
+    ("Инфо", "info"),
+)
+
 
 def _now_stamp() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
@@ -82,6 +97,80 @@ def _ensure_activity_state(self):
         self._last_action_can_undo = tk.BooleanVar(value=False)
     if not hasattr(self, "_human_log_summary_var"):
         self._human_log_summary_var = tk.StringVar(value="Сбоев не зафиксировано.")
+    if not hasattr(self, "_session_story_var"):
+        self._session_story_var = tk.StringVar(value="За сессию пока нет действий.")
+    if not hasattr(self, "_last_error_payload"):
+        self._last_error_payload = {}
+    if not hasattr(self, "_activity_filter_query_var"):
+        self._activity_filter_query_var = tk.StringVar(value="")
+    if not hasattr(self, "_activity_filter_route_var"):
+        self._activity_filter_route_var = tk.StringVar(value=ACTION_ROUTE_FILTERS[0][0])
+    if not hasattr(self, "_log_filter_query_var"):
+        self._log_filter_query_var = tk.StringVar(value="")
+    if not hasattr(self, "_log_filter_level_var"):
+        self._log_filter_level_var = tk.StringVar(value=LOG_LEVEL_FILTERS[0][0])
+    if not getattr(self, "_activity_filter_traces_bound", False):
+        for var in (
+            self._activity_filter_query_var,
+            self._activity_filter_route_var,
+            self._log_filter_query_var,
+            self._log_filter_level_var,
+        ):
+            try:
+                var.trace_add("write", lambda *_args: self._schedule_activity_filter_refresh())
+            except Exception:
+                pass
+        self._activity_filter_traces_bound = True
+
+
+def _filter_code_from_label(label: str, variants) -> str:
+    current = str(label or "").strip()
+    for title, code in variants:
+        if current == title:
+            return code
+    return "*"
+
+
+def _filtered_action_entries(self):
+    entries = list(getattr(self, "_action_history_entries", []))
+    query_var = getattr(self, "_activity_filter_query_var", None)
+    route_var = getattr(self, "_activity_filter_route_var", None)
+    query = str(query_var.get() if query_var is not None else "").strip().lower()
+    route_code = _filter_code_from_label(route_var.get() if route_var is not None else "", ACTION_ROUTE_FILTERS)
+    filtered = []
+    for item in entries:
+        route = str(item.get("route", "") or "").strip().lower()
+        if route_code != "*" and route != route_code:
+            continue
+        haystack = " ".join(
+            str(item.get(key, "") or "").strip().lower()
+            for key in ("title", "summary", "raw_cmd", "route", "at")
+        )
+        if query and query not in haystack:
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def _filtered_log_entries(self):
+    entries = list(getattr(self, "_human_log_entries", []))
+    query_var = getattr(self, "_log_filter_query_var", None)
+    level_var = getattr(self, "_log_filter_level_var", None)
+    query = str(query_var.get() if query_var is not None else "").strip().lower()
+    level_code = _filter_code_from_label(level_var.get() if level_var is not None else "", LOG_LEVEL_FILTERS)
+    filtered = []
+    for item in entries:
+        level = str(item.get("level", "") or "").strip().lower()
+        if level_code != "*" and level != level_code:
+            continue
+        haystack = " ".join(
+            str(item.get(key, "") or "").strip().lower()
+            for key in ("title", "detail", "fix", "level", "at")
+        )
+        if query and query not in haystack:
+            continue
+        filtered.append(item)
+    return filtered
 
 
 def _persist_activity_state(self):
@@ -115,6 +204,17 @@ def _refresh_activity_widgets(self):
         self._human_log_summary_var.set(f"{prefix}: {last_log.get('title')}")
     else:
         self._human_log_summary_var.set("Сбоев не зафиксировано.")
+
+    story_var = getattr(self, "_session_story_var", None)
+    if story_var is not None:
+        if actions:
+            recent_titles = [str(item.get("title", "") or "").strip() for item in actions[-3:] if str(item.get("title", "") or "").strip()]
+            story = " → ".join(recent_titles)
+            if logs and str(logs[-1].get("level", "") or "").strip().lower() == "error":
+                story += " • требует внимания"
+            story_var.set(f"За сессию: {story[:240]}")
+        else:
+            story_var.set("За сессию пока нет действий.")
 
     history_listbox = getattr(self, "_action_history_listbox", None)
     if history_listbox is not None:
@@ -198,7 +298,7 @@ def _record_human_log(self, title: str, detail: str, fix: str = "", level: str =
 def _friendly_fix_for_error(context: str, exc) -> str:
     low = f"{context} {short_exc(exc)}".lower()
     if "api key" in low or "authentication" in low or "invalid api key" in low:
-        return "Откройте control center -> ИИ и профиль и вставьте актуальный Groq API ключ."
+        return "Откройте центр управления -> ИИ и профиль и вставьте актуальный Groq API-ключ."
     if "timeout" in low or "connection" in low or "network" in low or "proxy" in low:
         return "Проверьте интернет, VPN/Proxy и затем повторите действие."
     if "microphone" in low or "mic" in low or "audio" in low or "speech" in low:
@@ -213,6 +313,29 @@ def _friendly_fix_for_error(context: str, exc) -> str:
 def _friendly_error_message(context: str, exc) -> str:
     issue = short_exc(exc)
     return f"{context}. {issue}".strip()
+
+
+def _friendly_error_severity(context: str, exc) -> str:
+    low = f"{context} {short_exc(exc)}".lower()
+    if any(token in low for token in ("invalid api key", "authentication", "permission", "denied", "traceback")):
+        return "Критично"
+    if any(token in low for token in ("timeout", "connection", "network", "proxy", "microphone", "audio", "speech")):
+        return "Важно"
+    return "Нормально: можно повторить позже"
+
+
+def _format_error_report(payload) -> str:
+    data = payload if isinstance(payload, dict) else {}
+    lines = [
+        f"Что случилось: {str(data.get('title', '') or 'Ошибка').strip()}",
+        f"Подробность: {str(data.get('detail', '') or 'Без подробностей').strip()}",
+        f"Насколько критично: {str(data.get('severity', '') or 'Нужно проверить').strip()}",
+        f"Что уже попробовали: {str(data.get('fix', '') or 'Пока только зафиксировали проблему.').strip()}",
+    ]
+    raw = str(data.get("raw", "") or "").strip()
+    if raw:
+        lines.append("Техническая строка: " + raw)
+    return "\n".join(lines)
 
 
 def _infer_undo_payload(action: str, arg, result: str = ""):
@@ -270,10 +393,16 @@ def _patched_report_error(self, context, exc, speak=True):
     _ensure_activity_state(self)
     friendly_text = _friendly_error_message(context, exc)
     fix = _friendly_fix_for_error(context, exc)
-    chat_text = friendly_text
-    if fix:
-        chat_text += "\nЧто сделать: " + fix
-    self.root.after(0, lambda t=chat_text: self.add_msg(t))
+    severity = _friendly_error_severity(context, exc)
+    payload = {
+        "title": str(context or "Ошибка").strip(),
+        "detail": friendly_text,
+        "fix": fix,
+        "severity": severity,
+        "raw": short_exc(exc),
+        "at": _now_stamp(),
+    }
+    self._last_error_payload = payload
     if speak:
         try:
             self.say(friendly_text)
@@ -285,7 +414,126 @@ def _patched_report_error(self, context, exc, speak=True):
     except Exception:
         pass
     _record_human_log(self, str(context or "Ошибка"), friendly_text, fix=fix, level="error")
+    lines = [
+        friendly_text,
+        f"Насколько критично: {severity}",
+        "Что уже попробовали: " + (fix or "Пока только зафиксировали проблему."),
+    ]
+    report = _format_error_report(payload)
+    if hasattr(self, "_render_chat_prompt_card"):
+        try:
+            self.root.after(
+                0,
+                lambda: self._render_chat_prompt_card(
+                    title="Центр ошибок",
+                    lines=lines,
+                    actions=[
+                        {"text": "Повторить", "command": lambda: self.retry_last_failed_command()},
+                        {"text": "Мастер среды", "command": lambda: self.open_error_doctor()},
+                        {"text": "Скопировать отчёт", "command": lambda text=report: self._copy_text_to_clipboard(text), "bg": Theme.ACCENT},
+                    ],
+                    tone="error",
+                ),
+            )
+        except Exception:
+            self.root.after(0, lambda t=friendly_text + ("\nЧто сделать: " + fix if fix else ""): self.add_msg(t))
+    else:
+        self.root.after(0, lambda t=friendly_text + ("\nЧто сделать: " + fix if fix else ""): self.add_msg(t))
     return friendly_text
+
+
+def retry_last_failed_command(self):
+    raw = str(getattr(self, "_last_user_query", "") or "").strip()
+    if not raw:
+        self.set_status_temp("Повторять пока нечего", "warn")
+        return
+    try:
+        self.add_msg(raw, "user")
+    except Exception:
+        pass
+    self.set_status("Обрабатываю...", "busy")
+    try:
+        self.executor.submit(self.process_query, raw)
+    except Exception:
+        self.set_status_temp("Не удалось повторить команду", "warn")
+
+
+def open_error_doctor(self):
+    if callable(getattr(self, "run_readiness_master", None)):
+        try:
+            self.run_readiness_master()
+            return
+        except Exception:
+            pass
+    try:
+        self.open_full_settings_view("system")
+    except Exception:
+        pass
+
+
+def show_error_center(self):
+    payload = dict(getattr(self, "_last_error_payload", {}) or {})
+    if not payload:
+        self.set_status_temp("Пока нет ошибок для разбора", "ok")
+        return
+    existing = getattr(self, "_error_center_window", None)
+    if existing is not None:
+        try:
+            if existing.winfo_exists():
+                existing.lift()
+                return
+        except Exception:
+            pass
+
+    win = tk.Toplevel(self.root)
+    self._error_center_window = win
+    win.title(app_dialog_title("Центр ошибок"))
+    win.geometry("760x560")
+    win.configure(bg=Theme.BG)
+
+    shell = tk.Frame(win, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
+    shell.pack(fill="both", expand=True, padx=16, pady=16)
+
+    tk.Label(shell, text="Центр ошибок", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 18)).pack(anchor="w", padx=18, pady=(18, 6))
+    tk.Label(
+        shell,
+        text="Последняя ошибка объясняется человеческим языком: без stack trace и без лишней технички.",
+        bg=Theme.CARD_BG,
+        fg=Theme.FG_SECONDARY,
+        font=("Segoe UI", 11),
+        justify="left",
+    ).pack(anchor="w", padx=18, pady=(0, 14))
+
+    for title, value in (
+        ("Что случилось", payload.get("title", "Ошибка")),
+        ("Насколько критично", payload.get("severity", "Нужно проверить")),
+        ("Что уже попробовали", payload.get("fix", "Пока только зафиксировали проблему.")),
+    ):
+        block = tk.Frame(shell, bg=Theme.BUTTON_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
+        block.pack(fill="x", padx=18, pady=(0, 10))
+        tk.Label(block, text=title, bg=Theme.BUTTON_BG, fg=Theme.FG, font=("Segoe UI Semibold", 11)).pack(anchor="w", padx=14, pady=(12, 4))
+        text = tk.Label(block, text=str(value or "").strip(), bg=Theme.BUTTON_BG, fg=Theme.FG_SECONDARY, justify="left", font=("Segoe UI", 11))
+        text.pack(fill="x", padx=14, pady=(0, 12))
+        bind_dynamic_wrap(text, block, padding=32, minimum=220)
+
+    detail_card = tk.Frame(shell, bg=Theme.INPUT_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
+    detail_card.pack(fill="both", expand=True, padx=18, pady=(0, 10))
+    tk.Label(detail_card, text="Подробность", bg=Theme.INPUT_BG, fg=Theme.FG, font=("Segoe UI Semibold", 11)).pack(anchor="w", padx=14, pady=(12, 4))
+    detail_label = tk.Label(detail_card, text=str(payload.get("detail", "") or ""), bg=Theme.INPUT_BG, fg=Theme.FG, justify="left", font=("Segoe UI", 11))
+    detail_label.pack(fill="x", padx=14, pady=(0, 12))
+    bind_dynamic_wrap(detail_label, detail_card, padding=32, minimum=220)
+
+    footer = tk.Frame(shell, bg=Theme.CARD_BG)
+    footer.pack(fill="x", padx=18, pady=(0, 18))
+    tk.Button(footer, text="Повторить", command=self.retry_last_failed_command, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(side="left")
+    tk.Button(footer, text="Открыть мастер", command=self.open_error_doctor, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(side="left", padx=(8, 0))
+    tk.Button(footer, text="Скопировать отчёт", command=lambda: self._copy_text_to_clipboard(_format_error_report(payload)), bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(side="right")
+
+    def _close():
+        self._error_center_window = None
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", _close)
 
 
 def _patched_execute_action(self, action: str, arg=None, raw_cmd: str = "", speak: bool = True, reply_callback=None):
@@ -603,6 +851,9 @@ def register_activity_runtime(app_cls):
     app_cls._record_human_log = _record_human_log
     app_cls._sync_action_detail = _sync_action_detail
     app_cls._sync_log_detail = _sync_log_detail
+    app_cls.retry_last_failed_command = retry_last_failed_command
+    app_cls.open_error_doctor = open_error_doctor
+    app_cls.show_error_center = show_error_center
     app_cls.execute_action = _patched_execute_action
     app_cls._handle_memory_route = _patched_handle_memory_route
     app_cls._handle_scenario_route = _patched_handle_scenario_route

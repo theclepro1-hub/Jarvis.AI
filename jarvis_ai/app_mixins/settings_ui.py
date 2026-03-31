@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import glob
 import json
 import os
@@ -8,15 +8,16 @@ from typing import Any, Dict, List, Optional
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
+from PIL import ImageTk
 
-from ..audio_devices import _expand_audio_device_name, _find_audio_device_entry_by_name, _get_audio_device_entry, _is_audio_garbage_name, pick_output_device
-from ..branding import APP_LOGGER_NAME, app_brand_name, app_dialog_title, app_version_badge
+from ..audio_devices import expand_audio_device_name as _expand_audio_device_name, get_audio_device_entry as _get_audio_device_entry
+from ..branding import APP_LOGGER_NAME, app_brand_name, app_version_badge
 from ..commands import make_dynamic_key
 from ..custom_actions import custom_actions_example
 from ..guide_noobs import GuideNoobPanel
 from ..release_meta import DEFAULT_GITHUB_REPO, DEFAULT_RELEASE_API_URL, DEFAULT_RELEASES_URL
 from ..runtime import runtime_root_path
-from ..state import CONFIG_MGR, DEFAULT_CHAT_MAX_TOKENS, DEFAULT_CHAT_MODEL, DEFAULT_CHAT_TEMPERATURE, db, get_config_path
+from ..state import CONFIG_MGR, DEFAULT_CHAT_MODEL, db, get_config_path
 from ..storage import app_log_dir, custom_actions_path
 from ..theme import Theme
 from ..ui_factory import bind_dynamic_wrap, create_action_button, create_action_grid, create_note_box, create_section_card
@@ -61,11 +62,11 @@ class SettingsUiMixin:
             pass
 
     def _is_full_settings_open(self) -> bool:
-        page = getattr(self, "embedded_settings_page", None)
-        if page is None:
+        win = getattr(self, "settings_window", None)
+        if win is None:
             return False
         try:
-            return bool(str(page.winfo_manager() or "").strip())
+            return bool(win.winfo_exists() and win.winfo_ismapped())
         except Exception:
             return False
 
@@ -77,15 +78,65 @@ class SettingsUiMixin:
             sw, sh = 1366, 768
         usable_w = max(560, sw - 36)
         usable_h = max(460, sh - 72)
-        min_w = min(760, usable_w)
-        min_h = min(560, usable_h)
-        pref_w = min(1360, usable_w)
-        pref_h = min(900, usable_h)
+        min_w = min(1040, usable_w)
+        min_h = min(700, usable_h)
+        pref_w = min(1440, usable_w)
+        pref_h = min(920, usable_h)
         pref_w = max(min_w, pref_w)
         pref_h = max(min_h, pref_h)
         x = max((sw - pref_w) // 2, 0)
         y = max((sh - pref_h) // 2, 0)
         return min_w, min_h, f"{pref_w}x{pref_h}+{x}+{y}"
+
+    def _sync_control_center_window_to_root(self, win=None):
+        window = win or getattr(self, "settings_window", None)
+        if window is None:
+            return
+        try:
+            if not window.winfo_exists():
+                return
+        except Exception:
+            return
+        if not isinstance(window, tk.Toplevel):
+            return
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            root_state = str(self.root.state() or "").lower()
+        except Exception:
+            root_state = "normal"
+        try:
+            if root_state == "zoomed":
+                window.state("zoomed")
+                return
+        except Exception:
+            pass
+        try:
+            window.state("normal")
+        except Exception:
+            pass
+        try:
+            min_w, min_h, _ = self._control_center_geometry_preset()
+            root_w = int(self.root.winfo_width() or 0)
+            root_h = int(self.root.winfo_height() or 0)
+            root_x = int(self.root.winfo_rootx() or 0)
+            root_y = int(self.root.winfo_rooty() or 0)
+            screen_w = max(int(self.root.winfo_screenwidth() or 0), root_w, min_w)
+            screen_h = max(int(self.root.winfo_screenheight() or 0), root_h, min_h)
+        except Exception:
+            return
+        if root_w <= 0 or root_h <= 0:
+            return
+        target_w = min(max(root_w, min_w), max(screen_w - 24, min_w))
+        target_h = min(max(root_h, min_h), max(screen_h - 48, min_h))
+        target_x = min(max(root_x, 0), max(screen_w - target_w, 0))
+        target_y = min(max(root_y, 0), max(screen_h - target_h, 0))
+        try:
+            window.geometry(f"{target_w}x{target_h}+{target_x}+{target_y}")
+        except Exception:
+            pass
 
     def _schedule_control_center_layout_refresh(self):
         win = getattr(self, "settings_window", None)
@@ -118,19 +169,22 @@ class SettingsUiMixin:
         header_left = getattr(self, "_control_center_header_left", None)
         header_right = getattr(self, "_control_center_header_right", None)
         guide_host = getattr(self, "_control_center_guide_host", None)
+        guide_note = getattr(self, "_control_center_nav_note", None)
         nav = getattr(self, "_control_center_nav", None)
         if not all(widget is not None for widget in (win, body, side, content, header_body, header_left, header_right)):
             return
         try:
             width = max(int(win.winfo_width() or 0), 1)
-            height = max(int(win.winfo_height() or 0), 1)
         except Exception:
             return
 
-        header_stacked = width < 1040
-        stacked_side = width < 920 or height < 620
-        compact_side = stacked_side or width < 1160 or height < 760
-        show_guide = not compact_side and width >= 1120 and height >= 720
+        header_stacked = width < 980
+        show_guide = width >= 1180
+        side_width = 224 if width < 1160 else 292 if show_guide else 248
+        layout_signature = (header_stacked, side_width, show_guide)
+        if layout_signature == getattr(self, "_control_center_layout_signature", None):
+            return
+        self._control_center_layout_signature = layout_signature
 
         try:
             header_left.pack_forget()
@@ -145,35 +199,31 @@ class SettingsUiMixin:
             header_right.pack(side="right", padx=(16, 0))
 
         try:
-            if stacked_side:
-                body.grid_columnconfigure(0, weight=1)
-                body.grid_columnconfigure(1, weight=0)
-                body.grid_rowconfigure(0, weight=0)
-                body.grid_rowconfigure(1, weight=1)
-                side.grid(row=0, column=0, columnspan=2, sticky="ew", padx=0, pady=(0, 12))
-                content.grid(row=1, column=0, columnspan=2, sticky="nsew")
-                side.grid_propagate(True)
-                side.configure(width=1)
-            else:
-                body.grid_columnconfigure(0, weight=0)
-                body.grid_columnconfigure(1, weight=1)
-                body.grid_rowconfigure(0, weight=1)
-                body.grid_rowconfigure(1, weight=0)
-                side.grid(row=0, column=0, columnspan=1, sticky="nsw", padx=(0, 12), pady=0)
-                content.grid(row=0, column=1, columnspan=1, sticky="nsew")
-                side.grid_propagate(False)
-                side.configure(width=230 if compact_side else 290)
+            body.grid_columnconfigure(0, weight=0)
+            body.grid_columnconfigure(1, weight=1)
+            body.grid_rowconfigure(0, weight=1)
+            body.grid_rowconfigure(1, weight=0)
+            side.grid(row=0, column=0, columnspan=1, sticky="nsw", padx=(0, 12), pady=0)
+            content.grid(row=0, column=1, columnspan=1, sticky="nsew")
+            side.grid_propagate(False)
+            side.configure(width=side_width)
         except Exception:
             pass
 
         if guide_host is not None:
             try:
-                packed = bool(str(guide_host.winfo_manager() or "").strip())
+                mapped = bool(str(guide_host.winfo_manager() or "").strip())
             except Exception:
-                packed = False
-            if show_guide and not packed:
-                guide_host.pack(fill="both", expand=True, padx=14, pady=(0, 14))
-            elif not show_guide and packed:
+                mapped = False
+            if show_guide and not mapped:
+                try:
+                    if guide_note is not None and guide_note.winfo_exists():
+                        guide_host.pack(fill="x", padx=12, pady=(0, 12), before=guide_note)
+                    else:
+                        guide_host.pack(fill="x", padx=12, pady=(0, 12))
+                except Exception:
+                    pass
+            elif not show_guide and mapped:
                 try:
                     guide_host.pack_forget()
                 except Exception:
@@ -181,7 +231,7 @@ class SettingsUiMixin:
 
         if nav is not None:
             try:
-                nav.configure(padx=14 if not compact_side else 10)
+                nav.configure(padx=10 if width < 1120 else 14)
             except Exception:
                 pass
 
@@ -192,7 +242,8 @@ class SettingsUiMixin:
                 continue
             try:
                 if widget.winfo_exists():
-                    return widget
+                    if isinstance(widget, tk.Toplevel):
+                        return widget
             except Exception:
                 continue
         return self.root
@@ -213,7 +264,7 @@ class SettingsUiMixin:
         if selected_provider == "elevenlabs" and (not eleven_key or not eleven_voice):
             messagebox.showwarning(
                 app_brand_name(),
-                "Для ElevenLabs в быстрых настройках нужны и API key, и voice_id.\nПока сохраню безопасный оффлайн-режим pyttsx3.",
+                "Для ElevenLabs в быстрых настройках нужны и API-ключ, и ID голоса.\nПока сохраню безопасный оффлайн-режим pyttsx3.",
                 parent=self._settings_dialog_parent(),
             )
             selected_provider = "pyttsx3"
@@ -255,10 +306,10 @@ class SettingsUiMixin:
         except Exception:
             pass
 
-        def entry_row(parent, label: str, value: str = "", show: str = ""):
+        def entry_row(parent, label: str, value: str = "", show: str = "", help_text: str = ""):
             row = tk.Frame(parent, bg=Theme.CARD_BG)
             row.pack(fill="x", pady=(0, 8))
-            tk.Label(row, text=label, bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+            self._create_settings_field_header(row, label, help_text, font=("Segoe UI Semibold", 10))
             var = tk.StringVar(value=value or "")
             entry = tk.Entry(
                 row,
@@ -273,15 +324,14 @@ class SettingsUiMixin:
             self._setup_entry_bindings(entry)
             return var, entry
 
-        def dropdown_row(parent, label: str, values: List[str], value: str):
+        def dropdown_row(parent, label: str, values: List[str], value: str, help_text: str = ""):
             row = tk.Frame(parent, bg=Theme.CARD_BG)
             row.pack(fill="x", pady=(0, 8))
-            tk.Label(row, text=label, bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+            self._create_settings_field_header(row, label, help_text, font=("Segoe UI Semibold", 10))
             var = tk.StringVar(value=value or (values[0] if values else ""))
-            box = ttk.Combobox(row, textvariable=var, values=values, state="readonly", style="Jarvis.TCombobox")
-            box.pack(fill="x", ipady=5, pady=(3, 0))
-            self._bind_selector_wheel_guard(box)
-            return var, box
+            shell, button = self._create_settings_choice_control(row, var, values, font=("Segoe UI", 10))
+            shell.pack(fill="x", pady=(3, 0))
+            return var, button
 
         head = tk.Frame(panel, bg=Theme.CARD_BG)
         head.pack(fill="x", padx=14, pady=(14, 8))
@@ -366,9 +416,9 @@ class SettingsUiMixin:
         )
         self._register_scroll_target(content_canvas)
 
-        self._quick_groq_var, _ = entry_row(body, "Groq API ключ", CONFIG_MGR.get_api_key(), show="•")
-        self._quick_tg_token_var, _ = entry_row(body, "Telegram Bot Token", CONFIG_MGR.get_telegram_token(), show="•")
-        self._quick_tg_id_var, _ = entry_row(body, "Telegram user ID", str(CONFIG_MGR.get_telegram_user_id() or ""))
+        self._quick_groq_var, _ = entry_row(body, "Groq API-ключ", CONFIG_MGR.get_api_key(), show="•", help_text="Секретный ключ для доступа к мозгу JARVIS через Groq. Без него чат и команды ИИ работать не будут.")
+        self._quick_tg_token_var, _ = entry_row(body, "Токен Telegram-бота", CONFIG_MGR.get_telegram_token(), show="•", help_text="Нужен только если хотите управлять JARVIS из Telegram.")
+        self._quick_tg_id_var, _ = entry_row(body, "ID пользователя Telegram", str(CONFIG_MGR.get_telegram_user_id() or ""), help_text="Личный ID того пользователя, которому разрешено писать вашему боту.")
 
         self._quick_tts_provider_items = [
             ("pyttsx3 — оффлайн / стабильно", "pyttsx3"),
@@ -382,10 +432,11 @@ class SettingsUiMixin:
             "Источник TTS",
             [label for label, _key in self._quick_tts_provider_items],
             current_provider_label,
+            help_text="Выбор движка озвучки: оффлайн-режим без сети, быстрый онлайн-голос или максимальное качество через ElevenLabs.",
         )
-        self._quick_edge_voice_var, _ = entry_row(body, "Edge-TTS voice", CONFIG_MGR.get_edge_tts_voice())
-        self._quick_eleven_key_var, _ = entry_row(body, "ElevenLabs API key", CONFIG_MGR.get_elevenlabs_api_key(), show="•")
-        self._quick_eleven_voice_var, _ = entry_row(body, "ElevenLabs voice_id", CONFIG_MGR.get_elevenlabs_voice_id())
+        self._quick_edge_voice_var, _ = entry_row(body, "Голос Edge-TTS", CONFIG_MGR.get_edge_tts_voice(), help_text="Точное имя голоса Edge-TTS. Нужен только если выбран Edge-TTS.")
+        self._quick_eleven_key_var, _ = entry_row(body, "API-ключ ElevenLabs", CONFIG_MGR.get_elevenlabs_api_key(), show="•", help_text="Секретный ключ ElevenLabs для онлайн-озвучки.")
+        self._quick_eleven_voice_var, _ = entry_row(body, "ID голоса ElevenLabs", CONFIG_MGR.get_elevenlabs_voice_id(), help_text="Идентификатор голоса внутри ElevenLabs. Без него сервис не сможет озвучивать текст.")
 
         status_card = tk.Frame(body, bg=Theme.BUTTON_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
         status_card.pack(fill="x", pady=(6, 8))
@@ -563,9 +614,9 @@ class SettingsUiMixin:
         mapping = {
             "main": (
                 "Нубик JARVIS",
-                "ИИ и профиль",
-                "Здесь живут ключ, модель, профиль пользователя и основные настройки мозга. Это база, без которой чат не будет работать как надо.",
-                "→ Если ИИ ругается на ключ, открывайте именно этот раздел.",
+                "Основное",
+                "Здесь живут активация, ключ Groq, профиль пользователя и базовые настройки мозга JARVIS. Это главный раздел для первого входа и базовой настройки.",
+                "→ Если ключ не вставлен или ИИ ругается на доступ, начинайте именно отсюда.",
             ),
             "voice": (
                 "Нубик JARVIS",
@@ -624,11 +675,276 @@ class SettingsUiMixin:
         except Exception:
             pass
 
+    def _make_settings_help_badge(self, parent, text: str = ""):
+        badge = tk.Button(
+            parent,
+            text="?",
+            bg=Theme.BUTTON_BG,
+            fg=Theme.FG,
+            width=2,
+            padx=0,
+            pady=0,
+            cursor="question_arrow",
+            font=("Segoe UI Semibold", 10),
+            highlightbackground=Theme.BORDER,
+            highlightthickness=1,
+            relief="flat",
+            bd=0,
+            takefocus=False,
+        )
+        tip = str(text or "").strip()
+        if tip:
+            self._bind_control_center_guide_hint(
+                badge,
+                "Нубик JARVIS",
+                "Что это значит?",
+                tip,
+                "→ Это короткое объяснение именно этой настройки, без лишней технички.",
+            )
+            try:
+                badge.configure(
+                    command=lambda t=tip: messagebox.showinfo(
+                        "Что это значит?",
+                        t,
+                        parent=self._settings_dialog_parent(),
+                    )
+                )
+            except Exception:
+                pass
+        return badge
+
+    def _create_settings_field_header(self, parent, label: str, help_text: str = "", *, font=None):
+        head = tk.Frame(parent, bg=parent.cget("bg"))
+        head.pack(fill="x")
+        tk.Label(
+            head,
+            text=label,
+            bg=parent.cget("bg"),
+            fg=Theme.FG,
+            font=font or ("Segoe UI Semibold", 11),
+        ).pack(side="left", anchor="w")
+        if str(help_text or "").strip():
+            badge = self._make_settings_help_badge(head, help_text)
+            badge.pack(side="right")
+        return head
+
+    def _create_settings_choice_control(self, parent, variable, values, *, font=None):
+        options = [str(item) for item in list(values or []) if str(item or "").strip()]
+        if not options:
+            options = ["(нет вариантов)"]
+
+        try:
+            current = str(variable.get() if isinstance(variable, tk.StringVar) else "").strip()
+        except Exception:
+            current = ""
+        if not current:
+            try:
+                variable.set(options[0])
+            except Exception:
+                pass
+
+        shell = tk.Frame(
+            parent,
+            bg=Theme.INPUT_BG,
+            highlightbackground=Theme.BORDER,
+            highlightthickness=1,
+            bd=0,
+        )
+        display_var = tk.StringVar(value="")
+        menu = tk.Menu(
+            shell,
+            tearoff=0,
+            bg=Theme.CARD_BG,
+            fg=Theme.FG,
+            activebackground=Theme.ACCENT,
+            activeforeground=Theme.FG,
+            bd=0,
+            relief="flat",
+            font=font or ("Segoe UI", 11),
+        )
+
+        def _sync_label(*_args):
+            try:
+                selected = str(variable.get() if isinstance(variable, tk.StringVar) else "").strip()
+            except Exception:
+                selected = ""
+            if not selected:
+                selected = options[0]
+            display_var.set(f"{selected}   ▾")
+
+        def _select(choice: str):
+            try:
+                variable.set(str(choice))
+            except Exception:
+                pass
+            _sync_label()
+            try:
+                button.event_generate("<<JarvisSelectorChanged>>")
+            except Exception:
+                pass
+
+        for item in options:
+            menu.add_command(label=item, command=lambda value=item: _select(value))
+
+        def _open_menu(event=None):
+            del event
+            try:
+                x = button.winfo_rootx()
+                y = button.winfo_rooty() + button.winfo_height() + 2
+                menu.tk_popup(x, y)
+            finally:
+                try:
+                    menu.grab_release()
+                except Exception:
+                    pass
+
+        button = tk.Button(
+            shell,
+            textvariable=display_var,
+            command=_open_menu,
+            anchor="w",
+            justify="left",
+            bg=Theme.INPUT_BG,
+            fg=Theme.FG,
+            activebackground=Theme.BUTTON_BG,
+            activeforeground=Theme.FG,
+            relief="flat",
+            bd=0,
+            highlightthickness=0,
+            cursor="hand2",
+            font=font or ("Segoe UI", 11),
+            padx=12,
+            pady=7,
+        )
+        button.pack(fill="x")
+
+        def _hover_on(_event=None):
+            try:
+                button.configure(bg=Theme.BUTTON_BG)
+            except Exception:
+                pass
+
+        def _hover_off(_event=None):
+            try:
+                button.configure(bg=Theme.INPUT_BG)
+            except Exception:
+                pass
+
+        for seq, handler in (
+            ("<Enter>", _hover_on),
+            ("<Leave>", _hover_off),
+            ("<FocusIn>", _hover_on),
+            ("<FocusOut>", _hover_off),
+        ):
+            try:
+                button.bind(seq, handler, add="+")
+            except Exception:
+                pass
+
+        if isinstance(variable, tk.StringVar):
+            try:
+                variable.trace_add("write", _sync_label)
+            except Exception:
+                pass
+        _sync_label()
+        try:
+            setattr(button, "_jarvis_select", _select)
+            setattr(button, "_jarvis_values", tuple(options))
+            setattr(button, "_jarvis_menu", menu)
+        except Exception:
+            pass
+        return shell, button
+
     def _show_control_center_guide_popup(self):
         section = self._control_center_tab_alias(self._cfg().get_last_control_center_section())
         title, status, text, pointer = self._control_center_noob_message(section)
         body = "\n\n".join(part for part in (status, text, pointer) if str(part or "").strip())
-        messagebox.showinfo(title, body, parent=getattr(self, "settings_window", None) or self.root)
+        messagebox.showinfo(title, body, parent=self._settings_dialog_parent())
+
+    def _ensure_control_center_page_built(self, key: str):
+        pages = getattr(self, "_control_center_pages", {})
+        builders = getattr(self, "_control_center_page_builders", {})
+        built = getattr(self, "_control_center_built_pages", set())
+        page = pages.get(key)
+        builder = builders.get(key)
+        if page is None or builder is None or key in built:
+            return page
+        try:
+            setattr(page, "_jarvis_plain_scroll_host", True)
+        except Exception:
+            pass
+        builder(page)
+        try:
+            self._refresh_control_center_content_scroll()
+        except Exception:
+            pass
+        built.add(key)
+        self._control_center_built_pages = built
+        return page
+
+    def _schedule_control_center_prewarm(self, preferred: Optional[str] = None):
+        win = getattr(self, "settings_window", None)
+        if win is None:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+        except Exception:
+            return
+        if bool(getattr(self, "_control_center_prewarm_done", False)):
+            return
+        if bool(getattr(self, "_control_center_prewarm_running", False)):
+            return
+        pages = list(getattr(self, "_control_center_pages", {}).keys())
+        if not pages:
+            return
+        preferred_key = self._control_center_tab_alias(preferred)
+        ordered = [preferred_key] if preferred_key in pages else []
+        ordered.extend(key for key in pages if key not in ordered)
+        self._control_center_prewarm_queue = ordered
+        self._control_center_prewarm_running = True
+
+        def _step():
+            self._control_center_prewarm_after_id = None
+            live_win = getattr(self, "settings_window", None)
+            if live_win is None:
+                self._control_center_prewarm_running = False
+                return
+            try:
+                if not live_win.winfo_exists():
+                    self._control_center_prewarm_running = False
+                    return
+            except Exception:
+                self._control_center_prewarm_running = False
+                return
+            queue = list(getattr(self, "_control_center_prewarm_queue", []))
+            if not queue:
+                self._control_center_prewarm_running = False
+                self._control_center_prewarm_done = True
+                try:
+                    self._refresh_control_center_content_scroll()
+                except Exception:
+                    pass
+                return
+            key = str(queue.pop(0))
+            self._control_center_prewarm_queue = queue
+            try:
+                self._ensure_control_center_page_built(key)
+            except Exception:
+                pass
+            try:
+                self._schedule_control_center_layout_refresh()
+            except Exception:
+                pass
+            try:
+                self._control_center_prewarm_after_id = live_win.after(140, _step)
+            except Exception:
+                self._control_center_prewarm_running = False
+
+        try:
+            self._control_center_prewarm_after_id = win.after(140, _step)
+        except Exception:
+            self._control_center_prewarm_running = False
 
     def _create_voice_center_page(self, parent):
         _, _, body = self._create_scrollable_settings_host(parent, inner_bg=Theme.BG_LIGHT)
@@ -651,7 +967,7 @@ class SettingsUiMixin:
 
         desc = tk.Label(
             card,
-            text="Один экран для проверки микрофона: живой уровень, wake-word debug, тестовая запись, прослушивание и автоподбор профиля.",
+            text="Один экран для проверки микрофона: живой уровень, отладка слова активации, тестовая запись, прослушивание и автоподбор профиля.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             justify="left",
@@ -661,7 +977,7 @@ class SettingsUiMixin:
         bind_dynamic_wrap(desc, card, padding=34, minimum=280)
 
         self.voice_meter_var = getattr(self, "voice_meter_var", tk.StringVar(value="Уровень микрофона: жду сигнал..."))
-        self.wake_debug_var = getattr(self, "wake_debug_var", tk.StringVar(value="Wake-word: жду слово 'джарвис'."))
+        self.wake_debug_var = getattr(self, "wake_debug_var", tk.StringVar(value="Слово активации: жду «джарвис»."))
         self.voice_last_heard_var = getattr(self, "voice_last_heard_var", tk.StringVar(value="Пока нет распознанных фраз."))
 
         meter_label = tk.Label(card, textvariable=self.voice_meter_var, bg=Theme.CARD_BG, fg=Theme.FG, justify="left", font=("Segoe UI", 10, "bold"))
@@ -698,7 +1014,7 @@ class SettingsUiMixin:
                 {"text": "Тестовая запись", "command": self.run_voice_recording_test, "bg": Theme.ACCENT},
                 {"text": "Что услышал JARVIS", "command": self.show_last_voice_capture_summary},
                 {"text": "Прослушать запись", "command": self.play_last_voice_capture},
-                {"text": "Автоподбор профиля", "command": lambda: (self._maybe_auto_switch_device_profile(self.get_selected_microphone_name()), self.set_status_temp("Автоподбор профиля выполнен", "ok"))},
+                {"text": "Автоподбор профиля", "command": self.run_voice_profile_autotune},
                 {"text": "Проверка готовности", "command": self.run_readiness_master},
                 {"text": "Открыть диагностику", "command": lambda: self._show_control_center_section("diagnostics")},
             ],
@@ -739,9 +1055,17 @@ class SettingsUiMixin:
             row = tk.Frame(profile_card, bg=Theme.CARD_BG)
             row.pack(fill="x", padx=16, pady=(0, 8))
             tk.Label(row, text=label_text, bg=Theme.CARD_BG, fg=Theme.FG).pack(anchor="w", pady=(0, 4))
-            combo = ttk.Combobox(row, textvariable=self._voice_profile_override_vars[key], state="readonly", values=["normal", "boost", "aggressive"], style="Jarvis.TCombobox")
-            combo.pack(fill="x")
-            self._bind_selector_wheel_guard(combo)
+            shell, button = self._create_settings_choice_control(
+                row,
+                self._voice_profile_override_vars[key],
+                ["normal", "boost", "aggressive"],
+                font=("Segoe UI", 10),
+            )
+            shell.pack(fill="x")
+            try:
+                setattr(self, f"_voice_profile_selector_{key}", button)
+            except Exception:
+                pass
 
         def _save_profiles():
             payload = {key: var.get() for key, var in self._voice_profile_override_vars.items()}
@@ -757,25 +1081,14 @@ class SettingsUiMixin:
 
     def _show_control_center_section(self, tab_key: Optional[str] = None):
         normalized = self._control_center_tab_alias(tab_key)
+        self.current_settings_subsection = normalized
         self._cfg().set_last_control_center_section(normalized)
-
-        if self._is_full_settings_open():
-            embedded_target = {
-                "voice": "audio",
-                "diagnostics": "diagnostics",
-                "apps": "apps",
-                "updates": "updates",
-                "system": "system",
-                "main": "main",
-            }.get(normalized, "main")
-            self._select_embedded_settings_tab(embedded_target)
-            self._sync_embedded_settings_workspace_section()
-            return
 
         pages = getattr(self, "_control_center_pages", {})
         buttons = getattr(self, "_control_center_nav_buttons", {})
         if not pages:
             return
+        self._ensure_control_center_page_built(normalized)
 
         for key, frame in pages.items():
             try:
@@ -785,6 +1098,13 @@ class SettingsUiMixin:
                     frame.pack_forget()
             except Exception:
                 pass
+        try:
+            self._refresh_control_center_content_scroll()
+            canvas = getattr(self, "_control_center_content_canvas", None)
+            if canvas is not None:
+                canvas.yview_moveto(0.0)
+        except Exception:
+            pass
 
         for key, btn in buttons.items():
             try:
@@ -828,15 +1148,9 @@ class SettingsUiMixin:
                 pass
 
         self._set_bg_animation_paused(True, reason="settings_window")
-        win = tk.Toplevel(self.root)
+        win = tk.Frame(self.root, bg=Theme.BG)
         self.settings_window = win
-        win.title(app_brand_name() + " • Центр управления")
-        min_w, min_h, geom = self._control_center_geometry_preset()
-        win.geometry(geom)
-        win.minsize(min_w, min_h)
-        win.configure(bg=Theme.BG)
-        win.transient(self.root)
-        win.protocol("WM_DELETE_WINDOW", self.close_full_settings_view)
+        win.bind("<Escape>", lambda _event: self.close_full_settings_view(), add="+")
 
         outer = tk.Frame(win, bg=Theme.BG_LIGHT, highlightbackground=Theme.BORDER, highlightthickness=1)
         outer.pack(fill="both", expand=True, padx=14, pady=14)
@@ -851,7 +1165,7 @@ class SettingsUiMixin:
         header_left = tk.Frame(header_body, bg=Theme.CARD_BG)
         header_left.pack(side="left", fill="x", expand=True)
         self._control_center_header_left = header_left
-        tk.Label(header_left, text="Центр управления JARVIS", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 17)).pack(anchor="w")
+        tk.Label(header_left, text="Центр управления JARVIS", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 19)).pack(anchor="w")
         desc = tk.Label(
             header_left,
             text="Чат остается на главном экране. Здесь открываются только настройки, голосовая диагностика, память, сценарии и релизные инструменты.",
@@ -875,7 +1189,7 @@ class SettingsUiMixin:
             "Нубик JARVIS",
             "Сохранить основные",
             "Эта кнопка быстро сохраняет базовые параметры: ключи, профиль, аудио, тему и чувствительность голоса.",
-            "→ Если меняли что-то важное в разделе «ИИ и профиль», нажмите сначала сюда.",
+            "→ Если меняли что-то важное в разделе «Основное», нажмите сначала сюда.",
         )
         self._bind_control_center_guide_hint(
             close_btn,
@@ -891,7 +1205,7 @@ class SettingsUiMixin:
         body.grid_rowconfigure(0, weight=1)
         self._control_center_body = body
 
-        side = tk.Frame(body, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1, width=290)
+        side = tk.Frame(body, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1, width=248)
         side.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
         side.grid_propagate(False)
         self._control_center_side = side
@@ -899,11 +1213,11 @@ class SettingsUiMixin:
         nav = tk.Frame(side, bg=Theme.CARD_BG)
         nav.pack(fill="x", padx=14, pady=(16, 10))
         self._control_center_nav = nav
-        tk.Label(nav, text="Разделы", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 12)).pack(anchor="w", pady=(0, 8))
+        tk.Label(nav, text="Разделы", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 13)).pack(anchor="w", pady=(0, 8))
 
         self._control_center_nav_buttons = {}
         sections = [
-            ("main", "ИИ и профиль"),
+            ("main", "Основное"),
             ("voice", "Центр голоса"),
             ("apps", "Приложения"),
             ("diagnostics", "Диагностика"),
@@ -931,28 +1245,81 @@ class SettingsUiMixin:
             self._control_center_nav_buttons[key] = btn
             title, status, text, pointer = self._control_center_noob_message(key)
             self._bind_control_center_guide_hint(btn, title, status, text, pointer)
+        self.settings_nav_buttons = self._control_center_nav_buttons
+
+        nav_note = tk.Label(
+            side,
+            text="Центр управления больше не зажимает контент: слева только разделы, справа рабочая область с настройками и диагностикой.",
+            bg=Theme.BUTTON_BG,
+            fg=Theme.FG_SECONDARY,
+            justify="left",
+            font=("Segoe UI", 9),
+            padx=12,
+            pady=10,
+            highlightbackground=Theme.BORDER,
+            highlightthickness=1,
+        )
+        nav_note.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
+        bind_dynamic_wrap(nav_note, side, padding=30, minimum=160)
+        self._control_center_nav_note = nav_note
 
         guide_host = tk.Frame(side, bg=Theme.CARD_BG)
-        guide_host.pack(fill="both", expand=True, padx=14, pady=(0, 14))
         self._control_center_guide_host = guide_host
-        noob_asset = self.assets.get("noob")
+        noob_asset = (
+            self.assets.get("noob_settings")
+            or self.assets.get("noob2")
+            or self.assets.get("noob_sidebar")
+            or self.assets.get("noob")
+        )
+        noob_image = noob_asset if isinstance(noob_asset, ImageTk.PhotoImage) else None
         self._control_center_guide = GuideNoobPanel(
             guide_host,
-            image=noob_asset if hasattr(noob_asset, "width") else None,
+            image=noob_image,
             title="Нубик JARVIS",
             on_click=self._show_control_center_guide_popup,
-            variant="hero",
+            variant="settings",
         )
+        guide_host.pack(fill="x", padx=12, pady=(0, 12), before=nav_note)
+        title, status, text, pointer = self._control_center_noob_message("main")
+        self._set_control_center_guide_hint(title=title, status=status, text=text, pointer=pointer)
 
         content = tk.Frame(body, bg=Theme.BG_LIGHT, highlightbackground=Theme.BORDER, highlightthickness=1)
         content.grid(row=0, column=1, sticky="nsew")
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=1)
         self._control_center_content = content
+
+        content_canvas = tk.Canvas(content, bg=Theme.BG_LIGHT, highlightthickness=0, bd=0)
+        content_scroll = ttk.Scrollbar(content, orient="vertical", command=content_canvas.yview, style="Jarvis.Vertical.TScrollbar")
+        content_canvas.grid(row=0, column=0, sticky="nsew")
+        content_scroll.grid(row=0, column=1, sticky="ns")
+        content_inner = tk.Frame(content_canvas, bg=Theme.BG_LIGHT)
+        content_inner_id = content_canvas.create_window((0, 0), window=content_inner, anchor="nw")
+        content_canvas.configure(yscrollcommand=content_scroll.set)
+        content_inner.bind("<Configure>", lambda _event: self._refresh_control_center_content_scroll(), add="+")
+        content_canvas.bind("<Configure>", lambda _event: self._refresh_control_center_content_scroll(), add="+")
+        self._register_scroll_target(content_canvas)
+        self._control_center_content_canvas = content_canvas
+        self._control_center_content_scroll = content_scroll
+        self._control_center_content_inner = content_inner
+        self._control_center_content_inner_id = content_inner_id
         self._control_center_pages = {}
+        self._control_center_page_builders = {}
+        self._control_center_built_pages = set()
+        self._control_center_layout_signature = None
+        self._control_center_prewarm_queue = []
+        self._control_center_prewarm_after_id = None
+        self._control_center_prewarm_running = False
+        self._control_center_prewarm_done = False
 
         def _make_page(key, builder):
-            page = tk.Frame(content, bg=Theme.BG_LIGHT)
+            page = tk.Frame(content_inner, bg=Theme.BG_LIGHT)
+            try:
+                setattr(page, "_jarvis_plain_scroll_host", True)
+            except Exception:
+                pass
             self._control_center_pages[key] = page
-            builder(page)
+            self._control_center_page_builders[key] = builder
 
         _make_page("main", self._create_settings_tab1)
         _make_page("voice", self._create_voice_center_page)
@@ -960,85 +1327,111 @@ class SettingsUiMixin:
         _make_page("diagnostics", self._create_diagnostic_tab)
         _make_page("updates", self._create_settings_tab4)
         _make_page("system", self._create_settings_tab5)
+        self._ensure_control_center_page_built("main")
 
         win.bind("<Configure>", lambda _event: self._schedule_control_center_layout_refresh(), add="+")
-        self._restyle_settings_window()
-        self._schedule_control_center_layout_refresh()
         return win
 
-    def open_full_settings_view(self, tab_key: Optional[str] = None):
+    def open_full_settings_view(self, tab_key: Optional[str] = None, section: Optional[str] = None):
+        target = self._control_center_tab_alias(section if section is not None else tab_key)
         self._hide_legacy_settings_surfaces()
+        page = getattr(self, "embedded_settings_page", None)
+        if page is not None:
+            try:
+                page.place_forget()
+                page.pack_forget()
+                page.grid_forget()
+            except Exception:
+                pass
+        win = self._build_control_center_window()
+        self._ensure_control_center_page_built(target)
+        self._sync_control_center_window_to_root(win)
+        self._restyle_settings_window()
+        self._show_control_center_section(target)
+        self._workspace_section = "settings"
+        self._schedule_control_center_layout_refresh()
         try:
-            win = getattr(self, "settings_window", None)
-            if win is not None and win.winfo_exists():
-                win.destroy()
+            if isinstance(win, tk.Toplevel):
+                win.deiconify()
+                win.lift()
+                win.focus_force()
+            else:
+                win.place(relx=0, rely=0, relwidth=1, relheight=1)
+                win.lift()
+                win.focus_force()
         except Exception:
             pass
-        self.settings_window = None
-
-        page = self._build_embedded_settings_page()
         try:
-            page.pack(fill="both", expand=True)
+            win.update_idletasks()
         except Exception:
             pass
-        chat_stage = getattr(self, "chat_stage", None)
-        if chat_stage is not None:
+        try:
+            self._refresh_control_center_content_scroll()
+        except Exception:
+            pass
+        try:
+            win.after(24, lambda: (self._show_control_center_section(target), self._refresh_control_center_content_scroll()))
+            win.after(120, lambda: (self._show_control_center_section(target), self._refresh_control_center_content_scroll()))
+        except Exception:
+            pass
+        try:
+            self._preferred_scroll_target = getattr(self, "_control_center_content_canvas", None)
+        except Exception:
+            pass
+        try:
+            win.after(850, lambda: self._schedule_control_center_prewarm(target))
+        except Exception:
+            pass
+        if bool(getattr(self, "_startup_gate_setup", False)):
             try:
-                chat_stage.pack_forget()
-            except Exception:
-                pass
-        controls_bar = getattr(self, "controls_bar", None)
-        if controls_bar is not None:
-            try:
-                controls_bar.pack_forget()
-            except Exception:
-                pass
-        self._show_control_center_section(tab_key)
-        if hasattr(self, "_schedule_settings_visual_refresh"):
-            try:
-                self._schedule_settings_visual_refresh()
-            except Exception:
-                pass
-        if hasattr(self, "_set_workspace_section"):
-            try:
-                self._set_workspace_section(self._control_center_tab_alias(tab_key))
+                win.after(80, lambda: getattr(self, "_settings_primary_api_entry", None).focus_set())
             except Exception:
                 pass
         self.set_status("Настройки открыты", "busy")
 
     def close_full_settings_view(self):
         win = getattr(self, "settings_window", None)
-        self.settings_window = None
+        try:
+            self._hide_tooltip()
+        except Exception:
+            pass
         if win is not None:
             try:
                 if win.winfo_exists():
-                    win.destroy()
+                    try:
+                        if isinstance(win, tk.Toplevel):
+                            win.withdraw()
+                    except Exception:
+                        pass
+                    try:
+                        win.place_forget()
+                    except Exception:
+                        pass
             except Exception:
                 pass
         page = getattr(self, "embedded_settings_page", None)
         if page is not None:
             try:
+                page.place_forget()
                 page.pack_forget()
-            except Exception:
-                pass
-        chat_stage = getattr(self, "chat_stage", None)
-        if chat_stage is not None:
-            try:
-                chat_stage.pack(fill="both", expand=True)
-            except Exception:
-                pass
-        controls_bar = getattr(self, "controls_bar", None)
-        if controls_bar is not None:
-            try:
-                controls_bar.pack(side="bottom", fill="x", pady=(12, 0))
-            except Exception:
-                pass
-        if hasattr(self, "_set_workspace_section"):
-            try:
-                self._set_workspace_section("chat")
+                page.grid_forget()
             except Exception:
                 pass
         self._set_bg_animation_paused(False, reason="settings_window")
+        self._workspace_section = "chat"
+        try:
+            self._set_workspace_section("chat")
+        except Exception:
+            pass
+        try:
+            self._preferred_scroll_target = getattr(self, "chat_canvas", None)
+        except Exception:
+            pass
+        try:
+            self._prime_after_visual_transition()
+        except Exception:
+            pass
+        self.set_status("Готов", "ok")
         self._schedule_chat_layout_sync(scroll_to_end=True)
         self.set_status("Готов", "ok")
 
@@ -1052,6 +1445,15 @@ class SettingsUiMixin:
                 child.destroy()
             except Exception:
                 pass
+        if bool(getattr(parent, "_jarvis_plain_scroll_host", False)):
+            inner = tk.Frame(parent, bg=inner_bg or Theme.BG_LIGHT)
+            inner.pack(fill="both", expand=True)
+            inner.bind("<Configure>", lambda _event: self._refresh_control_center_content_scroll(), add="+")
+            try:
+                parent.after_idle(self._refresh_control_center_content_scroll)
+            except Exception:
+                pass
+            return parent, getattr(self, "_control_center_content_canvas", None), inner
         host = tk.Frame(parent, bg=Theme.BG_LIGHT)
         host.pack(fill="both", expand=True)
         canvas = tk.Canvas(host, bg=Theme.BG_LIGHT, highlightthickness=0, bd=0)
@@ -1074,37 +1476,66 @@ class SettingsUiMixin:
         self._register_scroll_target(canvas)
         return host, canvas, inner
 
+    def _refresh_control_center_content_scroll(self):
+        canvas = getattr(self, "_control_center_content_canvas", None)
+        inner_id = getattr(self, "_control_center_content_inner_id", None)
+        if canvas is None or inner_id is None:
+            return
+        try:
+            canvas.update_idletasks()
+        except Exception:
+            pass
+        try:
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=bbox)
+        except Exception:
+            pass
+        try:
+            canvas.itemconfigure(inner_id, width=canvas.winfo_width())
+        except Exception:
+            pass
+
     def _create_settings_tab1(self, parent):
-        # Вкладка "Основные" (API ключи, Telegram, голос, микрофон)
+        # Вкладка "Основные" (активация, профиль, голос, микрофон)
         _, _, inner = self._create_scrollable_settings_host(parent, inner_bg=Theme.BG_LIGHT)
 
-        def entry_row(parent, label, value, show=None):
+        def entry_row(parent, label, value, show=None, help_text: str = ""):
             row = tk.Frame(parent, bg=Theme.CARD_BG)
             row.pack(fill="x", pady=(0, 10))
-            tk.Label(row, text=label, bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 10)).pack(anchor="w")
+            self._create_settings_field_header(row, label, help_text)
             var = tk.StringVar(value=value or "")
-            entry = tk.Entry(row, textvariable=var, bg=Theme.INPUT_BG, fg=Theme.FG, insertbackground=Theme.FG, width=42, show=show or "", relief="flat")
+            entry = tk.Entry(
+                row,
+                textvariable=var,
+                bg=Theme.INPUT_BG,
+                fg=Theme.FG,
+                insertbackground=Theme.FG,
+                width=42,
+                show=show or "",
+                relief="flat",
+                font=("Segoe UI Semibold", 12),
+            )
             entry.pack(fill="x", ipady=6)
             self._setup_entry_bindings(entry)
             return var, entry
 
-        def dropdown_row(parent, label, values, value):
+        def dropdown_row(parent, label, values, value, help_text: str = ""):
             row = tk.Frame(parent, bg=Theme.CARD_BG)
             row.pack(fill="x", pady=(0, 10))
-            tk.Label(row, text=label, bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 10)).pack(anchor="w")
+            self._create_settings_field_header(row, label, help_text)
             var = tk.StringVar(value=value)
-            box = ttk.Combobox(row, textvariable=var, values=values, state="readonly", style="Jarvis.TCombobox")
-            box.pack(fill="x", ipady=5, pady=(4, 0))
-            self._bind_selector_wheel_guard(box)
-            return var, box
+            shell, button = self._create_settings_choice_control(row, var, values, font=("Segoe UI", 11))
+            shell.pack(fill="x", pady=(4, 0))
+            return var, button
 
-        def slider_row(parent, label, from_, to, value, resolution, suffix=""):
+        def slider_row(parent, label, from_, to, value, resolution, suffix="", help_text: str = ""):
             row = tk.Frame(parent, bg=Theme.CARD_BG)
             row.pack(fill="x", pady=(0, 10))
             head = tk.Frame(row, bg=Theme.CARD_BG)
             head.pack(fill="x")
-            tk.Label(head, text=label, bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 10)).pack(side="left")
-            val_label = tk.Label(head, text="", bg=Theme.CARD_BG, fg=Theme.FG_SECONDARY, font=("Segoe UI", 10))
+            self._create_settings_field_header(head, label, help_text)
+            val_label = tk.Label(head, text="", bg=Theme.CARD_BG, fg=Theme.FG_SECONDARY, font=("Segoe UI", 11))
             val_label.pack(side="right")
             var = tk.DoubleVar(value=value)
             scale = tk.Scale(row, from_=from_, to=to, orient="horizontal", resolution=resolution, variable=var,
@@ -1116,20 +1547,45 @@ class SettingsUiMixin:
             val_label.config(text=f"{var.get():.0f}{suffix}" if resolution >= 1 else f"{var.get():.2f}{suffix}")
             return var, scale, val_label
 
+        def flag_row(parent, label: str, variable, help_text: str = ""):
+            row = tk.Frame(parent, bg=Theme.CARD_BG)
+            row.pack(fill="x", pady=(0, 6))
+            check = tk.Checkbutton(row, text=label, variable=variable, **check_kwargs)
+            check.pack(side="left", anchor="w")
+            if str(help_text or "").strip():
+                badge = self._make_settings_help_badge(row, help_text)
+                badge.pack(side="right")
+            return check
+
+        check_kwargs = {
+            "bg": Theme.CARD_BG,
+            "fg": Theme.FG,
+            "selectcolor": Theme.INPUT_BG,
+            "activebackground": Theme.CARD_BG,
+            "activeforeground": Theme.FG,
+            "font": ("Segoe UI", 10),
+        }
+
         # Секция
         access = tk.Frame(inner, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
         access.pack(fill="x", padx=18, pady=(0, 12))
-        tk.Label(access, text="Доступ и безопасность", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=14, pady=(12,0))
+        tk.Label(access, text="Активация, профиль и безопасность", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 13)).pack(anchor="w", padx=14, pady=(12,0))
         body = tk.Frame(access, bg=Theme.CARD_BG)
         body.pack(fill="x", padx=14, pady=10)
 
-        groq_var, _ = entry_row(body, "Groq API ключ", CONFIG_MGR.get_api_key(), show="•")
-        login_var, _ = entry_row(body, "Логин пользователя", CONFIG_MGR.get_user_login())
-        user_name_var, _ = entry_row(body, "Имя пользователя", CONFIG_MGR.get_user_name())
-        tg_token_var, _ = entry_row(body, "Telegram Bot Token", CONFIG_MGR.get_telegram_token(), show="•")
-        tg_id_var, _ = entry_row(body, "Telegram user ID", str(CONFIG_MGR.get_telegram_user_id() or ""))
+        create_note_box(
+            body,
+            "Здесь собраны только самые важные вещи: активация, ключи, профиль пользователя, мозг JARVIS, режимы безопасности и базовое поведение окна.",
+            tone="soft",
+        )
+        groq_var, groq_entry = entry_row(body, "Ключ Groq API", CONFIG_MGR.get_api_key(), show="•", help_text="Главный ключ для мозга JARVIS. Без него чат и часть голосовых функций не смогут обращаться к ИИ.")
+        self._settings_primary_api_entry = groq_entry
+        login_var, _ = entry_row(body, "Логин пользователя", CONFIG_MGR.get_user_login(), help_text="Техническое имя профиля. Используется в конфиге, логах и некоторых интеграциях.")
+        user_name_var, _ = entry_row(body, "Имя пользователя", CONFIG_MGR.get_user_name(), help_text="Как JARVIS будет обращаться к вам в чате, озвучке и подсказках.")
+        tg_token_var, _ = entry_row(body, "Токен Telegram-бота", CONFIG_MGR.get_telegram_token(), show="•", help_text="Нужен только если хотите управлять JARVIS через Telegram-бота.")
+        tg_id_var, _ = entry_row(body, "ID пользователя Telegram", str(CONFIG_MGR.get_telegram_user_id() or ""), help_text="Ваш числовой Telegram ID. По нему JARVIS поймёт, кому разрешено писать боту.")
         model_items = [
-            ("Groq Compound Mini — лучший баланс для Jarvis", "groq/compound-mini"),
+            ("Groq Compound Mini — рекомендуемый баланс для JARVIS", "groq/compound-mini"),
             ("Llama 3.3 70B — тяжелее, но мощнее", "llama-3.3-70b-versatile"),
             ("Llama 3.1 8B — быстрый fallback", "llama-3.1-8b-instant"),
             ("Qwen3 32B — альтернативный вариант", "qwen/qwen3-32b"),
@@ -1137,7 +1593,9 @@ class SettingsUiMixin:
         ai_simple_labels = bool(CONFIG_MGR.get_ai_simple_labels())
         current_model = str(CONFIG_MGR.get_model() or DEFAULT_CHAT_MODEL).strip()
         current_model_label = next((lbl for lbl, key in model_items if key == current_model), model_items[0][0])
-        model_var, _ = dropdown_row(body, "Мозг JARVIS" if ai_simple_labels else "Модель ИИ", [x[0] for x in model_items], current_model_label)
+        model_var, model_selector = dropdown_row(body, "Мозг JARVIS" if ai_simple_labels else "Модель ИИ", [x[0] for x in model_items], current_model_label, help_text="Главная модель для чата и команд. Compound Mini сейчас оптимален для повседневной работы.")
+        self._settings_model_var = model_var
+        self._settings_model_selector = model_selector
         temperature_var, _, _ = slider_row(
             body,
             "Строгость ответов" if ai_simple_labels else "Температура ИИ",
@@ -1146,6 +1604,7 @@ class SettingsUiMixin:
             float(CONFIG_MGR.get_temperature()),
             0.01,
             "",
+            help_text="Ниже значение — спокойнее и точнее ответы. Выше значение — свободнее стиль, но больше риск лишней фантазии.",
         )
         max_tokens_var, _, _ = slider_row(
             body,
@@ -1155,6 +1614,7 @@ class SettingsUiMixin:
             float(CONFIG_MGR.get_max_tokens()),
             1,
             " tok",
+            help_text="Ограничивает максимальную длину ответа. На ум модели не влияет, только на развернутость текста.",
         )
         create_note_box(
             body,
@@ -1177,21 +1637,21 @@ class SettingsUiMixin:
         free_chat_mode_var = tk.BooleanVar(value=CONFIG_MGR.get_free_chat_mode())
         wake_word_boost_var = tk.BooleanVar(value=CONFIG_MGR.get_wake_word_boost_enabled())
         safe_mode_var = tk.BooleanVar(value=CONFIG_MGR.get_safe_mode_enabled())
-        tk.Checkbutton(flags, text="Автообновление", variable=auto_update_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Режим одного пользователя", variable=single_user_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Автозапуск Windows", variable=autostart_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Активное прослушивание (слово «Джарвис»)", variable=active_listening_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Усилить чувствительность wake-word", variable=wake_word_boost_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Свободный стиль ответов (менее формально)", variable=free_chat_mode_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Безопасный режим при старте", variable=safe_mode_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
+        flag_row(flags, "Автообновление", auto_update_var, "JARVIS будет сам проверять новые версии и предлагать обновиться.")
+        flag_row(flags, "Режим одного пользователя", single_user_var, "Ограничивает доступ под одного основного пользователя и снижает риск чужих команд.")
+        flag_row(flags, "Автозапуск Windows", autostart_var, "Приложение будет запускаться вместе с Windows.")
+        flag_row(flags, "Активное прослушивание по слову «Джарвис»", active_listening_var, "JARVIS постоянно ждёт слово активации. Удобно, но требует стабильного микрофона и аккуратного порога.")
+        flag_row(flags, "Усилить чувствительность слова активации", wake_word_boost_var, "Помогает, если слово «Джарвис» слышно только очень близко к микрофону.")
+        flag_row(flags, "Свободный стиль ответов", free_chat_mode_var, "Разрешает ИИ отвечать менее сухо и формально.")
+        flag_row(flags, "Безопасный режим при старте", safe_mode_var, "Стартует без части фоновых сервисов. Полезно, если приложение падает, дёргается или странно ведёт себя на запуске.")
         tk.Label(
             flags,
-            text="Wake-word boost помогает, если «Джарвис» слышно только вплотную в микрофон. Безопасный режим урезает фоновые сервисы и лучше подходит для диагностики.",
+            text="Усиление слова активации помогает, если «Джарвис» слышно только вплотную в микрофон. Безопасный режим урезает фоновые сервисы и лучше подходит для диагностики.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             justify="left",
             wraplength=620,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 11),
         ).pack(anchor="w", pady=(4, 0))
 
         theme_items = [("Тёмная", "dark"), ("Светлая", "light")]
@@ -1199,25 +1659,33 @@ class SettingsUiMixin:
         if current_theme not in {"dark", "light"}:
             current_theme = "dark"
         current_theme_label = next((lbl for lbl, val in theme_items if val == current_theme), theme_items[0][0])
-        theme_var, _ = dropdown_row(body, "Тема интерфейса", [x[0] for x in theme_items], current_theme_label)
+        theme_var, theme_selector = dropdown_row(body, "Тема интерфейса", [x[0] for x in theme_items], current_theme_label, help_text="Общий цветовой режим приложения.")
         density_items = [("Комфортный — больше воздуха", "comfortable"), ("Компактный — плотнее", "compact")]
         current_density = str(CONFIG_MGR.get_ui_density() or "comfortable").strip().lower()
         current_density_label = next((lbl for lbl, val in density_items if val == current_density), density_items[0][0])
-        density_var, _ = dropdown_row(body, "Плотность интерфейса", [x[0] for x in density_items], current_density_label)
+        density_var, density_selector = dropdown_row(body, "Плотность интерфейса", [x[0] for x in density_items], current_density_label, help_text="Влияет на воздух между блоками. Комфортный режим лучше читается, компактный помещает больше элементов.")
         release_channel_items = [("Стабильный — официальный релиз", "stable"), ("Бета — тестовый канал", "beta")]
         current_release_channel = str(CONFIG_MGR.get_release_channel() or "stable").strip().lower()
         current_release_channel_label = next((lbl for lbl, val in release_channel_items if val == current_release_channel), release_channel_items[0][0])
-        release_channel_var, _ = dropdown_row(body, "Канал обновлений", [x[0] for x in release_channel_items], current_release_channel_label)
+        release_channel_var, release_selector = dropdown_row(body, "Канал обновлений", [x[0] for x in release_channel_items], current_release_channel_label, help_text="Стабильный канал безопаснее. Бета нужен для ранней проверки новых функций.")
         close_behavior_items = [("Закрывать приложение полностью", "exit"), ("Убирать в трей", "tray")]
         current_close_behavior = str(CONFIG_MGR.get_close_behavior() or "exit").strip().lower()
         current_close_behavior_label = next((lbl for lbl, val in close_behavior_items if val == current_close_behavior), close_behavior_items[0][0])
-        close_behavior_var, _ = dropdown_row(body, "Поведение при закрытии окна", [x[0] for x in close_behavior_items], current_close_behavior_label)
+        close_behavior_var, close_selector = dropdown_row(body, "Поведение при закрытии окна", [x[0] for x in close_behavior_items], current_close_behavior_label, help_text="Определяет, закрывается ли JARVIS полностью или прячется в трей.")
+        self._settings_theme_var = theme_var
+        self._settings_theme_selector = theme_selector
+        self._settings_density_var = density_var
+        self._settings_density_selector = density_selector
+        self._settings_release_channel_var = release_channel_var
+        self._settings_release_channel_selector = release_selector
+        self._settings_close_behavior_var = close_behavior_var
+        self._settings_close_behavior_selector = close_selector
         create_note_box(
             body,
             "По умолчанию безопаснее завершать приложение полностью. Режим трея нужен только если вы сознательно хотите оставлять JARVIS жить в фоне после закрытия окна.",
             tone="soft",
         )
-        ui_scale_var, _, _ = slider_row(body, "Масштаб интерфейса", 90, 150, float(CONFIG_MGR.get_ui_scale_percent()), 1, "%")
+        ui_scale_var, _, _ = slider_row(body, "Масштаб интерфейса", 90, 150, float(CONFIG_MGR.get_ui_scale_percent()), 1, "%", help_text="Увеличивает или уменьшает общий размер интерфейса. Полезно, если текст кажется слишком мелким.")
 
         bg_self_check_var = tk.BooleanVar(value=CONFIG_MGR.get_background_self_check())
         self_learning_var = tk.BooleanVar(value=CONFIG_MGR.get_self_learning_enabled())
@@ -1225,24 +1693,24 @@ class SettingsUiMixin:
         helper_guides_var = tk.BooleanVar(value=CONFIG_MGR.get_helper_guides_enabled())
         dpi_adaptation_var = tk.BooleanVar(value=CONFIG_MGR.get_dpi_adaptation_enabled())
         ai_simple_labels_var = tk.BooleanVar(value=CONFIG_MGR.get_ai_simple_labels())
-        tk.Checkbutton(flags, text="Внутренний поиск ошибок по расписанию", variable=bg_self_check_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Самообучение на выполненных командах", variable=self_learning_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Фокус-режим по кнопке", variable=focus_mode_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Помощники и визуальные подсказки", variable=helper_guides_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Авто-адаптация под DPI и масштаб", variable=dpi_adaptation_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(flags, text="Объяснять ИИ простым языком", variable=ai_simple_labels_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        self_check_interval_var, _ = entry_row(body, "Интервал фоновой диагностики (мин)", str(CONFIG_MGR.get_self_check_interval_min()))
+        flag_row(flags, "Внутренний поиск ошибок по расписанию", bg_self_check_var, "Периодически прогоняет внутреннюю самопроверку и пишет о найденных проблемах.")
+        flag_row(flags, "Самообучение на выполненных командах", self_learning_var, "Позволяет JARVIS учитывать историю удачных действий и адаптировать поведение.")
+        flag_row(flags, "Фокус-режим по кнопке", focus_mode_var, "В узком и спокойном режиме убирает лишние панели и оставляет только разговор.")
+        flag_row(flags, "Помощники и визуальные подсказки", helper_guides_var, "Показывает Нубика, контекстные советы и дополнительные объяснения по интерфейсу.")
+        flag_row(flags, "Авто-адаптация под DPI и масштаб", dpi_adaptation_var, "Ставит более безопасный размер интерфейса на мониторах с высоким масштабом Windows.")
+        flag_row(flags, "Объяснять ИИ простым языком", ai_simple_labels_var, "Меняет технические названия вроде «температура» на более понятные человеческие подписи.")
+        self_check_interval_var, _ = entry_row(body, "Интервал фоновой диагностики (мин)", str(CONFIG_MGR.get_self_check_interval_min()), help_text="Как часто запускать внутреннюю самопроверку в фоне.")
 
         # Аудио секция
         audio = tk.Frame(inner, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
         audio.pack(fill="x", padx=18, pady=(0, 12))
-        tk.Label(audio, text="Микрофон и звук", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=14, pady=(12,0))
+        tk.Label(audio, text="Микрофон, слышимость и озвучка", bg=Theme.CARD_BG, fg=Theme.FG, font=("Segoe UI Semibold", 13)).pack(anchor="w", padx=14, pady=(12,0))
         tk.Label(
             audio,
             text="Показываем только основные устройства. Системные и битые варианты скрыты, но сохранённое устройство не потеряется.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
-            font=("Segoe UI", 9),
+            font=("Segoe UI", 10),
         ).pack(anchor="w", padx=14, pady=(2, 8))
         audio_body = tk.Frame(audio, bg=Theme.CARD_BG)
         audio_body.pack(fill="x", padx=14, pady=10)
@@ -1270,7 +1738,9 @@ class SettingsUiMixin:
                 break
         if not mic_value and mic_values:
             mic_value = mic_values[0]
-        mic_var, _ = dropdown_row(device_col, "Микрофон", mic_values, mic_value)
+        mic_var, mic_selector = dropdown_row(device_col, "Микрофон", mic_values, mic_value, help_text="Основное устройство, из которого JARVIS слушает голос.")
+        self._settings_mic_var = mic_var
+        self._settings_mic_selector = mic_selector
 
         output_option_map = {}
         output_values = []
@@ -1289,7 +1759,9 @@ class SettingsUiMixin:
             output_selected = output_values[0]
         if not output_selected and output_values:
             output_selected = output_values[0]
-        output_var, _ = dropdown_row(device_col, "Вывод звука", output_values, output_selected)
+        output_var, output_selector = dropdown_row(device_col, "Вывод звука", output_values, output_selected, help_text="Куда воспроизводить ответы, тесты и озвучку.")
+        self._settings_output_var = output_var
+        self._settings_output_selector = output_selector
         mic_test_status = tk.StringVar(value="Готов к проверке")
         tk.Label(device_col, textvariable=mic_test_status, bg=Theme.CARD_BG, fg=Theme.FG_SECONDARY).pack(anchor="w", pady=(5,0))
         tk.Button(
@@ -1305,9 +1777,11 @@ class SettingsUiMixin:
 
         voice_values = self._voice_names()
         voice_value = self._selected_voice_label()
-        voice_var, _ = dropdown_row(voice_col, "Голос Windows TTS", voice_values or ["(голоса не найдены)"], voice_value or (voice_values[0] if voice_values else ""))
-        rate_var, _, _ = slider_row(voice_col, "Скорость голоса", 150, 350, float(CONFIG_MGR.get_voice_rate()), 1, " символов/мин")
-        volume_var, _, _ = slider_row(voice_col, "Громкость", 0.2, 1.0, float(CONFIG_MGR.get_voice_volume()), 0.01, "")
+        voice_var, voice_selector = dropdown_row(voice_col, "Голос Windows", voice_values or ["(голоса не найдены)"], voice_value or (voice_values[0] if voice_values else ""), help_text="Системный голос для оффлайн-озвучки Windows.")
+        self._settings_voice_var = voice_var
+        self._settings_voice_selector = voice_selector
+        rate_var, _, _ = slider_row(voice_col, "Скорость голоса", 150, 350, float(CONFIG_MGR.get_voice_rate()), 1, " символов/мин", help_text="Скорость, с которой JARVIS произносит текст.")
+        volume_var, _, _ = slider_row(voice_col, "Громкость", 0.2, 1.0, float(CONFIG_MGR.get_voice_volume()), 0.01, "", help_text="Громкость озвучки JARVIS.")
 
         tts_provider_items = [
             ("pyttsx3 — оффлайн / Windows", "pyttsx3"),
@@ -1316,18 +1790,20 @@ class SettingsUiMixin:
         ]
         current_tts_provider = CONFIG_MGR.get_tts_provider()
         current_tts_provider_label = next((lbl for lbl, key in tts_provider_items if key == current_tts_provider), tts_provider_items[0][0])
-        tts_provider_var, _ = dropdown_row(voice_col, "Источник TTS", [x[0] for x in tts_provider_items], current_tts_provider_label)
+        tts_provider_var, tts_provider_selector = dropdown_row(voice_col, "Движок озвучки", [x[0] for x in tts_provider_items], current_tts_provider_label, help_text="Выбор между оффлайн-озвучкой Windows и онлайн-провайдерами с более живым голосом.")
+        self._settings_tts_provider_var = tts_provider_var
+        self._settings_tts_provider_selector = tts_provider_selector
         tts_adv_toggle_row = tk.Frame(voice_col, bg=Theme.CARD_BG)
         tts_adv_toggle_row.pack(fill="x", pady=(0, 8))
         tts_adv_open = [False]
         tts_adv_wrap = tk.Frame(voice_col, bg=Theme.CARD_BG)
-        edge_voice_var, _ = entry_row(tts_adv_wrap, "Edge-TTS voice", CONFIG_MGR.get_edge_tts_voice())
-        eleven_key_var, _ = entry_row(tts_adv_wrap, "ElevenLabs API key", CONFIG_MGR.get_elevenlabs_api_key(), show="*")
-        eleven_voice_var, _ = entry_row(tts_adv_wrap, "ElevenLabs voice_id", CONFIG_MGR.get_elevenlabs_voice_id())
-        eleven_model_var, _ = entry_row(tts_adv_wrap, "ElevenLabs model_id", CONFIG_MGR.get_elevenlabs_model_id())
+        edge_voice_var, _ = entry_row(tts_adv_wrap, "Голос Edge-TTS", CONFIG_MGR.get_edge_tts_voice(), help_text="Точное имя голоса Edge-TTS. Нужен только если используете Edge-TTS.")
+        eleven_key_var, _ = entry_row(tts_adv_wrap, "API-ключ ElevenLabs", CONFIG_MGR.get_elevenlabs_api_key(), show="*", help_text="Секретный ключ ElevenLabs для онлайн-озвучки.")
+        eleven_voice_var, _ = entry_row(tts_adv_wrap, "ID голоса ElevenLabs", CONFIG_MGR.get_elevenlabs_voice_id(), help_text="Идентификатор конкретного голоса в ElevenLabs.")
+        eleven_model_var, _ = entry_row(tts_adv_wrap, "Модель ElevenLabs", CONFIG_MGR.get_elevenlabs_model_id(), help_text="Модель синтеза речи ElevenLabs. Можно оставить текущую рекомендацию по умолчанию.")
         tk.Label(
             tts_adv_wrap,
-            text="Для ElevenLabs обязательны API key и voice_id.\nРекомендация: eleven_flash_v2_5 для минимальной задержки, eleven_v3 для максимальной выразительности.\nЕсли ключи пустые — будет авто-переход на оффлайн pyttsx3.",
+            text="Для ElevenLabs обязательны API-ключ и ID голоса.\nРекомендация: eleven_flash_v2_5 для минимальной задержки, eleven_v3 для максимальной выразительности.\nЕсли ключи пустые — будет авто-переход на оффлайн pyttsx3.",
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             justify="left",
@@ -1364,7 +1840,9 @@ class SettingsUiMixin:
         current_listening = CONFIG_MGR.get_listening_profile()
         initial_listening_profile = [current_listening]
         current_listening_label = next((lbl for lbl, key in listening_items if key == current_listening), listening_items[0][0])
-        listening_var, _ = dropdown_row(voice_col, "Восприятие/слышимость", [x[0] for x in listening_items], current_listening_label)
+        listening_var, listening_selector = dropdown_row(voice_col, "Восприятие/слышимость", [x[0] for x in listening_items], current_listening_label, help_text="Насколько агрессивно JARVIS пытается услышать и поймать голос. Чем выше, тем чувствительнее.")
+        self._settings_listening_var = listening_var
+        self._settings_listening_selector = listening_selector
         listening_warn_var = tk.StringVar(value="")
         tk.Label(voice_col, textvariable=listening_warn_var, bg=Theme.CARD_BG, fg=Theme.STATUS_WARN, justify="left", wraplength=330).pack(anchor="w", pady=(2, 4))
 
@@ -1387,11 +1865,13 @@ class SettingsUiMixin:
         ]
         current_device_profile = str(CONFIG_MGR.get_device_profile_mode() or "auto").strip().lower()
         current_device_profile_label = next((lbl for lbl, key in device_profile_items if key == current_device_profile), device_profile_items[0][0])
-        device_profile_var, _ = dropdown_row(voice_col, "Профиль устройства", [x[0] for x in device_profile_items], current_device_profile_label)
+        device_profile_var, device_profile_selector = dropdown_row(voice_col, "Профиль устройства", [x[0] for x in device_profile_items], current_device_profile_label, help_text="Подсказывает JARVIS, какой тип микрофона используется, чтобы лучше подстроить чувствительность.")
+        self._settings_device_profile_var = device_profile_var
+        self._settings_device_profile_selector = device_profile_selector
         noise_suppression_var = tk.BooleanVar(value=CONFIG_MGR.get_noise_suppression_enabled())
         vad_var = tk.BooleanVar(value=CONFIG_MGR.get_vad_enabled())
-        tk.Checkbutton(voice_col, text="Шумоподавление", variable=noise_suppression_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
-        tk.Checkbutton(voice_col, text="VAD / отсев тишины", variable=vad_var, bg=Theme.CARD_BG, fg=Theme.FG, selectcolor=Theme.INPUT_BG).pack(anchor="w")
+        flag_row(voice_col, "Шумоподавление", noise_suppression_var, "Пытается ослабить постоянный фоновый шум: вентилятор, улицу, гул комнаты.")
+        flag_row(voice_col, "VAD / отсев тишины", vad_var, "Отсекает пустые участки без речи, чтобы меньше цеплять тишину и мусор.")
         create_note_box(
             voice_col,
             "Автоопределение само подбирает поведение под гарнитуру, USB-микрофон или встроенное устройство. VAD и шумоподавление помогают не цеплять лишний фон.",
@@ -1401,6 +1881,16 @@ class SettingsUiMixin:
         # Кнопка сохранения внизу вкладки
         def save_tab1():
             try:
+                api_key = groq_var.get().strip()
+                startup_activation = bool(getattr(self, "_startup_gate_setup", False))
+                if startup_activation and not api_key:
+                    self.set_status("Нужен API ключ", "warn")
+                    try:
+                        groq_entry.focus_set()
+                    except Exception:
+                        pass
+                    messagebox.showwarning(app_brand_name(), "Введите Groq API ключ, чтобы открыть чат.")
+                    return
                 try:
                     tg_id = int(tg_id_var.get().strip()) if tg_id_var.get().strip() else 0
                 except Exception:
@@ -1480,16 +1970,18 @@ class SettingsUiMixin:
                 if selected_tts_provider == "elevenlabs" and (not eleven_key or not eleven_voice):
                     messagebox.showwarning(
                         "ElevenLabs",
-                        "Для ElevenLabs нужно заполнить API key и voice_id.\nСейчас будет сохранён безопасный оффлайн-режим pyttsx3.",
+                        "Для ElevenLabs нужно заполнить API-ключ и ID голоса.\nСейчас будет сохранён безопасный оффлайн-режим pyttsx3.",
                     )
                     selected_tts_provider = "pyttsx3"
                 prev_theme_mode = str(CONFIG_MGR.get_theme_mode() or "dark").strip().lower()
                 prev_theme_mode = prev_theme_mode if prev_theme_mode in {"dark", "light"} else "dark"
+                prev_density_mode = str(CONFIG_MGR.get_ui_density() or "comfortable").strip().lower()
+                prev_scale_percent = int(CONFIG_MGR.get_ui_scale_percent() or 100)
                 previous_safe_mode = bool(getattr(self, "safe_mode", False))
                 next_safe_mode = bool(safe_mode_var.get())
 
                 CONFIG_MGR.set_many({
-                    "api_key": groq_var.get().strip(),
+                    "api_key": api_key,
                     "model": selected_model_key,
                     "temperature": float(temperature_var.get()),
                     "max_tokens": int(max_tokens_var.get()),
@@ -1561,6 +2053,14 @@ class SettingsUiMixin:
                 self.reload_services()
                 self._apply_dpi_scaling()
                 self.apply_theme_runtime()
+                if (
+                    prev_density_mode != str(selected_density_key or "").strip().lower()
+                    or prev_scale_percent != int(ui_scale_var.get())
+                ):
+                    try:
+                        self._rebuild_workspace_shell_v2()
+                    except Exception:
+                        pass
                 if hasattr(self, "refresh_workspace_layout_mode"):
                     self.refresh_workspace_layout_mode()
                 if hasattr(self, "_update_guide_context"):
@@ -1569,6 +2069,15 @@ class SettingsUiMixin:
                 self.refresh_mic_status_label()
                 self.refresh_output_status_label()
                 self.refresh_tts_status_label()
+                if startup_activation:
+                    CONFIG_MGR.set_first_run_done()
+                    self._startup_gate_setup = False
+                    self.close_full_settings_view()
+                    if not self.safe_mode and not getattr(self, "_bg_anim_started", False):
+                        self.start_bg_anim()
+                    self._start_runtime_services()
+                    self.set_status("Готов", "ok")
+                    return
                 self.set_status("Настройки сохранены", "ok")
                 messagebox.showinfo(app_brand_name(), "Настройки сохранены.")
             except Exception as e:
@@ -1918,7 +2427,7 @@ class SettingsUiMixin:
         publish_head.pack(fill="x", padx=12, pady=(10, 4))
         tk.Label(
             publish_head,
-            text="One-click publish",
+            text="Публикация в 1 клик",
             bg=Theme.BUTTON_BG,
             fg=Theme.FG,
             font=("Segoe UI", 11, "bold"),
@@ -1954,18 +2463,18 @@ class SettingsUiMixin:
         def run_publish_one_click():
             script_path = runtime_root_path("publish_tools", "Publish-One-Click.bat")
             if not os.path.exists(script_path):
-                messagebox.showerror(app_brand_name(), f"Скрипт one-click publish не найден:\n{script_path}")
+                messagebox.showerror(app_brand_name(), f"Скрипт публикации в 1 клик не найден:\n{script_path}")
                 return
             if not messagebox.askyesno(
                 app_brand_name(),
-                "Запустить one-click publish?\n\nЭто соберёт релиз, подготовит GitHub bundle, сделает commit, push и отправит tag в GitHub.",
+                "Запустить публикацию в 1 клик?\n\nЭто соберёт релиз, подготовит GitHub bundle, сделает commit, push и отправит tag в GitHub.",
             ):
                 return
             try:
                 os.startfile(script_path)
-                self.set_status_temp("Открыл one-click publish", "ok")
+                self.set_status_temp("Открыл публикацию в 1 клик", "ok")
             except Exception as e:
-                self.report_error("Ошибка запуска one-click publish", e, speak=False)
+                self.report_error("Ошибка запуска публикации в 1 клик", e, speak=False)
 
         publish_actions = tk.Frame(publish_card, bg=Theme.BUTTON_BG)
         publish_actions.pack(fill="x", padx=12, pady=(0, 12))
@@ -2014,7 +2523,7 @@ class SettingsUiMixin:
             [
                 {"text": "Проверка готовности", "command": self.run_readiness_master, "bg": Theme.ACCENT},
                 {"text": "Проверка релиза", "command": self.run_release_lock_check},
-                {"text": "Диагностика ZIP", "command": self.export_diagnostics_bundle_action},
+                {"text": "Пакет поддержки", "command": self.export_diagnostics_bundle_action},
                 {"text": "Резервная копия", "command": self.create_profile_backup_action},
                 {"text": "Восстановить копию", "command": self.restore_profile_backup_action},
                 {"text": "Набор расширений", "command": self.export_plugin_pack_action},
@@ -2254,10 +2763,10 @@ def _patched_create_settings_tab4_v2(self, parent):
     download_var = tk.StringVar(value=str(CONFIG_MGR.get_update_download_url() or "").strip())
     trusted_hosts_var = tk.StringVar(value=", ".join(CONFIG_MGR.get_update_trusted_hosts()))
 
-    def _labeled_entry(container, label_text, variable, readonly=False):
+    def _labeled_entry(container, label_text, variable, readonly=False, help_text: str = ""):
         row = tk.Frame(container, bg=Theme.CARD_BG)
         row.pack(fill="x", pady=(0, 10))
-        tk.Label(row, text=label_text, bg=Theme.CARD_BG, fg=Theme.FG).pack(anchor="w", pady=(0, 3))
+        self._create_settings_field_header(row, label_text, help_text, font=("Segoe UI Semibold", 10))
         entry = tk.Entry(
             row,
             textvariable=variable,
@@ -2270,10 +2779,10 @@ def _patched_create_settings_tab4_v2(self, parent):
         self._setup_entry_bindings(entry)
         return entry
 
-    _labeled_entry(updates_body, "GitHub репозиторий (owner/repo)", github_var, readonly=True)
-    _labeled_entry(updates_body, "URL манифеста обновлений (JSON/API)", manifest_var, readonly=True)
-    _labeled_entry(updates_body, "Прямая ссылка на скачивание (опционально)", download_var, readonly=False)
-    _labeled_entry(updates_body, "Доверенные хосты обновлений", trusted_hosts_var, readonly=False)
+    _labeled_entry(updates_body, "GitHub-репозиторий (owner/repo)", github_var, readonly=True, help_text="Основной репозиторий, из которого JARVIS читает официальный релиз.")
+    _labeled_entry(updates_body, "URL манифеста обновлений (JSON/API)", manifest_var, readonly=True, help_text="Адрес манифеста, где лежит версия, ссылки на файлы и release notes.")
+    _labeled_entry(updates_body, "Прямая ссылка на скачивание (опционально)", download_var, readonly=False, help_text="Необязательная прямая ссылка на инсталлятор, если хотите переопределить стандартный путь.")
+    _labeled_entry(updates_body, "Доверенные хосты обновлений", trusted_hosts_var, readonly=False, help_text="Список доменов, с которых JARVIS разрешено принимать релизные файлы.")
 
     def save_updates():
         hosts = [h.strip().lower() for h in trusted_hosts_var.get().split(",") if h.strip()]
@@ -2303,7 +2812,7 @@ def _patched_create_settings_tab4_v2(self, parent):
 
     _, publish_body = create_section_card(
         body,
-        "One-click publish",
+        "Публикация в 1 клик",
         f"Сборка, GitHub bundle, commit, push и tag {app_version_badge()} одной кнопкой. Репозиторий: {DEFAULT_GITHUB_REPO}.",
     )
 
@@ -2317,14 +2826,14 @@ def _patched_create_settings_tab4_v2(self, parent):
         def run_publish_one_click():
             if not messagebox.askyesno(
                 app_brand_name(),
-                "Запустить one-click publish?\n\nЭто соберет релиз, подготовит GitHub bundle, сделает commit, push и отправит tag в GitHub.",
+                "Запустить публикацию в 1 клик?\n\nЭто соберет релиз, подготовит GitHub bundle, сделает commit, push и отправит tag в GitHub.",
             ):
                 return
             try:
                 os.startfile(publish_script)
-                self.set_status_temp("Открыл one-click publish", "ok")
+                self.set_status_temp("Открыл публикацию в 1 клик", "ok")
             except Exception as e:
-                self.report_error("Ошибка запуска one-click publish", e, speak=False)
+                self.report_error("Ошибка запуска публикации в 1 клик", e, speak=False)
 
         create_action_grid(
             publish_body,
