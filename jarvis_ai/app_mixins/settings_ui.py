@@ -344,7 +344,7 @@ class SettingsUiMixin:
 
         if guide_host is not None:
             try:
-                guide_host.configure(width=max(side_width - 24, 208), height=304)
+                guide_host.configure(width=max(side_width - 24, 208))
             except Exception:
                 pass
             try:
@@ -1431,8 +1431,7 @@ class SettingsUiMixin:
         bind_dynamic_wrap(nav_note, side, padding=30, minimum=160)
         self._control_center_nav_note = nav_note
 
-        guide_host = tk.Frame(side, bg=Theme.CARD_BG, width=232, height=304)
-        guide_host.pack_propagate(False)
+        guide_host = tk.Frame(side, bg=Theme.CARD_BG, width=232)
         self._control_center_guide_host = guide_host
         noob_asset = (
             self.assets.get("noob_sidebar")

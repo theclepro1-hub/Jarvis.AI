@@ -5,7 +5,7 @@
     "installer_name":  "JarvisAI2_Setup.exe",
     "executable_name":  "jarvis_ai_2.exe",
     "notes":  "стабилизирована левая колонка Control Center: ширина бокового меню больше не прыгает между разделами, а карточка Нубика стала компактнее и перестала съедать нижний текст; control center перестал конфликтовать со стартовым activation gate: при открытии настроек первый overlay теперь снимается, а при закрытии возвращается только если активация ещё не завершена; маршрутизация секций настроек собрана в явные section-m...",
-    "build_utc":  "2026-04-01T04:16:31Z",
+    "build_utc":  "2026-04-01T04:37:59Z",
     "manifest_url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/manifest.json",
     "files":  [
                   {
@@ -23,19 +23,19 @@
                   {
                       "name":  "jarvis_ai_2.exe",
                       "path":  "jarvis_ai_2.exe",
-                      "size":  107214397,
+                      "size":  107214580,
                       "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/jarvis_ai_2.exe"
                   },
                   {
                       "name":  "JARVIS_AI_2_portable_v20.1.5.zip",
                       "path":  "JARVIS_AI_2_portable_v20.1.5.zip",
-                      "size":  106072811,
+                      "size":  106073129,
                       "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/JARVIS_AI_2_portable_v20.1.5.zip"
                   },
                   {
                       "name":  "JarvisAI2_Setup.exe",
                       "path":  "JarvisAI2_Setup.exe",
-                      "size":  105289534,
+                      "size":  105288587,
                       "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/JarvisAI2_Setup.exe"
                   },
                   {

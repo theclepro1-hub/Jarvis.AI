@@ -208,17 +208,21 @@ def test_control_center_noob_panel_keeps_sidebar_size(monkeypatch):
 
         side = app._control_center_side
         guide_host = app._control_center_guide_host
+        guide = app._control_center_guide
         base_side_width = int(side.winfo_width() or 0)
         base_guide_height = int(guide_host.winfo_height() or 0)
 
         assert base_side_width >= 240
-        assert base_guide_height >= 280
+        assert base_guide_height >= 220
+        assert guide.frame.winfo_height() >= guide.frame.winfo_reqheight()
+        assert not guide.pointer_label.winfo_ismapped()
 
         for section in ("updates", "system", "voice", "main"):
             app._show_control_center_section(section)
             _pump(root)
             assert abs(int(side.winfo_width() or 0) - base_side_width) <= 2
-            assert abs(int(guide_host.winfo_height() or 0) - base_guide_height) <= 2
+            assert abs(int(guide_host.winfo_height() or 0) - base_guide_height) <= 24
+            assert guide.frame.winfo_height() >= guide.frame.winfo_reqheight()
     finally:
         app.shutdown()
         root.destroy()

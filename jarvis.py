@@ -2917,9 +2917,9 @@ class JarvisApp(
                     elif key in {"noob", "noob2"}:
                         img = img.resize((180,180), Image.LANCZOS)
                     elif key == "noob_settings":
-                        img = img.resize((112,112), Image.LANCZOS)
+                        img = img.resize((92,92), Image.LANCZOS)
                     elif key == "noob_sidebar":
-                        img = img.resize((112,112), Image.LANCZOS)
+                        img = img.resize((92,92), Image.LANCZOS)
                     elif key in ["mic","send"]:
                         img = img.resize((32,32), Image.LANCZOS)
                     elif key == "settings":

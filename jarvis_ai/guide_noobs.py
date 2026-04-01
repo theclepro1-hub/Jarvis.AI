@@ -40,7 +40,8 @@ class GuideNoobPanel:
         self._message_wraplength = initial_wrap
         self._pointer_wraplength = initial_wrap
         self._message_line_limit = 4 if self.is_settings else 0
-        self._pointer_line_limit = 3 if self.is_settings else 0
+        self._pointer_line_limit = 0 if self.is_settings else 3
+        self._show_pointer = not self.is_settings
         self._title_text = str(title or "Noob Guide")
         self._status_text = "Готов помочь"
         self._message_text = "Подскажу, что делает выбранная функция, и покажу, с чего лучше начать."
@@ -53,9 +54,6 @@ class GuideNoobPanel:
             highlightthickness=1,
             cursor="hand2",
         )
-        if self.is_settings:
-            self.frame.configure(height=292)
-            self.frame.pack_propagate(False)
         self.frame.pack(fill="x", expand=False)
 
         self.top = tk.Frame(self.frame, bg=Theme.CARD_BG, cursor="hand2")
@@ -137,8 +135,9 @@ class GuideNoobPanel:
             cursor="hand2",
             wraplength=initial_wrap,
         )
-        self.pointer_label.pack(anchor="w", padx=outer_pad, pady=(0, outer_pad))
-        bind_dynamic_wrap(self.pointer_label, self.frame, padding=(outer_pad * 2) + 8, minimum=150)
+        if self._show_pointer:
+            self.pointer_label.pack(anchor="w", padx=outer_pad, pady=(0, outer_pad))
+            bind_dynamic_wrap(self.pointer_label, self.frame, padding=(outer_pad * 2) + 8, minimum=150)
 
         self._wave_tick = 0
         self._wave_after = None
@@ -308,7 +307,8 @@ class GuideNoobPanel:
         try:
             self.title_label.pack_configure(anchor=anchor)
             self.status_label.pack_configure(anchor=anchor, pady=(4 if self.is_settings else 6, 0))
-            self.pointer_label.pack_configure(anchor=anchor, padx=self._outer_pad, pady=(0, self._outer_pad))
+            if self._show_pointer:
+                self.pointer_label.pack_configure(anchor=anchor, padx=self._outer_pad, pady=(0, self._outer_pad))
         except Exception:
             pass
         self.title_label.configure(justify=justify)
