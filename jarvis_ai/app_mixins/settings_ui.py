@@ -27,6 +27,67 @@ logger = logging.getLogger(APP_LOGGER_NAME)
 
 
 class SettingsUiMixin:
+    def _settings_toast(self, message: str, tone: str = "ok"):
+        text = str(message or "").strip()
+        if not text:
+            return
+        if callable(getattr(self, "set_status_temp", None)):
+            self.set_status_temp(text, tone)
+            return
+        if callable(getattr(self, "set_status", None)):
+            self.set_status(text, tone)
+
+    def _hide_workspace_surface_for_settings(self):
+        bg_canvas = getattr(self, "bg_canvas", None)
+        if bg_canvas is None:
+            return
+        try:
+            if bg_canvas.winfo_manager():
+                bg_canvas.pack_forget()
+        except tk.TclError:
+            return
+
+    def _restore_workspace_surface_after_settings(self):
+        bg_canvas = getattr(self, "bg_canvas", None)
+        if bg_canvas is None:
+            return
+        try:
+            if not bg_canvas.winfo_manager():
+                bg_canvas.pack(fill="both", expand=True)
+        except tk.TclError:
+            return
+
+    def _suspend_activation_gate_for_settings(self):
+        gate = getattr(self, "activation_gate", None)
+        suspended = False
+        if gate is not None:
+            try:
+                suspended = bool(gate.winfo_ismapped())
+            except tk.TclError:
+                suspended = False
+        self._settings_activation_gate_suspended = suspended
+        if not suspended:
+            return
+        hide_gate = getattr(self, "_hide_embedded_activation_gate", None)
+        if callable(hide_gate):
+            try:
+                hide_gate()
+            except tk.TclError:
+                pass
+
+    def _resume_activation_gate_after_settings(self):
+        if not bool(getattr(self, "_settings_activation_gate_suspended", False)):
+            return
+        self._settings_activation_gate_suspended = False
+        if not bool(getattr(self, "_startup_gate_setup", False)):
+            return
+        show_gate = getattr(self, "_show_embedded_activation_gate", None)
+        if callable(show_gate):
+            try:
+                show_gate()
+            except tk.TclError:
+                pass
+
     def _hide_legacy_settings_surfaces(self):
         panel = getattr(self, "quick_settings_panel", None)
         if panel is not None:
@@ -52,14 +113,85 @@ class SettingsUiMixin:
             return
         messagebox.showinfo(app_brand_name(), "Откройте вкладку «Основные», затем попробуйте сохранить ещё раз.")
 
-    def _close_settings_window(self, win):
+    def _destroy_control_center_window(self, resume_bg: bool = True):
+        win = getattr(self, "settings_window", None)
+        canvas = getattr(self, "_control_center_content_canvas", None)
+
+        def _cancel_after(widget, attr_name: str):
+            after_id = getattr(self, attr_name, None)
+            setattr(self, attr_name, None)
+            if widget is None or after_id is None:
+                return
+            try:
+                widget.after_cancel(after_id)
+            except Exception:
+                pass
+
+        _cancel_after(win, "_control_center_layout_after_id")
+        _cancel_after(win, "_control_center_prewarm_after_id")
+        _cancel_after(canvas, "_control_center_scroll_after_id")
         self._settings_tab1_save_callback = None
         self.settings_window = None
-        self._set_bg_animation_paused(False, reason="settings_window")
+        self._control_center_outer = None
+        self._control_center_header_body = None
+        self._control_center_header_left = None
+        self._control_center_header_right = None
+        self._control_center_body = None
+        self._control_center_side = None
+        self._control_center_nav = None
+        self._control_center_nav_buttons = {}
+        self.settings_nav_buttons = {}
+        self._control_center_nav_note = None
+        self._control_center_guide_host = None
+        self._control_center_guide = None
+        self._control_center_content = None
+        self._control_center_content_canvas = None
+        self._control_center_content_scroll = None
+        self._control_center_content_inner = None
+        self._control_center_content_inner_id = None
+        self._control_center_pages = {}
+        self._control_center_page_builders = {}
+        self._control_center_built_pages = set()
+        self._control_center_layout_signature = None
+        self._control_center_prewarm_queue = []
+        self._control_center_prewarm_running = False
+        self._control_center_prewarm_done = False
+        self._control_center_scroll_signature = None
+        self._control_center_scroll_top_pending = False
+        if getattr(self, "_preferred_scroll_target", None) == canvas:
+            self._preferred_scroll_target = None
+        if getattr(self, "_active_scroll_target", None) == canvas:
+            self._active_scroll_target = None
         try:
-            win.destroy()
+            if win is not None and win.winfo_exists():
+                win.destroy()
         except Exception:
             pass
+        try:
+            self._cleanup_scroll_targets()
+        except Exception:
+            pass
+        if resume_bg:
+            self._set_bg_animation_paused(False, reason="settings_window")
+
+    def _schedule_control_center_reopen(self, tab_key: Optional[str] = None):
+        target = self._control_center_tab_alias(tab_key or getattr(self, "current_settings_subsection", "main"))
+        if bool(getattr(self, "_control_center_rebuild_pending", False)):
+            self._control_center_rebuild_target = target
+            return
+        self._control_center_rebuild_pending = True
+        self._control_center_rebuild_target = target
+
+        def _reopen():
+            target_key = self._control_center_tab_alias(getattr(self, "_control_center_rebuild_target", target))
+            self._control_center_rebuild_pending = False
+            self._control_center_rebuild_target = None
+            self.open_full_settings_view(target_key)
+
+        try:
+            self.root.after_idle(_reopen)
+        except Exception:
+            _reopen()
 
     def _is_full_settings_open(self) -> bool:
         win = getattr(self, "settings_window", None)
@@ -179,8 +311,8 @@ class SettingsUiMixin:
             return
 
         header_stacked = width < 980
-        show_guide = width >= 1180
-        side_width = 224 if width < 1160 else 292 if show_guide else 248
+        show_guide = width >= 1100
+        side_width = 256
         layout_signature = (header_stacked, side_width, show_guide)
         if layout_signature == getattr(self, "_control_center_layout_signature", None):
             return
@@ -211,6 +343,10 @@ class SettingsUiMixin:
             pass
 
         if guide_host is not None:
+            try:
+                guide_host.configure(width=max(side_width - 24, 208), height=304)
+            except Exception:
+                pass
             try:
                 mapped = bool(str(guide_host.winfo_manager() or "").strip())
             except Exception:
@@ -615,38 +751,38 @@ class SettingsUiMixin:
             "main": (
                 "Нубик JARVIS",
                 "Основное",
-                "Здесь живут активация, ключ Groq, профиль пользователя и базовые настройки мозга JARVIS. Это главный раздел для первого входа и базовой настройки.",
-                "→ Если ключ не вставлен или ИИ ругается на доступ, начинайте именно отсюда.",
+                "Здесь активация, ключ Groq, профиль пользователя и базовые настройки JARVIS.",
+                "→ Если ключа нет или ИИ не отвечает, начните отсюда.",
             ),
             "voice": (
                 "Нубик JARVIS",
                 "Центр голоса",
-                "Здесь проверяем, слышит ли JARVIS микрофон, делаем тестовую запись, слушаем ее и подбираем профиль под устройство.",
-                "→ Сначала тестовая запись, потом уже поиск проблемы глубже.",
+                "Здесь проверяются микрофон, тестовая запись, прослушивание и профиль устройства.",
+                "→ Сначала тестовая запись, потом глубокая диагностика.",
             ),
             "apps": (
                 "Нубик JARVIS",
                 "Приложения и игры",
-                "Здесь добавляются пользовательские приложения, ярлыки и команды запуска, чтобы чат понимал ваш набор программ.",
-                "→ Если что-то не открывается по имени, сначала проверь этот раздел.",
+                "Здесь добавляются ваши приложения, ярлыки и команды запуска.",
+                "→ Если программа не открывается по имени, проверьте этот раздел.",
             ),
             "diagnostics": (
                 "Нубик JARVIS",
                 "Диагностика",
-                "Здесь живут readiness-check, crash test и внутренняя проверка кода. Это уже техзона, а не обычный чат.",
-                "→ Для простого пользования этот раздел нужен редко.",
+                "Здесь readiness-check, crash test и внутренняя проверка кода.",
+                "→ Это техзона. Для обычного пользования она нужна редко.",
             ),
             "updates": (
                 "Нубик JARVIS",
                 "Релиз",
-                "Здесь обновления, release lock, backup перед апдейтом и контроль артефактов перед GitHub-релизом.",
-                "→ Перед публикацией сначала прогоняй release lock и readiness.",
+                "Здесь обновления, release lock, backup и контроль артефактов перед GitHub release.",
+                "→ Перед публикацией прогоните release lock и readiness.",
             ),
             "system": (
                 "Нубик JARVIS",
                 "Система",
-                "Здесь память, сценарии, журнал, резервные копии и сервисные инструменты. Все тяжелое убрано сюда, чтобы не мешать чату.",
-                "→ Главный экран должен жить разговором, а не админкой.",
+                "Здесь память, сценарии, журнал, бэкапы и сервисные инструменты.",
+                "→ Всё тяжёлое убрано сюда, чтобы не перегружать чат.",
             ),
         }
         return mapping.get(section, mapping["main"])
@@ -875,12 +1011,46 @@ class SettingsUiMixin:
             pass
         builder(page)
         try:
-            self._refresh_control_center_content_scroll()
+            self._schedule_control_center_content_scroll_refresh()
         except Exception:
             pass
         built.add(key)
         self._control_center_built_pages = built
         return page
+
+    def _schedule_control_center_content_scroll_refresh(self, scroll_top: bool = False):
+        canvas = getattr(self, "_control_center_content_canvas", None)
+        if canvas is None:
+            return
+        if scroll_top:
+            self._control_center_scroll_top_pending = True
+        after_id = getattr(self, "_control_center_scroll_after_id", None)
+        if after_id is not None:
+            try:
+                canvas.after_cancel(after_id)
+            except Exception:
+                pass
+
+        def _refresh():
+            self._control_center_scroll_after_id = None
+            reset_scroll = bool(getattr(self, "_control_center_scroll_top_pending", False))
+            self._control_center_scroll_top_pending = False
+            self._refresh_control_center_content_scroll(scroll_top=reset_scroll)
+
+        try:
+            self._control_center_scroll_after_id = canvas.after(16, _refresh)
+        except Exception:
+            _refresh()
+
+    def _schedule_settings_visual_refresh(self):
+        try:
+            self._schedule_control_center_layout_refresh()
+        except Exception:
+            pass
+        try:
+            self._schedule_control_center_content_scroll_refresh()
+        except Exception:
+            pass
 
     def _schedule_control_center_prewarm(self, preferred: Optional[str] = None):
         win = getattr(self, "settings_window", None)
@@ -922,7 +1092,7 @@ class SettingsUiMixin:
                 self._control_center_prewarm_running = False
                 self._control_center_prewarm_done = True
                 try:
-                    self._refresh_control_center_content_scroll()
+                    self._schedule_control_center_content_scroll_refresh()
                 except Exception:
                     pass
                 return
@@ -963,6 +1133,7 @@ class SettingsUiMixin:
             relief="flat",
             padx=14,
             pady=8,
+            cursor="hand2",
         ).pack(side="right")
 
         desc = tk.Label(
@@ -1075,7 +1246,7 @@ class SettingsUiMixin:
 
         footer = tk.Frame(profile_card, bg=Theme.CARD_BG)
         footer.pack(fill="x", padx=16, pady=(6, 16))
-        tk.Button(footer, text="Сохранить профили", command=_save_profiles, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(side="right")
+        tk.Button(footer, text="Сохранить профили", command=_save_profiles, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8, cursor="hand2").pack(side="right")
 
         self._apply_voice_insight_widgets()
 
@@ -1099,10 +1270,7 @@ class SettingsUiMixin:
             except Exception:
                 pass
         try:
-            self._refresh_control_center_content_scroll()
-            canvas = getattr(self, "_control_center_content_canvas", None)
-            if canvas is not None:
-                canvas.yview_moveto(0.0)
+            self._schedule_control_center_content_scroll_refresh(scroll_top=True)
         except Exception:
             pass
 
@@ -1180,9 +1348,9 @@ class SettingsUiMixin:
         header_right = tk.Frame(header_body, bg=Theme.CARD_BG)
         header_right.pack(side="right", padx=(16, 0))
         self._control_center_header_right = header_right
-        save_btn = tk.Button(header_right, text="Сохранить основные", command=self._save_settings_tab1_from_footer, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8)
+        save_btn = tk.Button(header_right, text="Сохранить основные", command=self._save_settings_tab1_from_footer, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8, cursor="hand2")
         save_btn.pack(side="right")
-        close_btn = tk.Button(header_right, text="Закрыть", command=self.close_full_settings_view, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=14, pady=8)
+        close_btn = tk.Button(header_right, text="Закрыть", command=self.close_full_settings_view, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=14, pady=8, cursor="hand2")
         close_btn.pack(side="right", padx=(0, 8))
         self._bind_control_center_guide_hint(
             save_btn,
@@ -1263,12 +1431,13 @@ class SettingsUiMixin:
         bind_dynamic_wrap(nav_note, side, padding=30, minimum=160)
         self._control_center_nav_note = nav_note
 
-        guide_host = tk.Frame(side, bg=Theme.CARD_BG)
+        guide_host = tk.Frame(side, bg=Theme.CARD_BG, width=232, height=304)
+        guide_host.pack_propagate(False)
         self._control_center_guide_host = guide_host
         noob_asset = (
-            self.assets.get("noob_settings")
+            self.assets.get("noob_sidebar")
+            or self.assets.get("noob_settings")
             or self.assets.get("noob2")
-            or self.assets.get("noob_sidebar")
             or self.assets.get("noob")
         )
         noob_image = noob_asset if isinstance(noob_asset, ImageTk.PhotoImage) else None
@@ -1296,8 +1465,8 @@ class SettingsUiMixin:
         content_inner = tk.Frame(content_canvas, bg=Theme.BG_LIGHT)
         content_inner_id = content_canvas.create_window((0, 0), window=content_inner, anchor="nw")
         content_canvas.configure(yscrollcommand=content_scroll.set)
-        content_inner.bind("<Configure>", lambda _event: self._refresh_control_center_content_scroll(), add="+")
-        content_canvas.bind("<Configure>", lambda _event: self._refresh_control_center_content_scroll(), add="+")
+        content_inner.bind("<Configure>", lambda _event: self._schedule_control_center_content_scroll_refresh(), add="+")
+        content_canvas.bind("<Configure>", lambda _event: self._schedule_control_center_content_scroll_refresh(), add="+")
         self._register_scroll_target(content_canvas)
         self._control_center_content_canvas = content_canvas
         self._control_center_content_scroll = content_scroll
@@ -1311,6 +1480,9 @@ class SettingsUiMixin:
         self._control_center_prewarm_after_id = None
         self._control_center_prewarm_running = False
         self._control_center_prewarm_done = False
+        self._control_center_scroll_after_id = None
+        self._control_center_scroll_signature = None
+        self._control_center_scroll_top_pending = False
 
         def _make_page(key, builder):
             page = tk.Frame(content_inner, bg=Theme.BG_LIGHT)
@@ -1335,6 +1507,8 @@ class SettingsUiMixin:
     def open_full_settings_view(self, tab_key: Optional[str] = None, section: Optional[str] = None):
         target = self._control_center_tab_alias(section if section is not None else tab_key)
         self._hide_legacy_settings_surfaces()
+        self._suspend_activation_gate_for_settings()
+        self._hide_workspace_surface_for_settings()
         page = getattr(self, "embedded_settings_page", None)
         if page is not None:
             try:
@@ -1349,30 +1523,25 @@ class SettingsUiMixin:
         self._restyle_settings_window()
         self._show_control_center_section(target)
         self._workspace_section = "settings"
-        self._schedule_control_center_layout_refresh()
+        self._schedule_settings_visual_refresh()
         try:
             if isinstance(win, tk.Toplevel):
                 win.deiconify()
                 win.lift()
                 win.focus_force()
             else:
-                win.place(relx=0, rely=0, relwidth=1, relheight=1)
+                try:
+                    if not win.winfo_manager():
+                        win.pack(fill="both", expand=True)
+                except tk.TclError:
+                    pass
                 win.lift()
                 win.focus_force()
-        except Exception:
+        except tk.TclError:
             pass
         try:
-            win.update_idletasks()
-        except Exception:
-            pass
-        try:
-            self._refresh_control_center_content_scroll()
-        except Exception:
-            pass
-        try:
-            win.after(24, lambda: (self._show_control_center_section(target), self._refresh_control_center_content_scroll()))
-            win.after(120, lambda: (self._show_control_center_section(target), self._refresh_control_center_content_scroll()))
-        except Exception:
+            win.after_idle(self._schedule_settings_visual_refresh)
+        except tk.TclError:
             pass
         try:
             self._preferred_scroll_target = getattr(self, "_control_center_content_canvas", None)
@@ -1390,38 +1559,25 @@ class SettingsUiMixin:
         self.set_status("Настройки открыты", "busy")
 
     def close_full_settings_view(self):
-        win = getattr(self, "settings_window", None)
         try:
             self._hide_tooltip()
-        except Exception:
+        except tk.TclError:
             pass
-        if win is not None:
-            try:
-                if win.winfo_exists():
-                    try:
-                        if isinstance(win, tk.Toplevel):
-                            win.withdraw()
-                    except Exception:
-                        pass
-                    try:
-                        win.place_forget()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+        self._destroy_control_center_window(resume_bg=True)
+        self._restore_workspace_surface_after_settings()
+        self._resume_activation_gate_after_settings()
         page = getattr(self, "embedded_settings_page", None)
         if page is not None:
             try:
                 page.place_forget()
                 page.pack_forget()
                 page.grid_forget()
-            except Exception:
+            except tk.TclError:
                 pass
-        self._set_bg_animation_paused(False, reason="settings_window")
         self._workspace_section = "chat"
         try:
             self._set_workspace_section("chat")
-        except Exception:
+        except tk.TclError:
             pass
         try:
             self._preferred_scroll_target = getattr(self, "chat_canvas", None)
@@ -1448,9 +1604,9 @@ class SettingsUiMixin:
         if bool(getattr(parent, "_jarvis_plain_scroll_host", False)):
             inner = tk.Frame(parent, bg=inner_bg or Theme.BG_LIGHT)
             inner.pack(fill="both", expand=True)
-            inner.bind("<Configure>", lambda _event: self._refresh_control_center_content_scroll(), add="+")
+            inner.bind("<Configure>", lambda _event: self._schedule_control_center_content_scroll_refresh(), add="+")
             try:
-                parent.after_idle(self._refresh_control_center_content_scroll)
+                parent.after_idle(self._schedule_control_center_content_scroll_refresh)
             except Exception:
                 pass
             return parent, getattr(self, "_control_center_content_canvas", None), inner
@@ -1476,25 +1632,38 @@ class SettingsUiMixin:
         self._register_scroll_target(canvas)
         return host, canvas, inner
 
-    def _refresh_control_center_content_scroll(self):
+    def _refresh_control_center_content_scroll(self, scroll_top: bool = False):
         canvas = getattr(self, "_control_center_content_canvas", None)
         inner_id = getattr(self, "_control_center_content_inner_id", None)
         if canvas is None or inner_id is None:
             return
         try:
-            canvas.update_idletasks()
-        except Exception:
-            pass
-        try:
             bbox = canvas.bbox("all")
+        except Exception:
+            bbox = None
+        try:
+            width = int(canvas.winfo_width() or 0)
+        except Exception:
+            width = 0
+        signature = (width, tuple(bbox) if bbox else None)
+        if not scroll_top and signature == getattr(self, "_control_center_scroll_signature", None):
+            return
+        self._control_center_scroll_signature = signature
+        try:
             if bbox:
                 canvas.configure(scrollregion=bbox)
         except Exception:
             pass
         try:
-            canvas.itemconfigure(inner_id, width=canvas.winfo_width())
+            if width > 0:
+                canvas.itemconfigure(inner_id, width=width)
         except Exception:
             pass
+        if scroll_top:
+            try:
+                canvas.yview_moveto(0.0)
+            except Exception:
+                pass
 
     def _create_settings_tab1(self, parent):
         # Вкладка "Основные" (активация, профиль, голос, микрофон)
@@ -1773,6 +1942,7 @@ class SettingsUiMixin:
             relief="flat",
             padx=14,
             pady=8,
+            cursor="hand2",
         ).pack(anchor="w", pady=(8,0))
 
         voice_values = self._voice_names()
@@ -1818,6 +1988,7 @@ class SettingsUiMixin:
             relief="flat",
             padx=10,
             pady=7,
+            cursor="hand2",
         )
         tts_adv_btn.pack(anchor="w")
 
@@ -1881,6 +2052,8 @@ class SettingsUiMixin:
         # Кнопка сохранения внизу вкладки
         def save_tab1():
             try:
+                notices = []
+                notice_tone = "ok"
                 api_key = groq_var.get().strip()
                 startup_activation = bool(getattr(self, "_startup_gate_setup", False))
                 if startup_activation and not api_key:
@@ -1889,7 +2062,7 @@ class SettingsUiMixin:
                         groq_entry.focus_set()
                     except Exception:
                         pass
-                    messagebox.showwarning(app_brand_name(), "Введите Groq API ключ, чтобы открыть чат.")
+                    self._settings_toast("Введите Groq API ключ, чтобы открыть чат", "warn")
                     return
                 try:
                     tg_id = int(tg_id_var.get().strip()) if tg_id_var.get().strip() else 0
@@ -1927,6 +2100,9 @@ class SettingsUiMixin:
                 selected_close_behavior = _simple_choice(close_behavior_var.get().strip(), close_behavior_items, current_close_behavior)
                 selected_model_label = model_var.get().strip()
                 selected_model_key = next((key for lbl, key in model_items if lbl == selected_model_label), DEFAULT_CHAT_MODEL)
+                selected_ui_scale_percent = int(ui_scale_var.get())
+                selected_dpi_adaptation = bool(dpi_adaptation_var.get())
+                selected_ai_simple_labels = bool(ai_simple_labels_var.get())
                 try:
                     interval_min = int(self_check_interval_var.get().strip() or "10")
                 except Exception:
@@ -1936,11 +2112,13 @@ class SettingsUiMixin:
                 selected = mic_var.get().strip()
                 mic_idx = None
                 mic_name = ""
+                mic_signature = ""
                 if selected in mic_index_map:
                     mic_idx = mic_index_map[selected]
                     selected_mic_item = _get_audio_device_entry(mic_idx, refresh=False)
                     if selected_mic_item is not None:
                         mic_name = _expand_audio_device_name(selected_mic_item.get("name"), "input")
+                        mic_signature = str(selected_mic_item.get("signature") or "").strip()
                 elif selected:
                     marker = re.search(r"\[#(\d+)\]\s*$", selected)
                     if marker:
@@ -1950,10 +2128,12 @@ class SettingsUiMixin:
                 out_sel = output_var.get().strip()
                 output_idx = output_option_map.get(out_sel)
                 output_name = ""
+                output_signature = ""
                 if output_idx is not None:
                     selected_output_item = _get_audio_device_entry(output_idx, refresh=False)
                     if selected_output_item is not None:
                         output_name = _expand_audio_device_name(selected_output_item.get("name"), "output")
+                        output_signature = str(selected_output_item.get("signature") or "").strip()
                 # Голос
                 voice_index = CONFIG_MGR.get_voice_index()
                 selected_voice = voice_var.get().strip()
@@ -1968,15 +2148,15 @@ class SettingsUiMixin:
                 eleven_key = eleven_key_var.get().strip()
                 eleven_voice = eleven_voice_var.get().strip()
                 if selected_tts_provider == "elevenlabs" and (not eleven_key or not eleven_voice):
-                    messagebox.showwarning(
-                        "ElevenLabs",
-                        "Для ElevenLabs нужно заполнить API-ключ и ID голоса.\nСейчас будет сохранён безопасный оффлайн-режим pyttsx3.",
-                    )
                     selected_tts_provider = "pyttsx3"
+                    notices.append("ElevenLabs отключен: не заполнены API-ключ и ID голоса, сохранён оффлайн-режим")
+                    notice_tone = "warn"
                 prev_theme_mode = str(CONFIG_MGR.get_theme_mode() or "dark").strip().lower()
                 prev_theme_mode = prev_theme_mode if prev_theme_mode in {"dark", "light"} else "dark"
                 prev_density_mode = str(CONFIG_MGR.get_ui_density() or "comfortable").strip().lower()
                 prev_scale_percent = int(CONFIG_MGR.get_ui_scale_percent() or 100)
+                prev_dpi_adaptation = bool(CONFIG_MGR.get_dpi_adaptation_enabled())
+                prev_ai_simple_labels = bool(CONFIG_MGR.get_ai_simple_labels())
                 previous_safe_mode = bool(getattr(self, "safe_mode", False))
                 next_safe_mode = bool(safe_mode_var.get())
 
@@ -2002,18 +2182,20 @@ class SettingsUiMixin:
                     "ui_density": selected_density_key,
                     "focus_mode_enabled": bool(focus_mode_var.get()),
                     "helper_guides_enabled": bool(helper_guides_var.get()),
-                    "dpi_adaptation_enabled": bool(dpi_adaptation_var.get()),
-                    "ui_scale_percent": int(ui_scale_var.get()),
+                    "dpi_adaptation_enabled": selected_dpi_adaptation,
+                    "ui_scale_percent": selected_ui_scale_percent,
                     "release_channel": selected_release_channel,
                     "close_behavior": selected_close_behavior,
-                    "ai_simple_labels": bool(ai_simple_labels_var.get()),
+                    "ai_simple_labels": selected_ai_simple_labels,
                     "background_self_check": bool(bg_self_check_var.get()),
                     "self_learning_enabled": bool(self_learning_var.get()),
                     "self_check_interval_min": interval_min,
                     "mic_device_index": mic_idx,
                     "mic_device_name": mic_name,
+                    "mic_device_signature": mic_signature,
                     "output_device_index": output_idx,
                     "output_device_name": output_name,
+                    "output_device_signature": output_signature,
                     "voice_index": int(voice_index),
                     "voice_rate": int(rate_var.get()),
                     "voice_volume": float(volume_var.get()),
@@ -2029,38 +2211,41 @@ class SettingsUiMixin:
                 })
 
                 if listening_changed and selected_listening_key in {"boost", "aggressive"}:
-                    messagebox.showwarning(
-                        "Внимание",
-                        "Усиленный режим слышимости может улавливать шумы и постороннюю речь.",
-                    )
+                    notices.append("Усиленный режим слышимости может улавливать шумы и постороннюю речь")
+                    notice_tone = "warn"
                 initial_listening_profile[0] = selected_listening_key
                 if initial_active_listening[0] and not bool(active_listening_var.get()):
-                    messagebox.showinfo(
-                        app_brand_name(),
-                        "Активное прослушивание отключено.\nТеперь голосовой вызов по слову «Джарвис» не работает.",
-                    )
+                    notices.append("Активное прослушивание отключено: вызов по слову «Джарвис» больше не работает")
+                    notice_tone = "warn"
                 initial_active_listening[0] = bool(active_listening_var.get())
                 self.safe_mode = next_safe_mode
                 self._set_bg_animation_paused(next_safe_mode, reason="safe_mode")
                 if not next_safe_mode and not getattr(self, "_bg_anim_started", False):
                     self.start_bg_anim()
                 if previous_safe_mode != next_safe_mode:
-                    messagebox.showinfo(
-                        app_brand_name(),
-                        "Режим запуска обновлён.\nTelegram и часть фоновых служб перестроятся сразу, но полный защищенный режим лучше проверять после перезапуска приложения.",
-                    )
+                    notices.append("Режим запуска обновлён: часть служб перестроилась сразу, но полный режим лучше проверить после перезапуска")
 
+                ui_rebuild_required = any((
+                    prev_theme_mode != str(selected_theme_key or "").strip().lower(),
+                    prev_density_mode != str(selected_density_key or "").strip().lower(),
+                    prev_scale_percent != selected_ui_scale_percent,
+                    prev_dpi_adaptation != selected_dpi_adaptation,
+                    prev_ai_simple_labels != selected_ai_simple_labels,
+                ))
+                reopen_control_center_section = None
+                if ui_rebuild_required and not startup_activation and self._is_full_settings_open():
+                    reopen_control_center_section = str(getattr(self, "current_settings_subsection", "main") or "main")
+                    self._destroy_control_center_window(resume_bg=False)
+
+                self._voice_device_refresh_requested = True
                 self.reload_services()
                 self._apply_dpi_scaling()
                 self.apply_theme_runtime()
-                if (
-                    prev_density_mode != str(selected_density_key or "").strip().lower()
-                    or prev_scale_percent != int(ui_scale_var.get())
-                ):
+                if ui_rebuild_required:
                     try:
                         self._rebuild_workspace_shell_v2()
-                    except Exception:
-                        pass
+                    except tk.TclError as exc:
+                        logger.debug("Workspace rebuild warning: %s", exc)
                 if hasattr(self, "refresh_workspace_layout_mode"):
                     self.refresh_workspace_layout_mode()
                 if hasattr(self, "_update_guide_context"):
@@ -2076,16 +2261,29 @@ class SettingsUiMixin:
                     if not self.safe_mode and not getattr(self, "_bg_anim_started", False):
                         self.start_bg_anim()
                     self._start_runtime_services()
-                    self.set_status("Готов", "ok")
+                    if notices:
+                        self._settings_toast(notices[0], notice_tone)
+                    else:
+                        self.set_status("Готов", "ok")
                     return
-                self.set_status("Настройки сохранены", "ok")
-                messagebox.showinfo(app_brand_name(), "Настройки сохранены.")
+                if reopen_control_center_section:
+                    self._schedule_control_center_reopen(reopen_control_center_section)
+                    self._settings_toast(
+                        notices[0] if notices else "Настройки сохранены, интерфейс пересобран",
+                        notice_tone if notices else "ok",
+                    )
+                    return
+                try:
+                    self._schedule_settings_visual_refresh()
+                except Exception:
+                    pass
+                self._settings_toast(notices[0] if notices else "Настройки сохранены", notice_tone if notices else "ok")
             except Exception as e:
                 self.report_error("Ошибка сохранения", e, speak=False)
-                messagebox.showerror("Ошибка", str(e))
+                self._settings_toast(f"Ошибка сохранения: {e}", "error")
 
         self._settings_tab1_save_callback = save_tab1
-        tk.Button(inner, text="Сохранить изменения", command=save_tab1, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=10).pack(anchor="w", padx=18, pady=(0, 14))
+        tk.Button(inner, text="Сохранить изменения", command=save_tab1, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=10, cursor="hand2").pack(anchor="w", padx=18, pady=(0, 14))
 
     def _create_settings_tab2(self, parent):
         # Вкладка "Приложения" (пути, кастомные приложения, игры лаунчеров)
@@ -2258,12 +2456,11 @@ class SettingsUiMixin:
                     "custom_apps": custom_apps_state,
                 })
                 self.sync_launcher_games(show_message=False)
-                self.set_status("Пути и приложения сохранены", "ok")
-                messagebox.showinfo(app_brand_name(), "Пути и список приложений сохранены.")
+                self._settings_toast("Пути и список приложений сохранены", "ok")
             except Exception as e:
                 self.report_error("Ошибка сохранения путей", e, speak=False)
 
-        tk.Button(frame, text="Сохранить изменения", command=save_tab2, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(pady=8)
+        tk.Button(frame, text="Сохранить изменения", command=save_tab2, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8, cursor="hand2").pack(pady=8)
 
     def _scan_steam_games(self, steam_exe_path: str) -> List[Dict[str, Any]]:
         games = []
@@ -2365,7 +2562,7 @@ class SettingsUiMixin:
             merged.append(game)
         CONFIG_MGR.set_launcher_games(merged)
         if show_message:
-            messagebox.showinfo(app_brand_name(), f"Синхронизация завершена. Найдено игр: {len(merged)}")
+            self._settings_toast(f"Синхронизация завершена. Найдено игр: {len(merged)}", "ok")
         return merged
 
     def _create_settings_tab4(self, parent):
@@ -2415,8 +2612,7 @@ class SettingsUiMixin:
                 "update_trusted_hosts": default_hosts,
                 "update_check_on_start": True,
             })
-            self.set_status_temp("Настройки обновлений сохранены", "ok")
-            messagebox.showinfo(app_brand_name(), f"Источник обновлений зафиксирован:\n{DEFAULT_RELEASES_URL}")
+            self._settings_toast("Настройки обновлений сохранены", "ok")
         tk.Button(frame, text="Сохранить настройки обновлений", command=save_updates, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(pady=(0,10))
 
         tk.Button(frame, text="Проверить обновления сейчас", command=self.check_for_updates_now, bg=Theme.ACCENT, fg=Theme.FG, relief="flat", padx=14, pady=8).pack(pady=5)
@@ -2545,10 +2741,9 @@ class SettingsUiMixin:
             self._apply_proxy_env_from_config()
             self.proxy_detected = self._detect_proxy_enabled()
             if self.proxy_detected:
-                self.set_status_temp("Прокси применен", "ok")
+                self._settings_toast("Прокси применен", "ok")
             else:
-                self.set_status_temp("Прокси отключен", "ok")
-            messagebox.showinfo(app_brand_name(), "Настройки прокси сохранены.")
+                self._settings_toast("Прокси отключен", "ok")
 
         tk.Button(net_card, text="Сохранить прокси", command=save_proxy, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=12, pady=8).pack(anchor="w", padx=12, pady=(0, 10))
 
@@ -2859,3 +3054,48 @@ def _patched_create_settings_tab4_v2(self, parent):
 
 
 SettingsUiMixin._create_settings_tab4 = _patched_create_settings_tab4_v2
+
+from .settings_sections import (
+    build_apps_settings_section,
+    build_diagnostics_settings_section,
+    build_main_settings_section,
+    build_system_settings_section,
+    build_updates_settings_section,
+    build_voice_settings_section,
+)
+
+
+SettingsUiMixin._legacy_create_settings_tab1 = SettingsUiMixin._create_settings_tab1
+SettingsUiMixin._legacy_create_settings_tab2 = SettingsUiMixin._create_settings_tab2
+
+
+def _delegated_create_settings_tab1(self, parent):
+    return build_main_settings_section(self, parent)
+
+
+def _delegated_create_settings_tab2(self, parent):
+    return build_apps_settings_section(self, parent)
+
+
+def _delegated_create_voice_center_page(self, parent):
+    return build_voice_settings_section(self, parent)
+
+
+def _delegated_create_diagnostic_tab(self, parent):
+    return build_diagnostics_settings_section(self, parent)
+
+
+def _delegated_create_settings_tab4(self, parent):
+    return build_updates_settings_section(self, parent)
+
+
+def _delegated_create_settings_tab5(self, parent):
+    return build_system_settings_section(self, parent)
+
+
+SettingsUiMixin._create_settings_tab1 = _delegated_create_settings_tab1
+SettingsUiMixin._create_settings_tab2 = _delegated_create_settings_tab2
+SettingsUiMixin._create_voice_center_page = _delegated_create_voice_center_page
+SettingsUiMixin._create_diagnostic_tab = _delegated_create_diagnostic_tab
+SettingsUiMixin._create_settings_tab4 = _delegated_create_settings_tab4
+SettingsUiMixin._create_settings_tab5 = _delegated_create_settings_tab5

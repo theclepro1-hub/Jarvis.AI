@@ -222,6 +222,40 @@ def _host_api_short_label(host_api: str) -> str:
     return mapping.get(key, str(host_api or "").strip())
 
 
+def _audio_device_signature(
+    name: str,
+    *,
+    host_api: str = "",
+    max_input_channels: int = 0,
+    max_output_channels: int = 0,
+    default_samplerate: float = 0.0,
+) -> str:
+    clean_name = _clean_audio_device_name(name)
+    family = _audio_device_family_key(clean_name or name) or re.sub(r"\s+", " ", str(clean_name or name or "")).strip().lower()
+    host = _host_api_short_label(host_api).strip().lower()
+    try:
+        sample_rate = int(float(default_samplerate or 0))
+    except Exception:
+        sample_rate = 0
+    try:
+        input_channels = int(max_input_channels or 0)
+    except Exception:
+        input_channels = 0
+    try:
+        output_channels = int(max_output_channels or 0)
+    except Exception:
+        output_channels = 0
+    return "|".join(
+        (
+            family or "unknown",
+            host or "unknown",
+            f"in{input_channels}",
+            f"out{output_channels}",
+            f"hz{sample_rate}",
+        )
+    )
+
+
 def _enumerate_portaudio_devices(refresh: bool = False) -> List[Dict[str, Any]]:
     now = time.monotonic()
     cache = _AUDIO_DEVICE_INFO_CACHE
@@ -288,6 +322,13 @@ def _enumerate_portaudio_devices(refresh: bool = False) -> List[Dict[str, Any]]:
                     "is_default_input": idx in defaults["input"],
                     "is_default_output": idx in defaults["output"],
                 }
+                item["signature"] = _audio_device_signature(
+                    name,
+                    host_api=host_api,
+                    max_input_channels=max_input,
+                    max_output_channels=max_output,
+                    default_samplerate=default_rate,
+                )
                 devices.append(item)
                 by_index[idx] = item
         except Exception as e:
@@ -340,6 +381,13 @@ def _enumerate_portaudio_devices(refresh: bool = False) -> List[Dict[str, Any]]:
                     "is_default_input": idx in defaults["input"],
                     "is_default_output": idx in defaults["output"],
                 }
+                item["signature"] = _audio_device_signature(
+                    name,
+                    host_api=host_name,
+                    max_input_channels=item.get("max_input_channels", 0),
+                    max_output_channels=item.get("max_output_channels", 0),
+                    default_samplerate=item.get("default_samplerate", 0),
+                )
                 devices.append(item)
                 by_index[idx] = item
         except Exception as e:
@@ -419,6 +467,30 @@ def _find_audio_device_entry_by_name(name: str, kind: str = "output", refresh: b
             best = item
             best_score = score
     return dict(best) if best else None
+
+
+def _find_audio_device_entry_by_signature(signature: str, kind: str = "output", refresh: bool = False) -> Optional[Dict[str, Any]]:
+    needle = str(signature or "").strip().lower()
+    if not needle:
+        return None
+    entries = list_input_device_entries_safe(refresh=refresh) if kind == "input" else list_output_device_entries_safe(refresh=refresh)
+    matches = []
+    for item in entries:
+        item_signature = str(item.get("signature") or "").strip().lower()
+        if item_signature != needle:
+            continue
+        matches.append(item)
+    if not matches:
+        return None
+    matches.sort(
+        key=lambda item: (
+            -int(bool(item.get("is_default_input") if kind == "input" else item.get("is_default_output"))),
+            -int(item.get("host_api_priority", 0) or 0),
+            -int(item.get("max_input_channels" if kind == "input" else "max_output_channels", 0) or 0),
+            int(item.get("index", 0) or 0),
+        )
+    )
+    return dict(matches[0])
 
 
 def _expand_audio_device_name(name: str, kind: str = "input") -> str:
@@ -709,6 +781,7 @@ def pick_output_device():
 audio_device_family_key = _audio_device_family_key
 expand_audio_device_name = _expand_audio_device_name
 find_audio_device_entry_by_name = _find_audio_device_entry_by_name
+find_audio_device_entry_by_signature = _find_audio_device_entry_by_signature
 get_audio_device_entry = _get_audio_device_entry
 host_api_short_label = _host_api_short_label
 is_audio_garbage_name = _is_audio_garbage_name
@@ -716,8 +789,10 @@ is_secondary_audio_choice = _is_secondary_audio_choice
 
 __all__ = [
     "_audio_device_family_key",
+    "_audio_device_signature",
     "_expand_audio_device_name",
     "_find_audio_device_entry_by_name",
+    "_find_audio_device_entry_by_signature",
     "_get_audio_device_entry",
     "_host_api_short_label",
     "_is_audio_garbage_name",
@@ -725,6 +800,7 @@ __all__ = [
     "audio_device_family_key",
     "expand_audio_device_name",
     "find_audio_device_entry_by_name",
+    "find_audio_device_entry_by_signature",
     "get_audio_device_entry",
     "host_api_short_label",
     "is_audio_garbage_name",

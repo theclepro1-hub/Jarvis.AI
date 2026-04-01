@@ -94,13 +94,17 @@ class UpdateFlowMixin:
             else:
                 messages.append(str(message))
 
-        if binary_backup and target_path and os.path.exists(binary_backup) and not getattr(sys, "frozen", False):
+        frozen_build = bool(getattr(sys, "frozen", False))
+
+        if binary_backup and target_path and os.path.exists(binary_backup) and not frozen_build:
             try:
                 os.replace(binary_backup, target_path)
                 binary_restored = True
                 messages.append("Файл приложения тоже откатан на предыдущую копию.")
             except Exception as exc:
                 messages.append(f"Файл приложения не удалось откатить автоматически: {short_exc(exc)}")
+        elif binary_backup and target_path and os.path.exists(binary_backup) and frozen_build:
+            messages.append("Профиль и пользовательские данные можно откатить из раздела «Система», но установленный `.exe` для этой сборки нужно вернуть вручную предыдущим инсталлятором.")
         elif from_version or to_version:
             messages.append(
                 f"Версия до обновления: {from_version or 'неизвестно'}, обновлялось до: {to_version or 'неизвестно'}."
@@ -587,7 +591,7 @@ class UpdateFlowMixin:
                     summary = f"✅ Обновление до {new_version} завершено."
                     speech_text = f"Обновление до версии {new_version} установлено."
                 if snapshot_path:
-                    summary = summary + "\nСнимок профиля перед обновлением сохранен. Откат доступен из раздела 'Система'."
+                    summary = summary + "\nСнимок профиля перед обновлением сохранён. Из раздела «Система» можно откатить профиль и пользовательские данные; если нужен возврат установленного `.exe`, используйте предыдущий инсталлятор вручную."
                 self.add_msg(summary, "bot")
                 self.say(speech_text)
                 self.set_status(f"Обновлено до {new_version}", "ok")

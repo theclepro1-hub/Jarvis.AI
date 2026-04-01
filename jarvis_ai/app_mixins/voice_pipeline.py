@@ -340,7 +340,10 @@ class VoicePipelineMixin:
             try:
                 desired_index = self.get_selected_microphone_index()
                 desired_name = self.get_selected_microphone_name()
-                if desired_index != current_device_index:
+                force_device_refresh = bool(getattr(self, "_voice_device_refresh_requested", False))
+                if force_device_refresh:
+                    self._voice_device_refresh_requested = False
+                if force_device_refresh or desired_index != current_device_index or str(desired_name or "").strip() != str(current_device_name or "").strip():
                     current_device_index = desired_index
                     current_device_name = desired_name
                     if mic is not None:

@@ -23,17 +23,33 @@ class WorkspaceToolsMixin:
     def _cfg(self):
         return getattr(self, "config_mgr", CONFIG_MGR)
 
-    def _workspace_scale_factor(self) -> float:
+    def _workspace_scale_percent(self) -> int:
         try:
             scale_percent = int(self._cfg().get_ui_scale_percent() or 100)
         except Exception:
             scale_percent = 100
-        scale_percent = max(90, min(150, scale_percent))
-        if scale_percent >= 100:
-            factor = 1.0 + ((scale_percent - 100) / 500.0)
-        else:
-            factor = max(0.96, 1.0 - ((100 - scale_percent) / 300.0))
-        return max(0.94, min(1.12, float(factor)))
+        return max(90, min(150, scale_percent))
+
+    def _workspace_scale_factor(self) -> float:
+        return float(self._workspace_scale_percent()) / 100.0
+
+    def _workspace_font(self, family: str, size_px: int):
+        return (family, -abs(int(size_px)))
+
+    def _workspace_dpi_multiplier(self) -> float:
+        multiplier = 1.0
+        if not self._cfg().get_dpi_adaptation_enabled():
+            return multiplier
+        try:
+            screen_w = int(self.root.winfo_screenwidth() or 0)
+            screen_h = int(self.root.winfo_screenheight() or 0)
+        except Exception:
+            screen_w = screen_h = 0
+        if screen_w and screen_w <= 1440:
+            multiplier *= 1.03
+        if screen_h and screen_h <= 900:
+            multiplier *= 0.98
+        return max(0.9, min(1.12, float(multiplier)))
 
     def _workspace_density_key(self) -> str:
         value = str(self._cfg().get_ui_density() or "comfortable").strip().lower()
@@ -53,42 +69,33 @@ class WorkspaceToolsMixin:
             "card_pad": s(13 if compact else 16),
             "sidebar_width": s(208 if compact else 228, minimum=168),
             "rail_width": 0,
-            "brand_font": ("Bahnschrift SemiBold", s(20 if compact else 24, minimum=14)),
-            "title_font": ("Bahnschrift SemiBold", s(28 if compact else 34, minimum=18)),
-            "body_font": ("Segoe UI", s(12 if compact else 14, minimum=10)),
-            "small_font": ("Segoe UI", s(11 if compact else 12, minimum=9)),
-            "input_font": ("Segoe UI", s(15 if compact else 17, minimum=11)),
+            "brand_font": self._workspace_font("Bahnschrift SemiBold", s(20 if compact else 24, minimum=14)),
+            "title_font": self._workspace_font("Bahnschrift SemiBold", s(28 if compact else 34, minimum=18)),
+            "body_font": self._workspace_font("Segoe UI", s(12 if compact else 14, minimum=10)),
+            "small_font": self._workspace_font("Segoe UI", s(11 if compact else 12, minimum=9)),
+            "input_font": self._workspace_font("Segoe UI", s(15 if compact else 17, minimum=11)),
             "entry_height": s(90 if compact else 104, minimum=76),
         }
 
     def _apply_dpi_scaling(self):
         if not getattr(self, "root", None):
             return
-        try:
-            scale_percent = int(self._cfg().get_ui_scale_percent() or 100)
-        except Exception:
-            scale_percent = 100
-        scale_percent = max(90, min(150, scale_percent))
-        if scale_percent >= 100:
-            base_scale = 1.0 + ((scale_percent - 100) / 500.0)
-        else:
-            base_scale = max(0.96, 1.0 - ((100 - scale_percent) / 300.0))
-        if self._cfg().get_dpi_adaptation_enabled():
+        base_tk_scaling = getattr(self, "_base_tk_scaling", None)
+        if not isinstance(base_tk_scaling, (int, float)) or float(base_tk_scaling) <= 0:
             try:
-                screen_w = int(self.root.winfo_screenwidth() or 0)
-                screen_h = int(self.root.winfo_screenheight() or 0)
+                base_tk_scaling = float(self.root.tk.call("tk", "scaling") or 1.0)
             except Exception:
-                screen_w = screen_h = 0
-            if screen_w and screen_w <= 1440:
-                base_scale = max(base_scale, 1.03)
-            if screen_h and screen_h <= 900:
-                base_scale = max(0.98, base_scale - 0.02)
+                base_tk_scaling = 1.0
+            self._base_tk_scaling = float(base_tk_scaling)
+        user_scale = self._workspace_scale_factor()
+        dpi_multiplier = self._workspace_dpi_multiplier()
+        target_scale = max(0.75, min(3.0, float(base_tk_scaling) * user_scale * dpi_multiplier))
         last_scale = getattr(self, "_last_applied_dpi_scale", None)
-        if isinstance(last_scale, (int, float)) and abs(float(last_scale) - float(base_scale)) < 0.001:
+        if isinstance(last_scale, (int, float)) and abs(float(last_scale) - float(target_scale)) < 0.001:
             return
         try:
-            self.root.tk.call("tk", "scaling", round(base_scale, 3))
-            self._last_applied_dpi_scale = float(base_scale)
+            self.root.tk.call("tk", "scaling", round(target_scale, 3))
+            self._last_applied_dpi_scale = float(target_scale)
         except Exception:
             pass
 

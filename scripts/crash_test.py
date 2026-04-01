@@ -301,7 +301,9 @@ def main():
         pump_ui(root, 2)
         report.assert_true(
             "settings close returns chat",
-            app.chat_shell.winfo_ismapped() and not app.settings_window.winfo_ismapped() and app._workspace_section == "chat",
+            app.chat_shell.winfo_ismapped()
+            and (getattr(app, "settings_window", None) is None or not app.settings_window.winfo_ismapped())
+            and app._workspace_section == "chat",
         )
 
         app.run_setup_wizard(True)

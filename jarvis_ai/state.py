@@ -123,8 +123,10 @@ class ConfigManager:
             "update_check_on_start": True,
             "mic_device_index": None,
             "mic_device_name": "",
+            "mic_device_signature": "",
             "output_device_index": None,
             "output_device_name": "",
+            "output_device_signature": "",
             "fortnite_roots": [r"D:\Epic Games", r"D:\Fortnite"],
             "yandex_music_path": os.path.join(LOCAL_APPDATA, r"Programs\YandexMusic\Яндекс Музыка.exe"),
             "discord_candidates": [
@@ -469,6 +471,10 @@ class ConfigManager:
 
         if not isinstance(cfg.get("output_device_name"), str):
             cfg["output_device_name"] = str(cfg.get("output_device_name") or "")
+        if not isinstance(cfg.get("mic_device_signature"), str):
+            cfg["mic_device_signature"] = str(cfg.get("mic_device_signature") or "")
+        if not isinstance(cfg.get("output_device_signature"), str):
+            cfg["output_device_signature"] = str(cfg.get("output_device_signature") or "")
         if cfg.get("output_device_index") in ("", None, "None"):
             cfg["output_device_index"] = None
         else:
@@ -721,6 +727,8 @@ class ConfigManager:
         self.set("mic_device_index", idx)
     def get_mic_device_name(self): return self.get("mic_device_name", "")
     def set_mic_device_name(self, name): self.set("mic_device_name", name or "")
+    def get_mic_device_signature(self): return self.get("mic_device_signature", "")
+    def set_mic_device_signature(self, signature): self.set("mic_device_signature", signature or "")
     def get_output_device_index(self): return self.get("output_device_index", None)
     def set_output_device_index(self, idx):
         if idx in ("", None, "None"):
@@ -732,6 +740,8 @@ class ConfigManager:
         self.set("output_device_index", idx)
     def get_output_device_name(self): return self.get("output_device_name", "")
     def set_output_device_name(self, name): self.set("output_device_name", name or "")
+    def get_output_device_signature(self): return self.get("output_device_signature", "")
+    def set_output_device_signature(self, signature): self.set("output_device_signature", signature or "")
     def get_api_key(self): return self.get("api_key", "")
     def set_api_key(self, key): self.set("api_key", key or "")
     def get_model(self): return self.get("model", DEFAULT_CHAT_MODEL)

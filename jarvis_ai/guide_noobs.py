@@ -1,4 +1,5 @@
-﻿import tkinter as tk
+import textwrap
+import tkinter as tk
 from typing import Callable, Optional
 
 from .theme import Theme
@@ -21,14 +22,14 @@ class GuideNoobPanel:
         self.is_hero = self.variant == "hero"
         self.is_settings = self.variant == "settings"
 
-        outer_pad = 22 if self.is_hero else 16 if self.is_settings else 14
-        title_font = ("Segoe UI Semibold", 18 if self.is_hero else 13 if self.is_settings else 12)
-        status_font = ("Segoe UI", 12 if self.is_hero else 10 if self.is_settings else 9)
-        message_font = ("Segoe UI", 12 if self.is_hero else 11 if self.is_settings else 10)
-        pointer_font = ("Segoe UI Semibold", 12 if self.is_hero else 10)
+        outer_pad = 22 if self.is_hero else 11 if self.is_settings else 14
+        title_font = ("Segoe UI Semibold", 18 if self.is_hero else 12 if self.is_settings else 12)
+        status_font = ("Segoe UI", 12 if self.is_hero else 9 if self.is_settings else 9)
+        message_font = ("Segoe UI", 12 if self.is_hero else 9 if self.is_settings else 10)
+        pointer_font = ("Segoe UI Semibold", 12 if self.is_hero else 9 if self.is_settings else 10)
         avatar_font = ("Segoe UI", 52 if self.is_hero else 28, "bold")
-        wave_font = ("Segoe UI Emoji", 22 if self.is_hero else 16)
-        initial_wrap = 220 if self.is_hero else 210 if self.is_settings else 180
+        wave_font = ("Segoe UI Emoji", 22 if self.is_hero else 14 if self.is_settings else 16)
+        initial_wrap = 220 if self.is_hero else 166 if self.is_settings else 180
         self._wave_anchor_relx = 1.0
         self._wave_anchor = "ne"
         self._wave_base_x = -12 if self.is_hero else -4
@@ -36,6 +37,14 @@ class GuideNoobPanel:
         self._outer_pad = outer_pad
         self._layout_after = None
         self._layout_signature = None
+        self._message_wraplength = initial_wrap
+        self._pointer_wraplength = initial_wrap
+        self._message_line_limit = 4 if self.is_settings else 0
+        self._pointer_line_limit = 3 if self.is_settings else 0
+        self._title_text = str(title or "Noob Guide")
+        self._status_text = "Готов помочь"
+        self._message_text = "Подскажу, что делает выбранная функция, и покажу, с чего лучше начать."
+        self._pointer_text = "→ Кликните по помощнику, чтобы переключать подсказки"
 
         self.frame = tk.Frame(
             parent,
@@ -44,10 +53,13 @@ class GuideNoobPanel:
             highlightthickness=1,
             cursor="hand2",
         )
+        if self.is_settings:
+            self.frame.configure(height=292)
+            self.frame.pack_propagate(False)
         self.frame.pack(fill="x", expand=False)
 
         self.top = tk.Frame(self.frame, bg=Theme.CARD_BG, cursor="hand2")
-        self.top.pack(fill="x", padx=outer_pad, pady=(outer_pad, 10))
+        self.top.pack(fill="x", padx=outer_pad, pady=(outer_pad, 8 if self.is_settings else 10))
 
         self.avatar_wrap = tk.Frame(self.top, bg=Theme.CARD_BG, cursor="hand2")
         if self.is_hero:
@@ -73,7 +85,7 @@ class GuideNoobPanel:
         title_anchor = "center" if self.is_hero else "w"
         self.title_label = tk.Label(
             self.text_wrap,
-            text=title,
+            text=self._title_text,
             bg=Theme.CARD_BG,
             fg=Theme.FG,
             font=title_font,
@@ -84,7 +96,7 @@ class GuideNoobPanel:
 
         self.status_label = tk.Label(
             self.text_wrap,
-            text="Готов помочь",
+            text=self._status_text,
             bg=Theme.CARD_BG,
             fg=Theme.FG_SECONDARY,
             font=status_font,
@@ -100,11 +112,11 @@ class GuideNoobPanel:
             highlightthickness=1,
             cursor="hand2",
         )
-        self.message_box.pack(fill="x", padx=outer_pad, pady=(0, 10))
+        self.message_box.pack(fill="x", padx=outer_pad, pady=(0, 8 if self.is_settings else 10))
 
         self.message_label = tk.Label(
             self.message_box,
-            text="Подскажу, что делает выбранная функция, и покажу, с чего лучше начать.",
+            text=self._message_text,
             bg=Theme.BUTTON_BG,
             fg=Theme.FG,
             justify="left",
@@ -112,12 +124,12 @@ class GuideNoobPanel:
             cursor="hand2",
             wraplength=initial_wrap,
         )
-        self.message_label.pack(fill="x", padx=14 if self.is_hero else 12, pady=12 if self.is_hero else 10)
-        bind_dynamic_wrap(self.message_label, self.message_box, padding=36 if self.is_hero else 28, minimum=260 if self.is_hero else 150)
+        self.message_label.pack(fill="x", padx=12, pady=10 if self.is_settings else 12)
+        bind_dynamic_wrap(self.message_label, self.message_box, padding=28 if self.is_settings else 36, minimum=150)
 
         self.pointer_label = tk.Label(
             self.frame,
-            text="→ Кликните по помощнику, чтобы переключать подсказки",
+            text=self._pointer_text,
             bg=Theme.CARD_BG,
             fg=Theme.ACCENT,
             font=pointer_font,
@@ -137,7 +149,34 @@ class GuideNoobPanel:
             self.parent.bind("<Configure>", lambda _event: self._schedule_layout_refresh(), add="+")
         except Exception:
             pass
+        self._refresh_text_content()
         self._schedule_layout_refresh()
+
+    def _compress_text(self, text: str, wraplength: int, max_lines: int) -> str:
+        raw = " ".join(str(text or "").replace("\r", " ").replace("\n", " ").split())
+        if not raw or max_lines <= 0:
+            return raw
+        chars_per_line = max(int(max(int(wraplength or 0), 120) / 7), 14)
+        lines = textwrap.wrap(raw, width=chars_per_line, break_long_words=False, break_on_hyphens=False)
+        if len(lines) <= max_lines:
+            return "\n".join(lines)
+        clipped = list(lines[:max_lines])
+        tail = clipped[-1].rstrip(" .,;:-")
+        if len(tail) > chars_per_line - 1:
+            tail = tail[: chars_per_line - 1].rstrip(" .,;:-")
+        clipped[-1] = f"{tail or clipped[-1].rstrip()}…"
+        return "\n".join(clipped)
+
+    def _refresh_text_content(self):
+        self.title_label.configure(text=self._title_text)
+        self.status_label.configure(text=self._status_text)
+        message_text = self._message_text
+        pointer_text = self._pointer_text
+        if self.is_settings:
+            message_text = self._compress_text(message_text, self._message_wraplength, self._message_line_limit)
+            pointer_text = self._compress_text(pointer_text, self._pointer_wraplength, self._pointer_line_limit)
+        self.message_label.configure(text=message_text)
+        self.pointer_label.configure(text=pointer_text)
 
     def _apply_wrap_constraints(self):
         try:
@@ -149,8 +188,14 @@ class GuideNoobPanel:
         try:
             message_wrap = max(150, frame_w - (self._outer_pad * 2) - 28)
             pointer_wrap = max(150, frame_w - (self._outer_pad * 2) - 16)
+            if self.is_settings:
+                message_wrap = min(message_wrap, 178)
+                pointer_wrap = min(pointer_wrap, 182)
+            self._message_wraplength = message_wrap
+            self._pointer_wraplength = pointer_wrap
             self.message_label.configure(wraplength=message_wrap)
             self.pointer_label.configure(wraplength=pointer_wrap)
+            self._refresh_text_content()
         except Exception:
             pass
 
@@ -184,15 +229,16 @@ class GuideNoobPanel:
         self._click_callback = callback
 
     def set_message(self, title: str = "", status: str = "", text: str = "", pointer: str = ""):
-        self._apply_wrap_constraints()
         if title:
-            self.title_label.configure(text=title)
+            self._title_text = str(title)
         if status:
-            self.status_label.configure(text=status)
+            self._status_text = str(status)
         if text:
-            self.message_label.configure(text=text)
+            self._message_text = str(text)
         if pointer:
-            self.pointer_label.configure(text=pointer)
+            self._pointer_text = str(pointer)
+        self._refresh_text_content()
+        self._apply_wrap_constraints()
         self._schedule_layout_refresh()
 
     def apply_theme(self):
@@ -237,7 +283,7 @@ class GuideNoobPanel:
             width = max(int(self.frame.winfo_width() or self.parent.winfo_width() or 0), 1)
         except Exception:
             return
-        stacked = width < (280 if self.is_settings else 240)
+        stacked = self.is_settings or width < 240
         centered = stacked or self.is_settings
         layout_signature = (stacked, centered)
         if layout_signature == self._layout_signature:
@@ -251,7 +297,7 @@ class GuideNoobPanel:
             pass
 
         if stacked:
-            self.avatar_wrap.pack(anchor="center", pady=(0, 8))
+            self.avatar_wrap.pack(anchor="center", pady=(0, 6 if self.is_settings else 8))
             self.text_wrap.pack(fill="x", expand=True, pady=(2, 0))
         else:
             self.avatar_wrap.pack(side="left", anchor="n")
@@ -261,7 +307,7 @@ class GuideNoobPanel:
         justify = "center" if centered else "left"
         try:
             self.title_label.pack_configure(anchor=anchor)
-            self.status_label.pack_configure(anchor=anchor, pady=(6, 0))
+            self.status_label.pack_configure(anchor=anchor, pady=(4 if self.is_settings else 6, 0))
             self.pointer_label.pack_configure(anchor=anchor, padx=self._outer_pad, pady=(0, self._outer_pad))
         except Exception:
             pass

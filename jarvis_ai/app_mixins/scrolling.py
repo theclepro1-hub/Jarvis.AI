@@ -197,16 +197,26 @@ class ScrollingMixin:
         except Exception:
             return "break"
 
-    def _ensure_mousewheel_bindings(self):
-        if self._mousewheel_bound:
+    def _ensure_mousewheel_bindings(self, container=None):
+        bind_host = container or getattr(self, "root", None)
+        if bind_host is None:
             return
         try:
-            self.root.bind_all("<MouseWheel>", self._handle_global_mousewheel, add="+")
-            self.root.bind_all("<Button-4>", self._handle_global_mousewheel, add="+")
-            self.root.bind_all("<Button-5>", self._handle_global_mousewheel, add="+")
+            host_key = str(bind_host)
+        except Exception:
+            host_key = "root"
+        bound_hosts = getattr(self, "_mousewheel_bound_hosts", set())
+        if host_key in bound_hosts:
+            return
+        try:
+            bind_host.bind("<MouseWheel>", self._handle_global_mousewheel, add="+")
+            bind_host.bind("<Button-4>", self._handle_global_mousewheel, add="+")
+            bind_host.bind("<Button-5>", self._handle_global_mousewheel, add="+")
+            bound_hosts.add(host_key)
+            self._mousewheel_bound_hosts = bound_hosts
             self._mousewheel_bound = True
         except Exception as e:
-            logger.debug(f"Mousewheel global bind error: {e}")
+            logger.debug(f"Mousewheel bind error for {host_key}: {e}")
 
     def _register_scroll_target(self, widget):
         if widget is None:
@@ -228,7 +238,11 @@ class ScrollingMixin:
             widget.bind("<Leave>", _leave, add="+")
         except Exception:
             pass
-        self._ensure_mousewheel_bindings()
+        try:
+            bind_host = widget.winfo_toplevel()
+        except Exception:
+            bind_host = getattr(self, "root", None)
+        self._ensure_mousewheel_bindings(bind_host)
 
     def _bind_selector_wheel_guard(self, widget):
         if widget is None:

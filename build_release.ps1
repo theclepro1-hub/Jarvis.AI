@@ -229,8 +229,17 @@ try {
     & $pythonExe -B @pythonPrefixArgs $versionCheckScript
     if ($LASTEXITCODE -ne 0) { throw "Version consistency check failed." }
 
-    & $pythonExe -B @pythonPrefixArgs -m py_compile $jarvisPy $brandingPath $crashTestScript $unitChecksScript $smokeCheckScript
-    if ($LASTEXITCODE -ne 0) { throw "Python compile check failed." }
+    Step "Run ruff"
+    & $pythonExe -B @pythonPrefixArgs -m ruff check $jarvisPy (Join-Path $root "jarvis_ai") (Join-Path $root "scripts") (Join-Path $root "tests")
+    if ($LASTEXITCODE -ne 0) { throw "Ruff check failed." }
+
+    Step "Run pytest"
+    & $pythonExe -B @pythonPrefixArgs -m pytest -q
+    if ($LASTEXITCODE -ne 0) { throw "Pytest failed." }
+
+    Step "Run compileall"
+    & $pythonExe -B @pythonPrefixArgs -m compileall $jarvisPy (Join-Path $root "jarvis_ai") (Join-Path $root "scripts") (Join-Path $root "tests")
+    if ($LASTEXITCODE -ne 0) { throw "Python compileall check failed." }
 
     Step "Run unit checks"
     & $pythonExe -B @pythonPrefixArgs $unitChecksScript
@@ -241,7 +250,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Crash test failed." }
 
     Step "Build EXE (PyInstaller)"
-    pyinstaller --noconfirm --clean $specPath
+    & $pythonExe -B @pythonPrefixArgs -m PyInstaller --noconfirm --clean $specPath
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
 
     if (-not (Test-Path $distExe)) {

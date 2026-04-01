@@ -354,27 +354,6 @@ def run_voice_recording_test(self):
     threading.Thread(target=_worker, daemon=True, name="VoiceTestRecording").start()
 
 
-def play_last_voice_capture(self):
-    path = str(getattr(self, "_voice_test_audio_path", "") or "").strip()
-    if not path or not os.path.exists(path):
-        self.set_status_temp("Сначала сделайте тестовую запись", "warn")
-        return
-    if winsound is None:
-        self.set_status_temp("Прослушивание доступно только в Windows-среде", "warn", duration_ms=2800)
-        return
-    try:
-        winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
-        self.set_status_temp("Воспроизвожу последнюю тестовую запись", "ok", duration_ms=2400)
-    except Exception as exc:
-        self.set_status_temp("Не удалось воспроизвести запись", "warn", duration_ms=2800)
-        if hasattr(self, "_record_human_log"):
-            try:
-                self._record_human_log("Прослушивание записи", "Не получилось воспроизвести тестовый файл микрофона.", "Повторите тестовую запись и проверьте устройство вывода.", level="warn")
-            except Exception:
-                pass
-        logger.warning(f"Voice playback error: {exc}")
-
-
 def show_last_voice_capture_summary(self):
     _ensure_voice_debug_state(self)
     path = str(getattr(self, "_voice_test_audio_path", "") or "").strip()
@@ -606,7 +585,10 @@ def _patched_listen_task(self):
         try:
             desired_index = self.get_selected_microphone_index()
             desired_name = self.get_selected_microphone_name()
-            if desired_index != current_device_index:
+            force_device_refresh = bool(getattr(self, "_voice_device_refresh_requested", False))
+            if force_device_refresh:
+                self._voice_device_refresh_requested = False
+            if force_device_refresh or desired_index != current_device_index or str(desired_name or "").strip() != str(current_device_name or "").strip():
                 current_device_index = desired_index
                 current_device_name = desired_name
                 if mic is not None:

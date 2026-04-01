@@ -6,15 +6,15 @@
 
 Здесь лежит новый контракт продукта:
 
-- [MANIFESTO.md](/C:/jarvisAI%202.0/next_core/MANIFESTO.md) — зачем существует новый JARVIS.
-- [V1_SPEC.md](/C:/jarvisAI%202.0/next_core/V1_SPEC.md) — что именно должно войти в первую рабочую версию.
-- [STYLE_GUIDE.md](/C:/jarvisAI%202.0/next_core/STYLE_GUIDE.md) — визуальная система `DOORS + PS1 + control hub`.
-- [QUALITY_GATE.md](/C:/jarvisAI%202.0/next_core/QUALITY_GATE.md) — жёсткая рамка качества, без которой релиза не будет.
-- [PROLOGUE.md](/C:/jarvisAI%202.0/next_core/PROLOGUE.md) — готовый пролог первого запуска.
-- [ROADMAP.md](/C:/jarvisAI%202.0/next_core/ROADMAP.md) — порядок сборки нового продукта.
-- [product_manifest.json](/C:/jarvisAI%202.0/next_core/product_manifest.json) — машинно-читаемый слепок новой системы.
-- [design_tokens.json](/C:/jarvisAI%202.0/next_core/design_tokens.json) — стартовые визуальные токены.
-- [prologue_scene.json](/C:/jarvisAI%202.0/next_core/prologue_scene.json) — сцена пролога в машинно-читаемом виде.
+- [MANIFESTO.md](./MANIFESTO.md) — зачем существует новый JARVIS.
+- [V1_SPEC.md](./V1_SPEC.md) — что именно должно войти в первую рабочую версию.
+- [STYLE_GUIDE.md](./STYLE_GUIDE.md) — визуальная система `DOORS + PS1 + control hub`.
+- [QUALITY_GATE.md](./QUALITY_GATE.md) — жёсткая рамка качества, без которой релиза не будет.
+- [PROLOGUE.md](./PROLOGUE.md) — готовый пролог первого запуска.
+- [ROADMAP.md](./ROADMAP.md) — порядок сборки нового продукта.
+- [product_manifest.json](./product_manifest.json) — машинно-читаемый слепок новой системы.
+- [design_tokens.json](./design_tokens.json) — стартовые визуальные токены.
+- [prologue_scene.json](./prologue_scene.json) — сцена пролога в машинно-читаемом виде.
 
 Базовая идея:
 

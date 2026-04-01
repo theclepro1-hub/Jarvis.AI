@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-JARVIS AI 2.0 Assistant v20.0.0
+JARVIS AI 2.0 Assistant v20.1.5
 """
 
 import os
@@ -41,6 +41,7 @@ from jarvis_ai.audio_devices import (
     audio_device_family_key as _audio_device_family_key,
     expand_audio_device_name as _expand_audio_device_name,
     find_audio_device_entry_by_name as _find_audio_device_entry_by_name,
+    find_audio_device_entry_by_signature as _find_audio_device_entry_by_signature,
     get_audio_device_entry as _get_audio_device_entry,
     host_api_short_label as _host_api_short_label,
     is_audio_garbage_name as _is_audio_garbage_name,
@@ -405,12 +406,17 @@ class JarvisApp(
         self._bg_anim_after_id = None
         self._bg_rebuild_after_id = None
         self._settings_tab1_save_callback = None
+        self._control_center_rebuild_pending = False
+        self._control_center_rebuild_target = None
         self._bg_tick_ms = 54
         self._status_reset_after_id = None
         self._scroll_targets = []
         self._mousewheel_bound = False
+        self._mousewheel_bound_hosts = set()
         self._active_scroll_target = None
         self._wheel_delta_accum = {}
+        self._base_tk_scaling = None
+        self._last_applied_dpi_scale = None
         self._chat_sync_after_id = None
         self._chat_scroll_to_end_pending = False
         self._bg_anim_paused = False
@@ -612,6 +618,7 @@ class JarvisApp(
         cfg = self.config_mgr
         refresh_known_app_launchers()
         MIC_DEVICE_INDEX, MIC_NAME = pick_microphone_device()
+        self._voice_device_refresh_requested = True
         if cfg.get_api_key() and Groq:
             try:
                 ensure_httpx_proxy_compat()
@@ -1825,8 +1832,18 @@ class JarvisApp(
 
     def get_selected_output_device_index(self, use_default: bool = False):
         entries = self._get_output_device_entries(refresh=False)
+        stored_signature = str(CONFIG_MGR.get_output_device_signature() or "").strip()
+        if stored_signature:
+            matched = _find_audio_device_entry_by_signature(stored_signature, kind="output", refresh=False)
+            if matched is not None:
+                return int(matched.get("index", 0) or 0)
+        stored = (CONFIG_MGR.get_output_device_name() or "").strip()
+        if stored:
+            matched = _find_audio_device_entry_by_name(stored, kind="output", refresh=False)
+            if matched is not None:
+                return int(matched.get("index", 0) or 0)
         idx = CONFIG_MGR.get_output_device_index()
-        if idx is not None:
+        if idx is not None and not stored_signature:
             try:
                 idx = int(idx)
                 matched_by_idx = next((item for item in entries if int(item.get("index", -1)) == idx), None)
@@ -1836,11 +1853,6 @@ class JarvisApp(
                         return idx
             except Exception:
                 pass
-        stored = (CONFIG_MGR.get_output_device_name() or "").strip()
-        if stored:
-            matched = _find_audio_device_entry_by_name(stored, kind="output", refresh=False)
-            if matched is not None:
-                return int(matched.get("index", 0) or 0)
         if use_default:
             default_item = next((item for item in entries if item.get("is_default_output")), None)
             if default_item is None:
@@ -1855,34 +1867,52 @@ class JarvisApp(
         return None
 
     def get_selected_microphone_index(self):
-        names = self._get_microphone_devices()
+        entries = self._get_input_device_entries(refresh=False)
+        stored_signature = str(CONFIG_MGR.get_mic_device_signature() or "").strip()
+        if stored_signature:
+            matched = _find_audio_device_entry_by_signature(stored_signature, kind="input", refresh=False)
+            if matched is not None:
+                return int(matched.get("index", 0) or 0)
+        stored = (CONFIG_MGR.get_mic_device_name() or "").strip()
+        if stored:
+            matched = _find_audio_device_entry_by_name(stored, kind="input", refresh=False)
+            if matched is not None:
+                return int(matched.get("index", 0) or 0)
         idx = CONFIG_MGR.get_mic_device_index()
-        if idx is not None:
+        if idx is not None and not stored_signature:
             try:
                 idx = int(idx)
-                if 0 <= idx < len(names) and str(names[idx] or "").strip():
-                    current_name = _expand_audio_device_name(names[idx], "input")
+                matched_by_idx = next((item for item in entries if int(item.get("index", -1)) == idx), None)
+                if matched_by_idx is not None:
+                    current_name = _expand_audio_device_name(matched_by_idx.get("name"), "input")
                     if current_name and not _is_audio_garbage_name(current_name):
                         return idx
             except Exception:
                 pass
-        if MIC_DEVICE_INDEX is not None and 0 <= MIC_DEVICE_INDEX < len(names) and str(names[MIC_DEVICE_INDEX] or "").strip():
-            current_name = _expand_audio_device_name(names[MIC_DEVICE_INDEX], "input")
-            if current_name and not _is_audio_garbage_name(current_name):
-                return MIC_DEVICE_INDEX
+        if MIC_DEVICE_INDEX is not None:
+            try:
+                matched_auto = next((item for item in entries if int(item.get("index", -1)) == int(MIC_DEVICE_INDEX)), None)
+                if matched_auto is not None:
+                    current_name = _expand_audio_device_name(matched_auto.get("name"), "input")
+                    if current_name and not _is_audio_garbage_name(current_name):
+                        return int(MIC_DEVICE_INDEX)
+            except Exception:
+                pass
         auto_idx, auto_name = pick_microphone_device()
-        if auto_idx is not None and 0 <= auto_idx < len(names) and str(names[auto_idx] or "").strip():
-            if auto_name and not _is_audio_garbage_name(auto_name):
-                return auto_idx
+        if auto_idx is not None and auto_name and not _is_audio_garbage_name(auto_name):
+            return auto_idx
         return None
 
     def get_selected_microphone_name(self):
-        names = self._get_microphone_devices()
         idx = self.get_selected_microphone_index()
-        if idx is not None and 0 <= idx < len(names):
-            return _expand_audio_device_name(names[idx], "input")
+        selected_item = _get_audio_device_entry(idx, refresh=False) if idx is not None else None
+        if selected_item and int(selected_item.get("max_input_channels", 0) or 0) > 0:
+            return _expand_audio_device_name(selected_item.get("name"), "input")
         stored = (CONFIG_MGR.get_mic_device_name() or "").strip()
-        return _expand_audio_device_name(stored, "input") or ("Авто" if names else "Не найден")
+        if stored:
+            return _expand_audio_device_name(stored, "input")
+        names = self._get_microphone_devices()
+        return "Авто" if names else "Не найден"
 
     def get_selected_output_name(self):
         selected_idx = self.get_selected_output_device_index(use_default=True)
@@ -2887,7 +2917,7 @@ class JarvisApp(
                     elif key in {"noob", "noob2"}:
                         img = img.resize((180,180), Image.LANCZOS)
                     elif key == "noob_settings":
-                        img = img.resize((148,148), Image.LANCZOS)
+                        img = img.resize((112,112), Image.LANCZOS)
                     elif key == "noob_sidebar":
                         img = img.resize((112,112), Image.LANCZOS)
                     elif key in ["mic","send"]:
@@ -3272,7 +3302,7 @@ class JarvisApp(
             if not self.safe_mode:
                 self.root.after(620, self.start_bg_anim)
         else:
-            self.root.after(180, lambda: self.run_setup_wizard(True))
+            self.root.after_idle(lambda: self.run_setup_wizard(True))
 
     def _show_entry_placeholder(self):
         entry = getattr(self, "entry", None)
@@ -3516,6 +3546,8 @@ class JarvisApp(
         if not hasattr(self, "main_container"):
             return
         metrics = self._workspace_metrics()
+        settings_canvas = getattr(self, "_control_center_content_canvas", None)
+        settings_open = bool(getattr(self, "_is_full_settings_open", lambda: False)())
         previous_entry = ""
         try:
             if getattr(self, "entry", None) is not None and self.entry.winfo_exists():
@@ -3540,6 +3572,7 @@ class JarvisApp(
         self._scroll_targets = []
         self._active_scroll_target = None
         self._wheel_delta_accum = {}
+        self._mousewheel_bound_hosts = set()
 
         self._build_workspace_shell_v2(metrics)
         try:
@@ -3563,6 +3596,14 @@ class JarvisApp(
             self.refresh_workspace_layout_mode()
         except Exception:
             pass
+        if settings_open and settings_canvas is not None:
+            try:
+                if settings_canvas.winfo_exists():
+                    self._register_scroll_target(settings_canvas)
+                    self._active_scroll_target = settings_canvas
+                    self._preferred_scroll_target = settings_canvas
+            except Exception:
+                pass
 
     def _build_workspace_sidebar(self, metrics):
         restored_build_workspace_sidebar(self, metrics)
@@ -4465,7 +4506,8 @@ class JarvisApp(
             except Exception:
                 pass
             try:
-                self._refresh_control_center_content_scroll()
+                if hasattr(self, "_schedule_control_center_content_scroll_refresh"):
+                    self._schedule_control_center_content_scroll_refresh()
             except Exception:
                 pass
             try:

@@ -117,6 +117,11 @@ def _memory_editor_window(self, item=None):
     win.geometry("560x420")
     win.configure(bg=Theme.BG)
     win.transient(self.root)
+    try:
+        win.lift()
+        win.focus_force()
+    except Exception:
+        pass
     card = tk.Frame(win, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
     card.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -184,6 +189,11 @@ def _scenario_editor_window(self, item=None):
     win.geometry("620x520")
     win.configure(bg=Theme.BG)
     win.transient(self.root)
+    try:
+        win.lift()
+        win.focus_force()
+    except Exception:
+        pass
     card = tk.Frame(win, bg=Theme.CARD_BG, highlightbackground=Theme.BORDER, highlightthickness=1)
     card.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -624,7 +634,7 @@ def _patched_build_embedded_settings_page(self):
     return page
 
 
-def register_system_ui(app_cls, settings_mixin_cls):
+def register_system_ui(app_cls, settings_mixin_cls=None):
     app_cls._selected_memory_item = _selected_memory_item
     app_cls._selected_scenario_item = _selected_scenario_item
     app_cls._refresh_memory_widgets = _refresh_memory_widgets
@@ -632,10 +642,6 @@ def register_system_ui(app_cls, settings_mixin_cls):
     app_cls._sync_memory_detail = _sync_memory_detail
     app_cls._memory_editor_window = _memory_editor_window
     app_cls._scenario_editor_window = _scenario_editor_window
-    if not hasattr(settings_mixin_cls, "_base_build_embedded_settings_page_v2"):
-        settings_mixin_cls._base_build_embedded_settings_page_v2 = settings_mixin_cls._build_embedded_settings_page
-    settings_mixin_cls._build_embedded_settings_page = _patched_build_embedded_settings_page
-    settings_mixin_cls._create_settings_tab5 = _patched_create_settings_tab5
 
 
 __all__ = ["register_system_ui"]

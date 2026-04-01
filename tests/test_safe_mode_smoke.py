@@ -1,9 +1,17 @@
 import sys
+import time
 import tkinter as tk
 
 import pytest
 
 import jarvis
+
+
+def _pump(root, steps: int = 4, delay: float = 0.05):
+    for _ in range(max(int(steps), 1)):
+        root.update_idletasks()
+        root.update()
+        time.sleep(max(float(delay), 0.0))
 
 
 def _make_app(monkeypatch, api_key: str):
@@ -19,8 +27,7 @@ def _make_app(monkeypatch, api_key: str):
     root.geometry("1440x960+40+40")
     app = jarvis.JarvisApp(root)
     root.deiconify()
-    root.update_idletasks()
-    root.update()
+    _pump(root)
     return root, app
 
 
@@ -72,7 +79,32 @@ def test_settings_open_as_full_screen_state(monkeypatch):
         root.update_idletasks()
         root.update()
         assert app._workspace_section == "chat"
-        assert not app.settings_window.winfo_ismapped()
+        assert getattr(app, "settings_window", None) is None or not app.settings_window.winfo_ismapped()
+    finally:
+        app.shutdown()
+        root.destroy()
+
+
+def test_settings_suspend_startup_gate_overlay(monkeypatch):
+    root, app = _make_app(monkeypatch, "")
+    try:
+        assert app._startup_gate_setup is True
+        assert app.activation_gate.winfo_ismapped()
+
+        app.open_full_settings_view("main")
+        _pump(root)
+
+        assert app._workspace_section == "settings"
+        assert app.settings_window.winfo_ismapped()
+        assert not app.activation_gate.winfo_ismapped()
+        assert not app.bg_canvas.winfo_ismapped()
+
+        app.close_full_settings_view()
+        _pump(root)
+
+        assert app._workspace_section == "chat"
+        assert app.activation_gate.winfo_ismapped()
+        assert app.bg_canvas.winfo_ismapped()
     finally:
         app.shutdown()
         root.destroy()
@@ -136,6 +168,57 @@ def test_settings_selectors_use_button_runtime(monkeypatch):
         assert app._settings_output_selector.winfo_class() == "Button"
         assert app._settings_tts_provider_selector.winfo_class() == "Button"
         assert app._settings_listening_selector.winfo_class() == "Button"
+    finally:
+        app.shutdown()
+        root.destroy()
+
+
+def test_system_settings_controls_are_button_driven(monkeypatch):
+    root, app = _make_app(monkeypatch, "ready-key")
+    try:
+        app.open_full_settings_view("system")
+        _pump(root)
+
+        assert app._settings_system_interface_selector.winfo_class() == "Button"
+        assert app._settings_system_memory_mode_selector.winfo_class() == "Button"
+        assert isinstance(app._settings_system_permission_selectors, dict)
+        assert app._settings_system_permission_selectors
+        assert all(widget.winfo_class() == "Button" for widget in app._settings_system_permission_selectors.values())
+
+        app._settings_system_interface_selector._jarvis_select("Фокус")
+        app._settings_system_save_interface_btn.invoke()
+        _pump(root)
+        assert str(app.config_mgr.get_workspace_view_mode() or "") == "focus"
+
+        first_category = next(iter(app._settings_system_permission_selectors))
+        app._settings_system_permission_selectors[first_category]._jarvis_select("Всегда выполнять")
+        app._settings_system_save_permissions_btn.invoke()
+        _pump(root)
+        assert app.config_mgr.get_dangerous_action_modes().get(first_category) == "trust"
+    finally:
+        app.shutdown()
+        root.destroy()
+
+
+def test_control_center_noob_panel_keeps_sidebar_size(monkeypatch):
+    root, app = _make_app(monkeypatch, "ready-key")
+    try:
+        app.open_full_settings_view("main")
+        _pump(root)
+
+        side = app._control_center_side
+        guide_host = app._control_center_guide_host
+        base_side_width = int(side.winfo_width() or 0)
+        base_guide_height = int(guide_host.winfo_height() or 0)
+
+        assert base_side_width >= 240
+        assert base_guide_height >= 280
+
+        for section in ("updates", "system", "voice", "main"):
+            app._show_control_center_section(section)
+            _pump(root)
+            assert abs(int(side.winfo_width() or 0) - base_side_width) <= 2
+            assert abs(int(guide_host.winfo_height() or 0) - base_guide_height) <= 2
     finally:
         app.shutdown()
         root.destroy()
