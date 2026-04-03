@@ -117,6 +117,19 @@ WAKE_WORD_BASE = (
     "джарис",
     "jarvis",
 )
+WAKE_WORD_PATTERN = re.compile(r"\b(?:джарвис|жарвис|дарвис|джарвес|джирвис|джервис|джервис|jarvis)(?:а|у|ом|е|ы|и)?\b")
+WAKE_TOKEN_PATTERN = re.compile(r"[a-zа-я0-9]+")
+PASSIVE_WAKE_PREFIX_WORDS = {
+    "эй",
+    "эйй",
+    "алло",
+    "слушай",
+    "слушайка",
+    "джарвис",
+    "жарвис",
+    "дарвис",
+    "jarvis",
+}
 
 
 def detect_wake_word(norm_text: str) -> Tuple[bool, str]:
@@ -125,12 +138,11 @@ def detect_wake_word(norm_text: str) -> Tuple[bool, str]:
         return False, ""
 
     # Быстрый путь: прямое вхождение/морфологические окончания.
-    wake_pattern = re.compile(r"\b(?:джарвис|жарвис|дарвис|джарвес|джирвис|джервис|джервис|jarvis)(?:а|у|ом|е|ы|и)?\b")
-    direct = wake_pattern.search(text)
+    direct = WAKE_WORD_PATTERN.search(text)
     if direct:
         return True, direct.group(0)
 
-    tokens = re.findall(r"[a-zа-я0-9]+", text)
+    tokens = WAKE_TOKEN_PATTERN.findall(text)
     if not tokens:
         return False, ""
 
@@ -155,6 +167,58 @@ def detect_wake_word(norm_text: str) -> Tuple[bool, str]:
             if ratio > best_match[1]:
                 best_match = (cleaned, ratio)
     if best_match[1] >= 0.64:
+        return True, best_match[0]
+    return False, ""
+
+
+def _passive_prefix_allowed(prefix_tokens: List[str]) -> bool:
+    if not prefix_tokens:
+        return True
+    if len(prefix_tokens) == 1 and prefix_tokens[0] in PASSIVE_WAKE_PREFIX_WORDS:
+        return True
+    if len(prefix_tokens) == 2 and "".join(prefix_tokens) in PASSIVE_WAKE_PREFIX_WORDS:
+        return True
+    return False
+
+
+def detect_passive_wake_word(norm_text: str) -> Tuple[bool, str]:
+    text = normalize_text(norm_text)
+    if not text:
+        return False, ""
+
+    direct = WAKE_WORD_PATTERN.search(text)
+    if direct:
+        prefix_tokens = WAKE_TOKEN_PATTERN.findall(text[: direct.start()])
+        if _passive_prefix_allowed(prefix_tokens):
+            return True, direct.group(0)
+        return False, ""
+
+    tokens = WAKE_TOKEN_PATTERN.findall(text)
+    if not tokens:
+        return False, ""
+
+    candidates = list(tokens[:2])
+    if len(tokens) >= 2:
+        left, right = tokens[0], tokens[1]
+        if len(left) <= 8 and len(right) <= 8:
+            candidates.append(f"{left}{right}")
+            candidates.append(f"{left}-{right}")
+
+    best_match = ("", 0.0)
+    for tok in candidates:
+        cleaned = tok.replace("-", "")
+        stripped = re.sub(r"(а|у|ом|е|ы|и|о)$", "", cleaned)
+        variants = [cleaned, stripped]
+        for v in variants:
+            if v in WAKE_WORD_FORMS:
+                return True, cleaned
+            close = get_close_matches(v, WAKE_WORD_BASE, n=1, cutoff=0.82)
+            if close:
+                return True, cleaned
+            ratio = max(SequenceMatcher(None, v, base).ratio() for base in WAKE_WORD_BASE)
+            if ratio > best_match[1]:
+                best_match = (cleaned, ratio)
+    if best_match[1] >= 0.84:
         return True, best_match[0]
     return False, ""
 
@@ -399,6 +463,7 @@ __all__ = [
     "CommandParser",
     "SIMPLE_BATCH_ACTIONS",
     "SPLIT_PATTERN",
+    "detect_passive_wake_word",
     "detect_wake_word",
     "find_dynamic_entry",
     "find_app_key",

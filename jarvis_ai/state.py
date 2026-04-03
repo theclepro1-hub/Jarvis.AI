@@ -53,6 +53,14 @@ _GENERIC_LEARNED_PATTERNS = {
     "открой", "открыть", "запусти", "запустить", "включи", "включить",
     "закрой", "закрыть", "выключи", "выключить", "start", "open", "close",
 }
+_LEARNED_PATTERN_BLOCK_MARKERS = {
+    "правило маршрутизации",
+    "запрос пользователя",
+    "json-командой",
+    "json-чатом",
+    "return only valid json",
+    "schema:",
+}
 
 
 def _normalize_pattern_text(text: str) -> str:
@@ -65,6 +73,10 @@ def _is_learned_pattern_generic(pattern: str) -> bool:
         return True
     words = norm.split()
     if len(words) < 2:
+        return True
+    if len(norm) > 160 or len(words) > 24:
+        return True
+    if any(marker in norm for marker in _LEARNED_PATTERN_BLOCK_MARKERS):
         return True
     return norm in _GENERIC_LEARNED_PATTERNS
 

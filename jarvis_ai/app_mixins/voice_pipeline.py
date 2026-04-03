@@ -16,7 +16,7 @@ except Exception:
 
 from ..branding import APP_LOGGER_NAME, APP_USER_AGENT
 from ..audio_runtime import audio_rms_int16
-from ..commands import detect_wake_word, normalize_text, strip_wake_word
+from ..commands import detect_passive_wake_word, normalize_text, strip_wake_word
 from ..state import CONFIG_MGR
 from ..theme import Theme
 from ..utils import short_exc
@@ -462,7 +462,7 @@ class VoicePipelineMixin:
                     if not self._cfg().get_active_listening_enabled():
                         continue
 
-                    detected, matched_word = detect_wake_word(norm)
+                    detected, matched_word = detect_passive_wake_word(norm)
                     if detected:
                         command_text = strip_wake_word(norm)
                         if command_text:

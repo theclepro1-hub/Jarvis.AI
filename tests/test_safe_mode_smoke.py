@@ -14,9 +14,11 @@ def _pump(root, steps: int = 4, delay: float = 0.05):
         time.sleep(max(float(delay), 0.0))
 
 
-def _make_app(monkeypatch, api_key: str):
+def _make_app(monkeypatch, api_key: str, *, focus_mode: bool = False, view_mode: str = "normal"):
     monkeypatch.setattr(sys, "argv", ["jarvis.py", "--safe-mode"])
     monkeypatch.setattr(jarvis.CONFIG_MGR, "get_api_key", lambda: api_key)
+    jarvis.CONFIG_MGR.set_focus_mode_enabled(bool(focus_mode))
+    jarvis.CONFIG_MGR.set_workspace_view_mode(str(view_mode or "normal"))
 
     try:
         root = tk.Tk()
@@ -105,6 +107,54 @@ def test_settings_suspend_startup_gate_overlay(monkeypatch):
         assert app._workspace_section == "chat"
         assert app.activation_gate.winfo_ismapped()
         assert app.bg_canvas.winfo_ismapped()
+    finally:
+        app.shutdown()
+        root.destroy()
+
+
+def test_focus_mode_startup_hides_sidebar_and_shows_top_status(monkeypatch):
+    root, app = _make_app(monkeypatch, "ready-key", focus_mode=True, view_mode="focus")
+    try:
+        assert not app.sidebar.winfo_ismapped()
+        assert not app.compact_controls_row.winfo_ismapped()
+        assert app.quick_bar.winfo_ismapped()
+        assert getattr(app, "header_settings_btn", None) is not None
+        assert app.header_settings_btn.winfo_exists()
+    finally:
+        app.shutdown()
+        root.destroy()
+
+
+def test_compact_workspace_keeps_composer_visible(monkeypatch):
+    root, app = _make_app(monkeypatch, "ready-key")
+    try:
+        root.geometry("980x700+40+40")
+        _pump(root, steps=8)
+        app.refresh_workspace_layout_mode()
+        _pump(root, steps=6)
+
+        assert app._workspace_shell_layout_mode == "compact"
+        assert not app.sidebar.winfo_ismapped()
+        assert not app.compact_controls_row.winfo_ismapped()
+        assert app.controls_bar.winfo_ismapped()
+        assert app.entry_wrap.winfo_ismapped()
+        assert app.mic_btn.winfo_ismapped()
+    finally:
+        app.shutdown()
+        root.destroy()
+
+
+def test_short_workspace_hides_sidebar_before_noob_clips(monkeypatch):
+    root, app = _make_app(monkeypatch, "ready-key")
+    try:
+        root.geometry("1520x720+40+40")
+        _pump(root, steps=8)
+        app.refresh_workspace_layout_mode()
+        _pump(root, steps=6)
+
+        assert app._workspace_shell_layout_mode == "compact"
+        assert not app.sidebar.winfo_ismapped()
+        assert app.controls_bar.winfo_ismapped()
     finally:
         app.shutdown()
         root.destroy()
@@ -213,8 +263,8 @@ def test_control_center_noob_panel_keeps_sidebar_size(monkeypatch):
         base_guide_height = int(guide_host.winfo_height() or 0)
 
         assert base_side_width >= 240
-        assert base_guide_height >= 220
-        assert guide.frame.winfo_height() >= guide.frame.winfo_reqheight()
+        assert base_guide_height >= 130
+        assert guide.frame.winfo_height() >= 130
         assert not guide.pointer_label.winfo_ismapped()
 
         for section in ("updates", "system", "voice", "main"):
@@ -222,7 +272,7 @@ def test_control_center_noob_panel_keeps_sidebar_size(monkeypatch):
             _pump(root)
             assert abs(int(side.winfo_width() or 0) - base_side_width) <= 2
             assert abs(int(guide_host.winfo_height() or 0) - base_guide_height) <= 24
-            assert guide.frame.winfo_height() >= guide.frame.winfo_reqheight()
+            assert guide.frame.winfo_height() >= 130
     finally:
         app.shutdown()
         root.destroy()

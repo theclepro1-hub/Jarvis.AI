@@ -386,19 +386,17 @@ class WorkspaceToolsMixin:
     def _set_focus_layout_visible(self, sidebar: bool, rail: bool):
         if hasattr(self, "sidebar"):
             try:
-                visible = bool(self.sidebar.winfo_ismapped())
-                if sidebar and not visible:
+                if sidebar:
                     self.sidebar.grid()
-                elif not sidebar and visible:
+                else:
                     self.sidebar.grid_remove()
             except Exception:
                 pass
         if hasattr(self, "side_panel"):
             try:
-                visible = bool(self.side_panel.winfo_ismapped())
-                if rail and not visible:
+                if rail:
                     self.side_panel.grid()
-                elif not rail and visible:
+                else:
                     self.side_panel.grid_remove()
             except Exception:
                 pass
@@ -435,7 +433,7 @@ class WorkspaceToolsMixin:
 
         if hasattr(self, "quick_desc_label"):
             if focus:
-                copy = "Фокус-режим убирает боковые панели и оставляет только чат, ввод и микрофон."
+                copy = "Фокус-режим убирает боковые панели и оставляет чат, верхние статусы, кнопку настроек и быстрый ввод."
             elif utility_visible:
                 copy = "Чат в центре, быстрые входы слева, голос и последние действия справа. Все глубокие инструменты открываются отдельно."
             else:

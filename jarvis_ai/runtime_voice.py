@@ -21,7 +21,7 @@ except Exception:
 from .audio_devices import _find_audio_device_entry_by_name, pick_microphone_device
 from .audio_runtime import audio_rms_int16
 from .branding import APP_LOGGER_NAME, app_title
-from .commands import detect_wake_word, normalize_text, strip_wake_word
+from .commands import detect_passive_wake_word, normalize_text, strip_wake_word
 from .state import CONFIG_MGR
 from .theme import Theme
 from .utils import short_exc
@@ -717,7 +717,7 @@ def _patched_listen_task(self):
                 if not self._cfg().get_active_listening_enabled():
                     continue
 
-                detected, matched_word = detect_wake_word(norm)
+                detected, matched_word = detect_passive_wake_word(norm)
                 if detected:
                     command_text = strip_wake_word(norm)
                     self._set_wake_debug("слово активации сработало", heard_text=text, matched_word=matched_word, rms=getattr(self, "_voice_meter_rms", 0), threshold=getattr(self.recognizer, "energy_threshold", 0))

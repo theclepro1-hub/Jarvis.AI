@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-JARVIS AI 2.0 Assistant v20.1.5
+JARVIS AI 2.0 Assistant v20.2.0
 """
 
 import os
@@ -3391,6 +3391,7 @@ class JarvisApp(
         self.root.bind("<Configure>", self.on_resize)
         self.root.bind("<FocusIn>", self._schedule_window_activity_sync, add="+")
         self.root.bind("<FocusOut>", self._schedule_window_activity_sync, add="+")
+        self._needs_visual_prime_after_map = True
         self.root.bind("<Map>", self._schedule_window_activity_sync, add="+")
         self.root.bind("<Unmap>", self._schedule_window_activity_sync, add="+")
         self.root.bind("<Map>", self._handle_window_map, add="+")
@@ -3406,6 +3407,8 @@ class JarvisApp(
         self._build_embedded_activation_gate()
         self.root.after(40, self._apply_main_container_bounds)
         self.root.after(60, self.refresh_workspace_layout_mode)
+        self.root.after(120, self._prime_after_visual_transition)
+        self.root.after(260, self._prime_after_visual_transition)
         self.root.after(90, self._schedule_window_activity_sync)
         if not self._startup_gate_setup:
             if not self.safe_mode:
@@ -4914,6 +4917,16 @@ class JarvisApp(
                         self.speak_msg(msg)
                 return msg
 
+            action_success_messages = {
+                "music": "Открываю музыку. Приятного прослушивания.",
+                "youtube": "Открываю YouTube. Приятного просмотра.",
+                "fortnite": "Запускаю Fortnite. Приятной игры.",
+                "cs2": "Запускаю CS2. Приятной игры.",
+                "dbd": "Запускаю DBD. Приятной игры.",
+                "deadlock": "Запускаю Deadlock. Приятной игры.",
+                "roblox": "Запускаю Roblox. Приятной игры.",
+            }
+
             if hasattr(self, "_set_live_pipeline_step"):
                 try:
                     label = action_executor.describe(action, arg) if action_executor else permission_action_label(action, arg)
@@ -4947,7 +4960,7 @@ class JarvisApp(
             if action in APP_OPEN_FUNCS:
                 try:
                     APP_OPEN_FUNCS[action]()
-                    return out("Выполнено!")
+                    return out(action_success_messages.get(str(action or "").strip().lower(), "Выполнено!"))
                 except Exception as e:
                     log_event(logger, "actions", "execute_action_failed", level=logging.ERROR, action=action, error=str(e))
                     return self.report_error(f"Ошибка запуска {action}", e, speak=speak)
@@ -5078,6 +5091,9 @@ class JarvisApp(
             parsed = extract_json_block(text)
             if parsed is None:
                 msg = text[:300] if text else "Не понял команду."
+                normalized_msg = normalize_text(msg)
+                if normalized_msg.startswith("продолжение следует") or normalized_msg.startswith("to be continued"):
+                    msg = "Модель вернула обрывок ответа. Повторите запрос или переключите мозг JARVIS."
                 if hasattr(self, "_set_live_pipeline_step"):
                     try:
                         self._set_live_pipeline_step(understood="Свободный ответ", executed=msg[:120])

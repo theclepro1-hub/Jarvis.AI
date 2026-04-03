@@ -373,6 +373,120 @@ def _build_corner_meter(self, parent=None):
     ).pack(anchor="w", padx=12, pady=(0, 10))
 
 
+def _workspace_compact_section_copy(section: str, fallback: str) -> str:
+    mapping = {
+        "chat": "Когда окно сжимается, остаются только разговор, верхний статус и быстрый ввод.",
+        "main": "Главные настройки открываются отдельно и не давят на рабочий экран.",
+        "voice": "Голосовые настройки вынесены отдельно, чтобы главный экран оставался чистым.",
+        "audio": "Голосовые настройки вынесены отдельно, чтобы главный экран оставался чистым.",
+        "diagnostics": "Диагностика и предрелизные проверки убраны глубже, чтобы не шуметь на главном экране.",
+        "system": "Система, память и сервисные действия убраны глубже, чтобы не забивать главный экран.",
+    }
+    return mapping.get(str(section or "").strip().lower(), fallback)
+
+
+def _apply_workspace_overview_layout(self, *, stacked: bool, compact_copy: bool, meter_compact: bool):
+    header = getattr(self, "workspace_overview_header", None)
+    left = getattr(self, "workspace_overview_left", None)
+    right = getattr(self, "workspace_overview_right", None)
+    meter_host = getattr(self, "header_meter_host", None)
+    action_host = getattr(self, "header_action_host", None)
+    meter_card = getattr(self, "corner_voice_card", None)
+    if not all((header, left, right, meter_host, action_host, meter_card)):
+        return
+
+    overview_signature = (bool(stacked), bool(compact_copy), bool(meter_compact))
+    if overview_signature == getattr(self, "_workspace_overview_layout_signature", None):
+        return
+    self._workspace_overview_layout_signature = overview_signature
+    self._workspace_header_compact_copy = bool(compact_copy)
+
+    for widget in (left, right):
+        try:
+            widget.pack_forget()
+        except Exception:
+            pass
+    if stacked:
+        left.pack(side="top", fill="x", expand=True, anchor="w")
+        right.pack(side="top", fill="x", pady=(10, 0), anchor="e")
+    else:
+        left.pack(side="left", fill="x", expand=True)
+        right.pack(side="right", padx=(18, 0))
+
+    for widget in (action_host, meter_host):
+        try:
+            widget.pack_forget()
+        except Exception:
+            pass
+    if stacked:
+        action_host.pack(side="right", padx=(8, 0))
+        meter_host.pack(side="right", fill="x", expand=False)
+    else:
+        action_host.pack(side="right", padx=(0, 10))
+        meter_host.pack(side="right")
+
+    try:
+        meter_card.pack_propagate(False)
+        meter_card.configure(width=284 if meter_compact else 340, height=98 if meter_compact else 108)
+    except Exception:
+        pass
+
+    current_section = getattr(self, "_workspace_section", "chat")
+    if current_section:
+        self._set_workspace_section(current_section)
+
+
+def _apply_workspace_controls_layout(self, *, compact: bool, ultra_narrow: bool):
+    controls_bar = getattr(self, "controls_bar", None)
+    entry_wrap = getattr(self, "entry_wrap", None)
+    entry = getattr(self, "entry", None)
+    paste_btn = getattr(self, "paste_btn", None)
+    copy_btn = getattr(self, "copy_btn", None)
+    send_btn = getattr(self, "send_btn", None)
+    mic_btn = getattr(self, "mic_btn", None)
+    if not controls_bar:
+        return
+
+    controls_signature = (bool(compact), bool(ultra_narrow))
+    if controls_signature == getattr(self, "_workspace_controls_layout_signature", None):
+        return
+    self._workspace_controls_layout_signature = controls_signature
+
+    try:
+        controls_bar.configure(height=76 if compact else 94)
+    except Exception:
+        pass
+    if entry_wrap is not None:
+        try:
+            entry_wrap.configure(padx=8 if compact else 12, pady=6 if compact else 8)
+        except Exception:
+            pass
+        try:
+            entry_wrap.pack_configure(padx=(0, 6 if compact else 8))
+        except Exception:
+            pass
+    if entry is not None:
+        try:
+            entry.configure(font=("Segoe UI", 12 if compact else 13))
+        except Exception:
+            pass
+
+    icon_padx = 7 if compact else 9
+    icon_pady = 5 if compact else 6
+    for widget in (paste_btn, copy_btn, send_btn):
+        if widget is None:
+            continue
+        try:
+            widget.configure(padx=icon_padx, pady=icon_pady)
+        except Exception:
+            pass
+    if mic_btn is not None:
+        try:
+            mic_btn.configure(padx=11 if ultra_narrow else 13 if compact else 15, pady=9 if compact else 11)
+        except Exception:
+            pass
+
+
 def _set_workspace_section(self, section: str = "chat"):
     normalized = str(section or "chat").strip().lower()
     self._workspace_section = normalized
@@ -385,12 +499,15 @@ def _set_workspace_section(self, section: str = "chat"):
         "system": ("Система", "Редкие системные операции, память, сценарии, приложения и релизные инструменты собраны отдельно от разговора."),
     }
     title, desc = mapping.get(normalized, mapping["chat"])
+    self._workspace_section_title = title
+    self._workspace_section_desc_full = desc
+    desc_to_show = _workspace_compact_section_copy(normalized, desc) if getattr(self, "_workspace_header_compact_copy", False) else desc
     try:
         self.quick_title_label.configure(text=title)
     except Exception:
         pass
     try:
-        self.quick_desc_label.configure(text=desc)
+        self.quick_desc_label.configure(text=desc_to_show)
     except Exception:
         pass
     buttons = getattr(self, "sidebar_section_buttons", {})
@@ -609,9 +726,11 @@ def _patched_build_workspace_overview(self, metrics):
 
     header = tk.Frame(self.top_bar, bg=Theme.CARD_BG)
     header.pack(fill="x")
+    self.workspace_overview_header = header
 
     left = tk.Frame(header, bg=Theme.CARD_BG)
     left.pack(side="left", fill="x", expand=True)
+    self.workspace_overview_left = left
     tk.Label(
         left,
         text="JARVIS AI 2.0",
@@ -671,10 +790,36 @@ def _patched_build_workspace_overview(self, metrics):
 
     right = tk.Frame(header, bg=Theme.CARD_BG)
     right.pack(side="right", padx=(18, 0))
+    self.workspace_overview_right = right
     self.header_action_buttons = []
+    self.header_action_host = tk.Frame(right, bg=Theme.CARD_BG)
+    self.header_action_host.pack(side="right", padx=(0, 10))
     self.header_meter_host = tk.Frame(right, bg=Theme.CARD_BG)
     self.header_meter_host.pack(side="right")
     _build_corner_meter(self, parent=self.header_meter_host)
+    self.header_settings_btn = tk.Button(
+        self.header_action_host,
+        command=lambda: self.open_full_settings_view("main"),
+        bg=Theme.BUTTON_BG,
+        fg=Theme.FG,
+        relief="flat",
+        padx=8,
+        pady=8,
+        cursor="hand2",
+        highlightbackground=Theme.BORDER,
+        highlightthickness=1,
+        compound="center",
+    )
+    settings_icon = self.assets.get("settings")
+    if isinstance(settings_icon, ImageTk.PhotoImage):
+        self.header_settings_btn.configure(image=settings_icon, text="", width=34)
+    else:
+        self.header_settings_btn.configure(text="⚙", font=("Segoe UI Semibold", 11))
+    self.header_settings_btn.pack(side="right")
+    self.header_action_buttons.append(self.header_settings_btn)
+    self._bind_hover_bg(self.header_settings_btn, role="button")
+    self.header_settings_btn.bind("<Enter>", lambda _e, b=self.header_settings_btn: self._show_tooltip_for_widget(b, "Открыть настройки"), add="+")
+    self.header_settings_btn.bind("<Leave>", lambda _e: self._hide_tooltip(), add="+")
 
     for child in list(self.quick_bar.winfo_children()):
         try:
@@ -969,25 +1114,60 @@ def _patched_refresh_workspace_layout_mode(self, *_args):
         width = int(self.root.winfo_width() or self.main_container.winfo_width() or 0)
     except Exception:
         width = 0
+    try:
+        shell_width = int(self.shell.winfo_width() or width or 0)
+    except Exception:
+        shell_width = width
+    try:
+        shell_height = int(self.shell.winfo_height() or self.main_container.winfo_height() or self.root.winfo_height() or 0)
+    except Exception:
+        shell_height = 0
     focus = bool(self._cfg().get_focus_mode_enabled())
     previous_mode = str(getattr(self, "_workspace_shell_layout_mode", "") or "")
     if focus:
         layout_mode = "focus"
-    elif previous_mode == "wide":
-        layout_mode = "wide" if width >= 1360 else "compact"
-    elif previous_mode == "compact":
-        layout_mode = "wide" if width >= 1440 else "compact"
     else:
-        layout_mode = "wide" if width >= 1400 else "compact"
+        wide_exit_width = 1320 if previous_mode == "wide" else 1410
+        sidebar_req_height = 0
+        sidebar = getattr(self, "sidebar", None)
+        if sidebar is not None:
+            try:
+                sidebar_req_height = int(sidebar.winfo_reqheight() or 0)
+            except Exception:
+                sidebar_req_height = 0
+        sidebar_fits_height = True
+        if shell_height and sidebar_req_height:
+            sidebar_fits_height = shell_height >= (sidebar_req_height + 16)
+        layout_mode = "wide" if shell_width >= wide_exit_width and sidebar_fits_height else "compact"
 
     sidebar_visible = (not focus) and layout_mode == "wide"
-    compact_nav_visible = (not focus) and layout_mode == "compact"
-    layout_signature = (layout_mode, sidebar_visible, compact_nav_visible)
+    compact_nav_visible = False
+    stacked_header = (not focus) and layout_mode == "compact" and shell_width < 780
+    compact_copy = (not focus) and layout_mode == "compact"
+    meter_compact = compact_copy
+    compact_controls = compact_copy
+    ultra_narrow_controls = compact_controls and (shell_width < 920 or shell_height < 720)
+    layout_signature = (
+        layout_mode,
+        sidebar_visible,
+        compact_nav_visible,
+        stacked_header,
+        compact_copy,
+        meter_compact,
+        compact_controls,
+        ultra_narrow_controls,
+    )
     if layout_signature == getattr(self, "_workspace_layout_signature", None):
         return
     self._workspace_layout_signature = layout_signature
     self._workspace_shell_layout_mode = layout_mode
     self._set_focus_layout_visible(sidebar_visible, False)
+    self._apply_workspace_overview_layout(
+        stacked=stacked_header,
+        compact_copy=compact_copy,
+        meter_compact=meter_compact,
+    )
+    self._apply_workspace_controls_layout(compact=compact_controls, ultra_narrow=ultra_narrow_controls)
 
     utility_shell = getattr(self, "utility_shell", None)
     if utility_shell is not None and utility_shell is not getattr(self, "chat_side", None):
@@ -1018,9 +1198,16 @@ def _patched_refresh_workspace_layout_mode(self, *_args):
     quick_bar = getattr(self, "quick_bar", None)
     if quick_bar is not None:
         try:
-            quick_bar.pack_forget()
+            mapped = bool(str(quick_bar.winfo_manager() or "").strip())
         except Exception:
-            pass
+            mapped = False
+        if focus and not mapped:
+            quick_bar.pack(side="top", fill="x", pady=(8, 10), before=self.content_stage)
+        elif not focus and mapped:
+            try:
+                quick_bar.pack_forget()
+            except Exception:
+                pass
 
     current_section = getattr(self, "_workspace_section", "chat")
     if current_section:
@@ -1054,6 +1241,8 @@ def register_shell_runtime(app_cls):
     app_cls._start_runtime_services = _patched_start_runtime_services
     app_cls.reload_services = _patched_reload_services
     _assign("_set_workspace_section", _set_workspace_section)
+    _assign("_apply_workspace_overview_layout", _apply_workspace_overview_layout)
+    _assign("_apply_workspace_controls_layout", _apply_workspace_controls_layout)
     _assign("_build_workspace_shell_v2", _patched_build_workspace_shell_v2)
     _assign("_rebuild_workspace_shell_v2", _patched_rebuild_workspace_shell_v2)
     _assign("_build_workspace_sidebar", _patched_build_workspace_sidebar)

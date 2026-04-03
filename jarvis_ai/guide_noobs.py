@@ -22,7 +22,7 @@ class GuideNoobPanel:
         self.is_hero = self.variant == "hero"
         self.is_settings = self.variant == "settings"
 
-        outer_pad = 22 if self.is_hero else 11 if self.is_settings else 14
+        outer_pad = 22 if self.is_hero else 8 if self.is_settings else 14
         title_font = ("Segoe UI Semibold", 18 if self.is_hero else 12 if self.is_settings else 12)
         status_font = ("Segoe UI", 12 if self.is_hero else 9 if self.is_settings else 9)
         message_font = ("Segoe UI", 12 if self.is_hero else 9 if self.is_settings else 10)
@@ -57,7 +57,7 @@ class GuideNoobPanel:
         self.frame.pack(fill="x", expand=False)
 
         self.top = tk.Frame(self.frame, bg=Theme.CARD_BG, cursor="hand2")
-        self.top.pack(fill="x", padx=outer_pad, pady=(outer_pad, 8 if self.is_settings else 10))
+        self.top.pack(fill="x", padx=outer_pad, pady=(outer_pad, 6 if self.is_settings else 10))
 
         self.avatar_wrap = tk.Frame(self.top, bg=Theme.CARD_BG, cursor="hand2")
         if self.is_hero:
@@ -110,7 +110,7 @@ class GuideNoobPanel:
             highlightthickness=1,
             cursor="hand2",
         )
-        self.message_box.pack(fill="x", padx=outer_pad, pady=(0, 8 if self.is_settings else 10))
+        self.message_box.pack(fill="x", padx=outer_pad, pady=(0, 6 if self.is_settings else 10))
 
         self.message_label = tk.Label(
             self.message_box,
@@ -122,7 +122,7 @@ class GuideNoobPanel:
             cursor="hand2",
             wraplength=initial_wrap,
         )
-        self.message_label.pack(fill="x", padx=12, pady=10 if self.is_settings else 12)
+        self.message_label.pack(fill="x", padx=12, pady=8 if self.is_settings else 12)
         bind_dynamic_wrap(self.message_label, self.message_box, padding=28 if self.is_settings else 36, minimum=150)
 
         self.pointer_label = tk.Label(

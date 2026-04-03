@@ -1,60 +1,60 @@
 ﻿{
-    "version":  "20.1.5",
-    "download_url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/JarvisAI2_Setup.exe",
-    "release_page":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/tag/v20.1.5",
+    "version":  "20.2.0",
+    "download_url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/JarvisAI2_Setup.exe",
+    "release_page":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/tag/v20.2.0",
     "installer_name":  "JarvisAI2_Setup.exe",
     "executable_name":  "jarvis_ai_2.exe",
-    "notes":  "стабилизирована левая колонка Control Center: ширина бокового меню больше не прыгает между разделами, а карточка Нубика стала компактнее и перестала съедать нижний текст; control center перестал конфликтовать со стартовым activation gate: при открытии настроек первый overlay теперь снимается, а при закрытии возвращается только если активация ещё не завершена; маршрутизация секций настроек собрана в явные section-m...",
-    "build_utc":  "2026-04-01T04:37:59Z",
-    "manifest_url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/manifest.json",
+    "notes":  "??????? shell ???? ?????? ?????????????? ?? ?????? ?? ??????, ?? ? ?? ????????? ??????: ???? sidebar ? ????????? ? ??????? ??? ?? ??????????, ?? ????????? ??????, ?? ????????? ? ??????????; compact-????? ?????? ?? ?????? ?????? ?????? ? header: ?? ????? ???? ???????? ????????, ??????, ????????? ??????, ?????? ???????? ? ?????? composer, ??? ??????? ?????????? ??????? ?????; ??????? ???? workspace ???? ??? narrow-l...",
+    "build_utc":  "2026-04-03T02:48:27Z",
+    "manifest_url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/manifest.json",
     "files":  [
                   {
                       "name":  "CHANGELOG.md",
                       "path":  "CHANGELOG.md",
-                      "size":  19290,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/CHANGELOG.md"
+                      "size":  20199,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/CHANGELOG.md"
                   },
                   {
                       "name":  "CRASH_TEST_REPORT.txt",
                       "path":  "CRASH_TEST_REPORT.txt",
-                      "size":  3051,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/CRASH_TEST_REPORT.txt"
+                      "size":  3072,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/CRASH_TEST_REPORT.txt"
                   },
                   {
                       "name":  "jarvis_ai_2.exe",
                       "path":  "jarvis_ai_2.exe",
-                      "size":  107214580,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/jarvis_ai_2.exe"
+                      "size":  145773595,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/jarvis_ai_2.exe"
                   },
                   {
-                      "name":  "JARVIS_AI_2_portable_v20.1.5.zip",
-                      "path":  "JARVIS_AI_2_portable_v20.1.5.zip",
-                      "size":  106073129,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/JARVIS_AI_2_portable_v20.1.5.zip"
+                      "name":  "JARVIS_AI_2_portable_v20.2.0.zip",
+                      "path":  "JARVIS_AI_2_portable_v20.2.0.zip",
+                      "size":  144366331,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/JARVIS_AI_2_portable_v20.2.0.zip"
                   },
                   {
                       "name":  "JarvisAI2_Setup.exe",
                       "path":  "JarvisAI2_Setup.exe",
-                      "size":  105288587,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/JarvisAI2_Setup.exe"
+                      "size":  145452752,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/JarvisAI2_Setup.exe"
                   },
                   {
                       "name":  "manifest.json",
                       "path":  "manifest.json",
                       "size":  1981,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/manifest.json"
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/manifest.json"
                   },
                   {
                       "name":  "RELEASE_NOTES.md",
                       "path":  "RELEASE_NOTES.md",
-                      "size":  1948,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/RELEASE_NOTES.md"
+                      "size":  812,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/RELEASE_NOTES.md"
                   },
                   {
                       "name":  "updates.json",
                       "path":  "updates.json",
-                      "size":  2939,
-                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.1.5/updates.json"
+                      "size":  2638,
+                      "url":  "https://github.com/theclepro1-hub/Jarvis.AI/releases/download/v20.2.0/updates.json"
                   }
               ]
 }

@@ -1431,7 +1431,8 @@ class SettingsUiMixin:
         bind_dynamic_wrap(nav_note, side, padding=30, minimum=160)
         self._control_center_nav_note = nav_note
 
-        guide_host = tk.Frame(side, bg=Theme.CARD_BG, width=232)
+        guide_host = tk.Frame(side, bg=Theme.CARD_BG, width=232, height=252)
+        guide_host.pack_propagate(False)
         self._control_center_guide_host = guide_host
         noob_asset = (
             self.assets.get("noob_sidebar")
@@ -1750,6 +1751,35 @@ class SettingsUiMixin:
         self._settings_primary_api_entry = groq_entry
         login_var, _ = entry_row(body, "Логин пользователя", CONFIG_MGR.get_user_login(), help_text="Техническое имя профиля. Используется в конфиге, логах и некоторых интеграциях.")
         user_name_var, _ = entry_row(body, "Имя пользователя", CONFIG_MGR.get_user_name(), help_text="Как JARVIS будет обращаться к вам в чате, озвучке и подсказках.")
+
+        avatar_quick = tk.Frame(body, bg=Theme.CARD_BG)
+        avatar_quick.pack(fill="x", pady=(0, 10))
+        self._create_settings_field_header(avatar_quick, "Аватар пользователя", "Быстрый выбор картинки для профиля пользователя в чате и на главном экране.")
+        avatar_quick_actions = tk.Frame(avatar_quick, bg=Theme.CARD_BG)
+        avatar_quick_actions.pack(anchor="w", pady=(4, 0))
+
+        def pick_avatar_quick():
+            path = filedialog.askopenfilename(
+                title="Выберите аватар",
+                filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.webp;*.bmp"), ("All files", "*.*")],
+                parent=self._settings_dialog_parent(),
+            )
+            if not path:
+                return
+            CONFIG_MGR.set_user_avatar_path(path)
+            self.load_assets()
+            self._refresh_chat_theme()
+            self.set_status_temp("Аватар обновлён", "ok")
+
+        def clear_avatar_quick():
+            CONFIG_MGR.set_user_avatar_path("")
+            self.load_assets()
+            self._refresh_chat_theme()
+            self.set_status_temp("Аватар сброшен", "ok")
+
+        tk.Button(avatar_quick_actions, text="Выбрать аватар", command=pick_avatar_quick, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=12, pady=8, cursor="hand2").pack(side="left")
+        tk.Button(avatar_quick_actions, text="Сбросить", command=clear_avatar_quick, bg=Theme.BUTTON_BG, fg=Theme.FG, relief="flat", padx=12, pady=8, cursor="hand2").pack(side="left", padx=(8, 0))
+
         tg_token_var, _ = entry_row(body, "Токен Telegram-бота", CONFIG_MGR.get_telegram_token(), show="•", help_text="Нужен только если хотите управлять JARVIS через Telegram-бота.")
         tg_id_var, _ = entry_row(body, "ID пользователя Telegram", str(CONFIG_MGR.get_telegram_user_id() or ""), help_text="Ваш числовой Telegram ID. По нему JARVIS поймёт, кому разрешено писать боту.")
         model_items = [
