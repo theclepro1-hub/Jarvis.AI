@@ -1,0 +1,43 @@
+from core.registration.registration_service import RegistrationService
+from core.settings.settings_service import SettingsService
+
+
+class FakeStore:
+    def __init__(self) -> None:
+        self.payload = {
+            "theme_mode": "midnight",
+            "startup_enabled": False,
+            "privacy_mode": "balance",
+            "ai_provider": "groq",
+            "ai_model": "openai/gpt-oss-20b",
+            "voice_mode": "balance",
+            "command_style": "one_shot",
+            "wake_word_enabled": True,
+            "microphone_name": "Системный по умолчанию",
+            "registration": {
+                "groq_api_key": "",
+                "telegram_user_id": "",
+                "telegram_bot_token": "",
+                "skipped": False,
+            },
+        }
+
+    def load(self):
+        return self.payload.copy()
+
+    def save(self, payload):
+        self.payload = payload
+
+
+def test_registration_completes_when_all_fields_are_filled():
+    settings = SettingsService(FakeStore())
+    service = RegistrationService(settings)
+    result = service.save("gsk_key", "123", "bot_token")
+    assert result.is_complete is True
+
+
+def test_registration_can_be_skipped():
+    settings = SettingsService(FakeStore())
+    service = RegistrationService(settings)
+    result = service.skip()
+    assert result.skipped is True

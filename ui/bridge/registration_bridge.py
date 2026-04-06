@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from PySide6.QtCore import QObject, Property, Signal, Slot
+
+
+class RegistrationBridge(QObject):
+    registrationChanged = Signal()
+    feedbackChanged = Signal()
+
+    def __init__(self, state, services, app_bridge) -> None:
+        super().__init__()
+        self.state = state
+        self.services = services
+        self.app_bridge = app_bridge
+        self._feedback = ""
+
+    @Property("QVariantMap", notify=registrationChanged)
+    def registration(self) -> dict[str, str]:
+        record = self.services.registration.load()
+        return {
+            "groq_api_key": record.groq_api_key,
+            "telegram_user_id": record.telegram_user_id,
+            "telegram_bot_token": record.telegram_bot_token,
+            "skipped": record.skipped,
+        }
+
+    @Property(str, notify=feedbackChanged)
+    def feedback(self) -> str:
+        return self._feedback
+
+    @Slot(str, str, str)
+    def saveRegistration(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> None:
+        record = self.services.registration.save(groq_api_key, telegram_user_id, telegram_bot_token)
+        if record.is_complete:
+            self._feedback = "Подключение сохранено. Можно переходить в новый JARVIS."
+            self.feedbackChanged.emit()
+            self.registrationChanged.emit()
+            self.app_bridge.finishRegistration()
+            return
+        self._feedback = "Нужны все три поля: Groq API Key, Telegram User ID и Telegram Bot Token."
+        self.feedbackChanged.emit()
+
+    @Slot()
+    def skipForNow(self) -> None:
+        self.services.registration.skip()
+        self._feedback = "Регистрацию можно завершить позже в настройках."
+        self.feedbackChanged.emit()
+        self.registrationChanged.emit()
+        self.app_bridge.finishRegistration()
