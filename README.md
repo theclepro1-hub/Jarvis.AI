@@ -28,7 +28,7 @@
 C:\JarvisAi_Unity\.venv\Scripts\python.exe -m app.main
 ```
 
-## Dev checks
+## Dev Checks
 
 ```powershell
 C:\JarvisAi_Unity\.venv\Scripts\ruff.exe check C:\JarvisAi_Unity
@@ -41,13 +41,21 @@ C:\JarvisAi_Unity\.venv\Scripts\pytest.exe -q
 powershell -ExecutionPolicy Bypass -File C:\JarvisAi_Unity\build\build_release.ps1
 ```
 
+## Release Assets
+
+The release build produces:
+
+- `JarvisAi_Unity_22.0.0_windows_installer.exe`
+- `JarvisAi_Unity_22.0.0_windows_onefile.exe`
+- `JarvisAi_Unity_22.0.0_windows_portable.zip`
+
 ## Release Notes
 
 - [Release 22.0.0](docs/RELEASE_22.0.0.md)
 - [Release Readiness](docs/RELEASE_READINESS.md)
 - [Security Notes](docs/SECURITY.md)
 
-## Voice runtime
+## Voice Runtime
 
 - manual mic capture uses `sounddevice`
 - transcription uses Groq Whisper STT after capture

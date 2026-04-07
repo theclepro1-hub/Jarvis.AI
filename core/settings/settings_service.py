@@ -15,6 +15,7 @@ class SettingsService:
             theme_mode=self._settings["theme_mode"],
             startup_enabled=self._settings["startup_enabled"],
             privacy_mode=self._settings["privacy_mode"],
+            ai_mode=self._settings["ai_mode"],
             ai_model=self._settings["ai_model"],
             voice_mode=self._settings["voice_mode"],
             command_style=self._settings["command_style"],

@@ -7,12 +7,13 @@
 - brand-new PySide6 + Qt Quick/QML desktop shell
 - clean registration screen with Groq / Telegram helper links
 - chat-first interface with quick actions and command palette
-- compact settings with `Нубик` preserved only as a settings navigator
-- rewritten local command router and batch command flow
+- compact settings with `Нубик` preserved only as a contextual guide
+- rewritten offline-first command router and batch command flow
+- explicit AI profiles: Auto, fast Groq, quality Gemini, fast Cerebras, OpenRouter reserve, local
 - always-on local wake word runtime using `vosk`
-- manual microphone capture with Groq Whisper STT after capture
+- manual microphone capture with STT routing by voice mode
 - bundled `Golos Text` font for stable Cyrillic rendering
-- rebuilt Windows icon and packaged portable + onefile executables
+- rebuilt Windows icon and packaged installer, portable, and onefile executables
 
 ## Quality Gates
 
@@ -20,4 +21,4 @@
 - `Ctrl+V` paste path verified in the composer
 - Cyrillic text rendering rechecked through offscreen screenshots
 - `pytest`, `ruff`, and `compileall` passed
-- both portable and onefile EXE passed startup smoke runs
+- portable, onefile, and installer assets are produced by the release script

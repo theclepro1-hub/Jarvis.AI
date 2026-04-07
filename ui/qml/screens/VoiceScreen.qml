@@ -21,8 +21,199 @@ Rectangle {
 
             SettingRow {
                 Layout.fillWidth: true
-                title: "Режим голоса"
-                description: "Приватный, баланс или качество. Интерфейс не раздувается, меняется только маршрут распознавания."
+                title: "Микрофон"
+                description: "Выберите устройство, через которое JARVIS слушает ручной микрофон и слово активации."
+
+                Item { Layout.fillWidth: true }
+
+                AppComboBox {
+                    id: microphoneCombo
+                    objectName: "microphoneCombo"
+                    Layout.preferredWidth: 420
+                    model: voiceBridge.microphoneDeviceModels
+                    textRole: "name"
+                    currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedMicrophone))
+                    onActivated: (index) => voiceBridge.setMicrophone(model[index].name)
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Куда говорить"
+                description: "Выберите колонки или наушники для голоса JARVIS."
+
+                Item { Layout.fillWidth: true }
+
+                AppComboBox {
+                    id: outputCombo
+                    objectName: "outputDeviceCombo"
+                    Layout.preferredWidth: 420
+                    enabled: voiceBridge.canRouteTtsOutput
+                    opacity: enabled ? 1.0 : 0.48
+                    model: voiceBridge.outputDeviceModels
+                    textRole: "name"
+                    currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedOutputDevice))
+                    onActivated: (index) => voiceBridge.setOutputDevice(model[index].name)
+                }
+
+                Text {
+                    visible: !voiceBridge.canRouteTtsOutput
+                    Layout.fillWidth: true
+                    text: "Отдельный маршрут голоса пока недоступен. JARVIS будет говорить через системный вывод, пока это не будет реализовано полностью."
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.micro
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                color: Theme.Colors.card
+                radius: 22
+                border.color: Theme.Colors.borderSoft
+                border.width: 1
+                implicitHeight: checkColumn.implicitHeight + 24
+
+                ColumnLayout {
+                    id: checkColumn
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 8
+
+                    Text {
+                        text: "Проверка"
+                        color: Theme.Colors.text
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: Theme.Typography.small
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "Кнопки ниже не выполняют команду. Они только проверяют: слышит ли JARVIS слово активации и умеет ли говорить тестовую фразу."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        PrimaryButton {
+                            objectName: "wakeWordTestButton"
+                            text: "Проверить «Джарвис»"
+                            compact: true
+                            onClicked: voiceBridge.runWakeWordTest()
+                        }
+
+                        PrimaryButton {
+                            objectName: "jarvisVoiceTestButton"
+                            text: "Сказать «Я на связи»"
+                            compact: true
+                            onClicked: voiceBridge.runJarvisVoiceTest()
+                        }
+
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Голос JARVIS"
+                description: "Озвучка ответов, движок голоса и выбор голоса. Если что-то недоступно, JARVIS так и пишет."
+
+                AppSwitch {
+                    id: voiceResponseSwitch
+                    objectName: "voiceResponseSwitch"
+                    checked: voiceBridge.voiceResponseEnabled
+                    onToggled: voiceBridge.setVoiceResponseEnabled(checked)
+                }
+
+                StatusPill {
+                    objectName: "ttsEnginePill"
+                    text: voiceBridge.ttsEngine === "edge" ? "Выбран онлайн-движок" : "Выбран системный движок"
+                }
+
+                AppComboBox {
+                    id: ttsVoiceCombo
+                    objectName: "ttsVoiceCombo"
+                    Layout.preferredWidth: 260
+                    model: voiceBridge.ttsVoices
+                    currentIndex: Math.max(0, model.indexOf(voiceBridge.selectedTtsVoice))
+                    onActivated: (index) => voiceBridge.setTtsVoice(model[index])
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Слово активации"
+                description: "JARVIS слушает «Джарвис» локально. Статусы не должны притворяться отдельными сообщениями в чате."
+
+                Item { Layout.fillWidth: true }
+
+                AppSwitch {
+                    id: wakeWordSwitch
+                    objectName: "wakeWordSwitch"
+                    checked: voiceBridge.wakeWordEnabled
+                    onToggled: voiceBridge.setWakeWordEnabled(checked)
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Статус"
+                description: voiceBridge.summary
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Text {
+                        text: "Слово активации: " + voiceBridge.runtimeStatus["wakeWord"]
+                        color: Theme.Colors.text
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.body
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Распознавание речи: " + voiceBridge.runtimeStatus["command"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Озвучка: " + voiceBridge.runtimeStatus["tts"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Профиль: " + voiceBridge.runtimeStatus["model"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Распознавание речи"
+                description: "Выберите баланс между приватностью, скоростью и качеством распознавания."
 
                 Item { Layout.fillWidth: true }
 
@@ -44,7 +235,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Сценарий команды"
-                description: "Основной режим: «Джарвис + команда» одной фразой. Для шумной среды можно оставить два шага."
+                description: "Основной режим: «Джарвис + команда» одной фразой. Два шага оставлены для шумной среды."
 
                 Item { Layout.fillWidth: true }
 
@@ -64,93 +255,43 @@ Rectangle {
 
             SettingRow {
                 Layout.fillWidth: true
-                title: "Микрофон"
-                description: "Один и тот же выбор используется для слова активации и ручной записи."
+                title: "Скорость и громкость"
+                description: "Три понятных пресета для голоса JARVIS без технических ручек."
 
                 Item { Layout.fillWidth: true }
 
                 AppComboBox {
-                    id: microphoneCombo
-                    objectName: "microphoneCombo"
-                    Layout.preferredWidth: 360
-                    model: voiceBridge.microphones
-                    currentIndex: Math.max(0, model.indexOf(voiceBridge.selectedMicrophone))
-                    onActivated: (index) => voiceBridge.setMicrophone(model[index])
-                }
-            }
-
-            SettingRow {
-                Layout.fillWidth: true
-                title: "Слово активации"
-                description: "Слово активации остаётся локальным и не превращает приложение в лабораторию."
-
-                Item { Layout.fillWidth: true }
-
-                AppSwitch {
-                    id: wakeWordSwitch
-                    objectName: "wakeWordSwitch"
-                    checked: voiceBridge.wakeWordEnabled
-                    onToggled: voiceBridge.setWakeWordEnabled(checked)
+                    id: ttsRateCombo
+                    objectName: "ttsRateCombo"
+                    Layout.preferredWidth: 180
+                    model: [
+                        { key: 155, title: "Медленнее" },
+                        { key: 185, title: "Нормально" },
+                        { key: 220, title: "Быстрее" }
+                    ]
+                    textRole: "title"
+                    currentIndex: Math.max(0, model.findIndex(item => item.key === voiceBridge.ttsRate))
+                    onActivated: (index) => voiceBridge.setTtsRate(model[index].key)
                 }
 
-                PrimaryButton {
-                    objectName: "wakeWordTestButton"
-                    text: "Проверить"
-                    compact: true
-                    onClicked: voiceBridge.runWakeWordTest()
-                }
-            }
-
-            SettingRow {
-                Layout.fillWidth: true
-                title: "Статус голосового контура"
-                description: voiceBridge.summary
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    Text {
-                        text: "Слово активации: " + voiceBridge.runtimeStatus["wakeWord"]
-                        color: Theme.Colors.text
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.body
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Команда: " + voiceBridge.runtimeStatus["command"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "ИИ: " + voiceBridge.runtimeStatus["ai"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Модель: " + voiceBridge.runtimeStatus["model"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
+                AppComboBox {
+                    id: ttsVolumeCombo
+                    objectName: "ttsVolumeCombo"
+                    Layout.preferredWidth: 180
+                    model: [
+                        { key: 55, title: "Тише" },
+                        { key: 85, title: "Нормально" },
+                        { key: 100, title: "Громче" }
+                    ]
+                    textRole: "title"
+                    currentIndex: Math.max(0, model.findIndex(item => item.key === voiceBridge.ttsVolume))
+                    onActivated: (index) => voiceBridge.setTtsVolume(model[index].key)
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
-                color: "#0d1522"
+                color: Theme.Colors.card
                 radius: 22
                 border.color: Theme.Colors.borderSoft
                 border.width: 1

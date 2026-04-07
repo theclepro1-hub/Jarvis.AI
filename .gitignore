@@ -1,8 +1,14 @@
 .venv/
 dist/
+dist_fresh_*/
 build/pyinstaller/
+build/pyinstaller_fresh_*/
 build/pyinstaller_onefile/
+build/pyinstaller_onefile_fresh_*/
 build/release/
+build/release_fresh_*/
+build/installer/
+build/installer_smoke/
 build/model_cache/
 build/ui_probe/
 build/ui_probe2/
@@ -19,6 +25,7 @@ build/*data*/
 build/*runtime*/
 build/smoke_runtime/
 dist_onefile/
+dist_onefile_fresh_*/
 .pytest_cache/
 .ruff_cache/
 __pycache__/

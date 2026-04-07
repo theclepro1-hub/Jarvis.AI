@@ -17,6 +17,7 @@ class AppBridge(QObject):
             {"id": "chat", "title": "Чат"},
             {"id": "voice", "title": "Голос"},
             {"id": "apps", "title": "Приложения"},
+            {"id": "settings", "title": "Настройки"},
         ]
         registration = self.services.registration.load()
         if registration.is_complete or registration.skipped:

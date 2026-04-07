@@ -9,8 +9,14 @@ Rectangle {
     property var navItems: []
     property string currentScreen: "chat"
     property bool registrationRequired: false
+    property string contextHelpText: ""
+    property string hoverHelpText: ""
     signal navigate(string screen)
-    signal openSettings()
+
+    readonly property string defaultHelpText: "Наведи на раздел или настройку, и я коротко объясню, зачем она нужна."
+    readonly property string visibleHelpText: hoverHelpText.length > 0
+                                           ? hoverHelpText
+                                           : (contextHelpText.length > 0 ? contextHelpText : defaultHelpText)
 
     color: Qt.rgba(0.06, 0.09, 0.15, 0.95)
     border.color: Theme.Colors.borderSoft
@@ -77,21 +83,66 @@ Rectangle {
                 text: modelData.title
                 compact: true
                 selected: root.currentScreen === modelData.id
-                enabled: !root.registrationRequired
+                enabled: !root.registrationRequired || modelData.id === "settings"
                 onClicked: root.navigate(modelData.id)
                 kind: root.currentScreen === modelData.id ? "primary" : "nav"
+                onHoveredChanged: {
+                    if (!hovered) {
+                        root.hoverHelpText = ""
+                        return
+                    }
+                    if (modelData.id === "chat") {
+                        root.hoverHelpText = "Чат — главное место для команд, вопросов и быстрых действий."
+                    } else if (modelData.id === "voice") {
+                        root.hoverHelpText = "Голос — микрофон, слово активации и голосовые ответы JARVIS."
+                    } else if (modelData.id === "apps") {
+                        root.hoverHelpText = "Приложения — игры, музыка и другие быстрые запускатели."
+                    } else if (modelData.id === "settings") {
+                        root.hoverHelpText = "Настройки — подключение, внешний вид, автозапуск и обновления."
+                    }
+                }
             }
         }
 
         Item { Layout.fillHeight: true }
 
-        UiButton {
-            objectName: "sidebarSettingsButton"
+        ColumnLayout {
             Layout.fillWidth: true
-            text: "Настройки"
-            compact: true
-            onClicked: root.openSettings()
-            kind: "secondary"
+            spacing: 10
+
+            Image {
+                objectName: "sidebarNubikImage"
+                source: "../../../assets/images/nubik.png"
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 118
+                Layout.preferredHeight: 118
+                sourceSize.width: 180
+                sourceSize.height: 180
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                mipmap: true
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: Math.max(70, nubikHelp.implicitHeight + 24)
+                radius: Theme.Spacing.radiusSmall
+                color: Theme.Colors.cardAlt
+                border.color: Theme.Colors.borderSoft
+                border.width: 1
+
+                Text {
+                    id: nubikHelp
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    text: root.visibleHelpText
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.micro
+                    wrapMode: Text.WordWrap
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
         }
     }
 }

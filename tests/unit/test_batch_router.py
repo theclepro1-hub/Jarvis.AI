@@ -48,3 +48,61 @@ def test_expand_open_command_keeps_verb_for_inflected_music_target():
         "открой ютуб",
         "открой музыку",
     ]
+
+
+def test_split_short_action_then_open_command():
+    router = make_router()
+    assert router.split("прибавь и открой музыку") == [
+        "прибавь",
+        "открой музыку",
+    ]
+
+
+def test_split_short_action_then_open_chain():
+    router = make_router()
+    assert router.split("прибавь и открой музыку и ютуб") == [
+        "прибавь",
+        "открой музыку",
+        "открой ютуб",
+    ]
+
+
+def test_split_mixed_command_by_commas_and_verbs():
+    router = make_router()
+    assert router.split("найди чизбургер, прибавь громкость, открой ютуб") == [
+        "найди чизбургер",
+        "прибавь громкость",
+        "открой ютуб",
+    ]
+
+
+def test_split_mixed_command_without_punctuation_between_verbs():
+    router = make_router()
+    assert router.split("открой музыку прибавь и найди чизбургер") == [
+        "открой музыку",
+        "прибавь",
+        "найди чизбургер",
+    ]
+
+
+def test_split_inflected_volume_synonym_after_open():
+    router = make_router()
+    assert router.split("Открой музыку и поднимай.") == [
+        "Открой музыку",
+        "поднимай",
+    ]
+
+
+def test_search_query_with_infinitive_open_is_not_split():
+    router = make_router()
+    assert router.split("найди как открыть ютуб") == [
+        "найди как открыть ютуб",
+    ]
+
+
+def test_search_query_splits_on_explicit_connector_before_action():
+    router = make_router()
+    assert router.split("найди чизбургер и открой ютуб") == [
+        "найди чизбургер",
+        "открой ютуб",
+    ]

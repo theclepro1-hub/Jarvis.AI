@@ -38,7 +38,7 @@ class WakeService:
         self._thread: threading.Thread | None = None
         self._running = False
         self._phase = "idle"
-        self._detail = "Локальный wake runtime не запущен"
+        self._detail = "Слово активации не запущено"
         self._buffer = deque(maxlen=18)
         self._last_detected_at = 0.0
         SetLogLevel(-1)
@@ -57,19 +57,19 @@ class WakeService:
         if self._thread and self._thread.is_alive():
             return self.status()
         if not self.model_path.exists():
-            self._set_phase("error", "Локальная wake-модель не загружена", ready=False)
+            self._set_phase("error", "Локальная модель слова активации не загружена", ready=False)
             return self.status()
 
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        return "Готовлю локальный wake runtime"
+        return "Готовлю слово активации"
 
     def stop(self) -> None:
         self._stop_event.set()
         self._running = False
         if self._phase != "error":
-            self._set_phase("idle", "Локальный wake runtime не запущен", ready=False)
+            self._set_phase("idle", "Слово активации не запущено", ready=False)
         if self._thread and self._thread.is_alive() and threading.current_thread() is not self._thread:
             self._thread.join(timeout=2.0)
 
@@ -81,7 +81,7 @@ class WakeService:
 
     def _run(self) -> None:
         try:
-            self._set_phase("preparing", "Готовлю локальный wake runtime", ready=False)
+            self._set_phase("preparing", "Готовлю слово активации", ready=False)
             model = Model(str(self.model_path))
             recognizer = self._new_recognizer(model)
 
@@ -101,7 +101,7 @@ class WakeService:
                 callback=callback,
             ):
                 self._running = True
-                self._set_phase("waiting", "Жду «Джарвис»", ready=True)
+                self._set_phase("waiting_wake", "Жду «Джарвис»", ready=True)
 
                 while not self._stop_event.is_set():
                     try:
@@ -119,17 +119,17 @@ class WakeService:
                         self._last_detected_at = time.time()
                         pre_roll = b"".join(self._buffer)
                         self._buffer.clear()
-                        self._set_phase("transcribing", "Распознаю команду", ready=False)
+                        self._set_phase("capturing_command", "Слушаю команду", ready=False)
                         self._running = False
                         if self._callback is not None:
                             self._callback(pre_roll)
                         return
         except Exception as exc:
-            self._set_phase("error", f"Ошибка wake runtime: {exc}", ready=False)
+            self._set_phase("error", f"Ошибка слова активации: {exc}", ready=False)
         finally:
             self._running = False
-            if self._phase not in {"error", "transcribing"} and not self._stop_event.is_set():
-                self._set_phase("idle", "Локальный wake runtime не запущен", ready=False)
+            if self._phase not in {"error", "transcribing", "routing", "executing"} and not self._stop_event.is_set():
+                self._set_phase("idle", "Слово активации не запущено", ready=False)
 
     def _find_bundled_model_path(self) -> Path:
         candidates = []

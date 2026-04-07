@@ -9,6 +9,154 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 
 from app.app import JarvisUnityApplication
+from core.actions.action_registry import ActionRegistry
+from core.ai.ai_service import AIService
+from core.pc_control.service import PcControlService
+from core.routing.batch_router import BatchRouter
+from core.routing.command_router import CommandRouter
+from core.registration.registration_service import RegistrationService
+from core.settings.settings_service import SettingsService
+from core.settings.settings_store import SettingsStore
+from core.settings.startup_manager import StartupManager
+from core.services.chat_history_store import ChatHistoryStore
+
+
+class _TestServiceContainer:
+    def __init__(self) -> None:
+        self.settings_store = SettingsStore()
+        self.chat_history = ChatHistoryStore()
+        self.settings = SettingsService(self.settings_store)
+        self.startup = StartupManager()
+        self.settings.set("startup_enabled", self.startup.is_enabled())
+        self.registration = RegistrationService(self.settings)
+        self.ai = AIService(self.settings)
+        self.actions = ActionRegistry(self.settings)
+        self.batch_router = BatchRouter(self.actions)
+        self.pc_control = PcControlService(self.actions)
+        self.command_router = CommandRouter(self.actions, self.batch_router, self.ai, self.pc_control)
+        self.voice = _TestVoiceService(self.settings)
+        self.stt = _TestSttService()
+        self.wake = _TestWakeService()
+        self.updates = _TestUpdatesService()
+
+
+class _TestSttService:
+    def can_transcribe(self) -> bool:
+        return False
+
+
+class _TestVoiceService:
+    def __init__(self, settings: SettingsService) -> None:
+        self.settings = settings
+        self.is_recording = False
+        self._wake_detail = "Жду «Джарвис»"
+
+    def voice_response_enabled(self) -> bool:
+        return bool(self.settings.get("voice_response_enabled", False))
+
+    def tts_engine(self) -> str:
+        return str(self.settings.get("tts_engine", "system"))
+
+    def available_tts_engines(self) -> list[dict[str, object]]:
+        return [
+            {"key": "system", "title": "Системный"},
+            {"key": "edge", "title": "Edge"},
+        ]
+
+    def can_route_tts_output(self) -> bool:
+        return True
+
+    def available_tts_voices(self) -> list[str]:
+        return ["Голос по умолчанию", "Тестовый голос"]
+
+    def tts_voice_name(self) -> str:
+        return str(self.settings.get("tts_voice_name", "Голос по умолчанию"))
+
+    def tts_rate(self) -> int:
+        return int(self.settings.get("tts_rate", 185))
+
+    def tts_volume(self) -> int:
+        return int(self.settings.get("tts_volume", 85))
+
+    @property
+    def microphones(self) -> list[str]:
+        return ["Системный микрофон", "Logitech PRO X Gaming Headset"]
+
+    @property
+    def microphone_device_models(self) -> list[object]:
+        return []
+
+    @property
+    def output_devices(self) -> list[str]:
+        return ["Системный вывод", "Realtek HD Audio output"]
+
+    @property
+    def output_device_models(self) -> list[object]:
+        return []
+
+    def normalize_microphone_selection(self, value: str) -> str:
+        return value or "Системный микрофон"
+
+    def normalize_output_selection(self, value: str) -> str:
+        return value or "Системный вывод"
+
+    def summary(self) -> str:
+        return "Голосовой контур готов к проверке."
+
+    def runtime_status(self) -> dict[str, str]:
+        return {
+            "wakeWord": self._wake_detail,
+            "command": "Команда распознаётся после активации",
+            "tts": "Системный голос готов",
+            "model": "Модель: загружена",
+        }
+
+    def test_wake_word(self) -> str:
+        return "Проверка wake: ок"
+
+    def test_jarvis_voice(self) -> str:
+        return "Проверка голоса: ок"
+
+    def start_manual_capture(self, on_text, on_note, on_finish):  # noqa: ANN001
+        self.is_recording = True
+        on_note("Слушаю")
+        return "Слушаю"
+
+    def stop_manual_capture(self) -> None:
+        self.is_recording = False
+
+    def set_wake_runtime_status(self, _stage, *, ready=True, detail=""):  # noqa: ANN001
+        self._wake_detail = detail or ("Готов" if ready else "Ожидаю")
+
+    def capture_after_wake(self, _pre_roll: bytes) -> str:
+        return "открой ютуб"
+
+
+class _TestWakeService:
+    def __init__(self) -> None:
+        self._status = "Жду «Джарвис»"
+
+    def start(self, on_detected, on_status=None) -> str:  # noqa: ANN001
+        self._status = "Жду «Джарвис»"
+        if on_status is not None:
+            on_status(self._status)
+        return self._status
+
+    def stop(self) -> None:
+        self._status = "Остановлен"
+
+    def status(self) -> str:
+        return self._status
+
+    def model_status(self) -> str:
+        return "Модель: загружена"
+
+
+class _TestUpdatesService:
+    current_version = "22.0.0"
+
+    def summary(self) -> str:
+        return "Версия 22.0.0 • канал стабильный"
 
 
 def _pump(app: QGuiApplication, ms: int = 80) -> None:
@@ -140,6 +288,7 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_WAKE", "1")
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_STARTUP_REGISTRY", "1")
+    monkeypatch.setattr("app.app.ServiceContainer", _TestServiceContainer)
 
     app = QGuiApplication.instance() or QGuiApplication([])
     for top_level in list(app.topLevelWindows()):
@@ -178,7 +327,7 @@ def test_registration_and_navigation_clicks_work(ui_runtime) -> None:
     _click(app, window, _find(window, "navButton_voice"))
     assert runtime.state.currentScreen == "voice"
 
-    _click(app, window, _find(window, "sidebarSettingsButton"))
+    _click(app, window, _find(window, "navButton_settings"))
     assert runtime.state.currentScreen == "settings"
 
     _click(app, window, _find(window, "navButton_apps"))
@@ -272,7 +421,7 @@ def test_nav_spam_clicks_keep_screen_state_sane(ui_runtime) -> None:
     _click(app, window, _find(window, "registrationSkipButton"))
     _pump(app, 150)
 
-    targets = ["navButton_chat", "navButton_voice", "navButton_apps", "sidebarSettingsButton"]
+    targets = ["navButton_chat", "navButton_voice", "navButton_apps", "navButton_settings"]
     for _ in range(5):
         for name in targets:
             _click(app, window, _find(window, name))
@@ -298,19 +447,28 @@ def test_apps_screen_add_button_and_feedback_work(ui_runtime) -> None:
     assert "Добавлено" in runtime.apps_bridge.feedback
 
 
-def test_settings_nubik_and_voice_controls_are_clickable(ui_runtime) -> None:
+def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
     _click(app, window, _find(window, "registrationSkipButton"))
     _pump(app, 200)
-    _click(app, window, _find(window, "sidebarSettingsButton"))
+    _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
-    settings_scroll = _wait_for_object(app, window, "settingsScroll")
-    settings_flickable = settings_scroll.property("contentItem")
-    settings_flickable.setProperty("contentY", settings_flickable.property("contentHeight") - settings_flickable.property("height"))
+    _wait_for_object(app, window, "sidebarNubikImage")
+
+    theme_combo = _wait_for_object(app, window, "themeCombo")
+    assert theme_combo.property("count") >= 2
+    runtime.settings_bridge.themeMode = "steel"
     _pump(app, 120)
-    _click(app, window, _find(window, "nubik_voice"))
+
+    assert runtime.services.settings.get("theme_mode", "midnight") == "steel"
+
+    _click(app, window, _find(window, "navButton_voice"))
     _wait_for(app, lambda: runtime.state.currentScreen == "voice")
+
+    voice_scroll = _wait_for_object(app, window, "voiceScroll")
+    for _ in range(5):
+        _wheel(app, window, voice_scroll, -180)
 
     current = runtime.services.settings.get("wake_word_enabled", True)
     _click(app, window, _find(window, "wakeWordSwitch"))
@@ -354,3 +512,96 @@ def test_voice_microphone_combo_popup_is_visible_and_scrollable(ui_runtime) -> N
     content_item = popup.property("contentItem")
     assert content_item is not None
     assert content_item.property("contentHeight") >= content_item.property("height")
+
+
+def test_chat_viewport_does_not_drift_horizontally_after_theme_change(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+    for index in range(10):
+        role = "user" if index % 2 else "assistant"
+        runtime.chat_bridge._append_message(  # noqa: SLF001 - UI gate needs deterministic message injection.
+            role,
+            (
+                "Проверка ширины чата после смены темы: длинное сообщение должно "
+                "переноситься внутри пузыря и не уезжать за правую границу окна."
+            ),
+        )
+    _pump(app, 220)
+
+    list_view = _wait_for_object(app, window, "chatListView")
+    assert isinstance(list_view, QQuickItem)
+    assert list_view.property("contentX") == 0
+    assert list_view.width() <= window.width()
+
+    runtime.settings_bridge.themeMode = "steel"
+    _pump(app, 220)
+
+    assert runtime.services.settings.get("theme_mode", "midnight") == "steel"
+    assert list_view.property("contentX") == 0
+    assert list_view.width() <= window.width()
+
+    list_view.setProperty("contentX", 160)
+    _pump(app, 160)
+
+    assert list_view.property("contentX") == 0
+
+
+def test_chat_execution_card_renders_steps(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+    runtime.chat_bridge.appendExecutionResult(
+        "Выполняю 2 действия: Музыка, YouTube",
+        [
+            {"title": "Музыка", "status": "готово"},
+            {"title": "YouTube", "status": "в очереди"},
+        ],
+    )
+    _pump(app, 300)
+
+    messages = runtime.chat_bridge.messages
+    assert messages[-1]["type"] == "execution"
+    assert messages[-1]["steps"][0]["title"] == "Музыка"
+    assert messages[-1]["steps"][1]["status"] == "в очереди"
+
+    _find_by_text(window, messages[-1]["text"])
+    _find_by_text(window, messages[-1]["steps"][0]["title"])
+    _find_by_text(window, messages[-1]["steps"][1]["title"])
+
+    _click(app, window, _find(window, "clearChatButton"))
+    _pump(app, 160)
+
+    assert len(runtime.chat_bridge.messages) == 1
+    assert runtime.chat_bridge.messages[0]["role"] == "assistant"
+
+
+def test_apps_screen_has_group_tabs_and_music_default_switch(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 200)
+    _click(app, window, _find(window, "navButton_apps"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "apps")
+
+    for tab_name in [
+        "appsCategory_music",
+        "appsCategory_steam",
+        "appsCategory_launcher",
+        "appsCategory_web",
+        "appsCategory_app",
+    ]:
+        assert _find(window, tab_name) is not None
+
+    with pytest.raises(AssertionError):
+        _find(window, "appsCategory_all")
+
+    music_tab = _find(window, "appsCategory_music")
+    _click(app, window, music_tab)
+    _pump(app, 120)
+
+    assert runtime.state.currentScreen == "apps"

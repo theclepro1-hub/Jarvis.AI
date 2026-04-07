@@ -7,7 +7,7 @@ Rectangle {
 
     signal openVoice()
     signal openApps()
-    signal openRegistration()
+    signal openConnections()
 
     color: "#0d1624"
     radius: Theme.Spacing.radius
@@ -28,7 +28,7 @@ Rectangle {
         }
 
         Text {
-            text: "Я остался только как навигатор настроек. Могу быстро провести к голосу, приложениям и регистрации."
+            text: "Я остался только как навигатор настроек. Могу быстро провести к голосу, приложениям и подключениям."
             color: Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily
             font.pixelSize: Theme.Typography.small
@@ -44,7 +44,7 @@ Rectangle {
                 model: [
                     { title: "Голос", action: "voice" },
                     { title: "Приложения", action: "apps" },
-                    { title: "Регистрация", action: "registration" }
+                    { title: "Подключения", action: "connections" }
                 ]
 
                 UiButton {
@@ -58,7 +58,7 @@ Rectangle {
                     onClicked: {
                         if (modelData.action === "voice") root.openVoice()
                         if (modelData.action === "apps") root.openApps()
-                        if (modelData.action === "registration") root.openRegistration()
+                        if (modelData.action === "connections") root.openConnections()
                     }
                 }
             }

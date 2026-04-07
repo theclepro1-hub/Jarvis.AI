@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import "../theme" as Theme
 
 ComboBox {
@@ -47,41 +48,118 @@ ComboBox {
         required property int index
         required property var modelData
 
-        width: control.width - 12
-        height: 42
+        hoverEnabled: true
+        padding: 0
+        leftPadding: 14
+        rightPadding: 14
+        topPadding: 8
+        bottomPadding: 8
+        width: ListView.view ? ListView.view.width - 8 : control.width - 8
+        implicitWidth: width
+        implicitHeight: Math.max(48, contentColumn.implicitHeight + topPadding + bottomPadding)
         highlighted: control.highlightedIndex === index
+        opacity: itemDelegate.itemAvailable ? 1.0 : 0.68
 
-        contentItem: Text {
-            text: {
-                if (typeof itemDelegate.modelData === "string") {
-                    return itemDelegate.modelData
-                }
-                if (control.textRole && itemDelegate.modelData[control.textRole] !== undefined) {
-                    return itemDelegate.modelData[control.textRole]
-                }
-                if (itemDelegate.modelData.text !== undefined) {
-                    return itemDelegate.modelData.text
-                }
-                return ""
+        readonly property string itemTitle: {
+            if (typeof itemDelegate.modelData === "string") {
+                return itemDelegate.modelData
             }
-            color: itemDelegate.highlighted ? "#061016" : Theme.Colors.text
-            font.family: Theme.Typography.bodyFamily
-            font.pixelSize: Theme.Typography.body
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
+            if (control.textRole && itemDelegate.modelData[control.textRole] !== undefined) {
+                return itemDelegate.modelData[control.textRole]
+            }
+            if (itemDelegate.modelData.title !== undefined) {
+                return itemDelegate.modelData.title
+            }
+            if (itemDelegate.modelData.text !== undefined) {
+                return itemDelegate.modelData.text
+            }
+            return ""
+        }
+
+        readonly property string itemNote: {
+            if (typeof itemDelegate.modelData === "object" && itemDelegate.modelData !== null && itemDelegate.modelData.note !== undefined) {
+                return String(itemDelegate.modelData.note)
+            }
+            if (typeof itemDelegate.modelData === "object" && itemDelegate.modelData !== null) {
+                const parts = []
+                if (itemDelegate.modelData.kind !== undefined) {
+                    const kind = String(itemDelegate.modelData.kind)
+                    if (kind.length > 0) {
+                        parts.push(kind === "input" ? "вход" : kind === "output" ? "вывод" : kind)
+                    }
+                }
+                if (itemDelegate.modelData.hostapi !== undefined && String(itemDelegate.modelData.hostapi).length > 0 && String(itemDelegate.modelData.hostapi) !== "system") {
+                    parts.push(String(itemDelegate.modelData.hostapi))
+                }
+                if (itemDelegate.modelData.channels !== undefined && Number(itemDelegate.modelData.channels) > 0) {
+                    parts.push(Number(itemDelegate.modelData.channels) + " кан.")
+                }
+                if (itemDelegate.modelData.isDefault === true) {
+                    parts.push("основной")
+                }
+                if (itemDelegate.modelData.isUsable === false) {
+                    parts.push("недоступно")
+                }
+                if (parts.length > 0) {
+                    return parts.join(" • ")
+                }
+            }
+            return ""
+        }
+
+        readonly property bool itemAvailable: {
+            if (typeof itemDelegate.modelData === "object" && itemDelegate.modelData !== null && itemDelegate.modelData.available !== undefined) {
+                return Boolean(itemDelegate.modelData.available)
+            }
+            return true
+        }
+
+        contentItem: ColumnLayout {
+            id: contentColumn
+            spacing: 3
+            width: itemDelegate.width - itemDelegate.leftPadding - itemDelegate.rightPadding
+
+            Text {
+                text: itemDelegate.itemTitle
+                color: itemDelegate.highlighted ? "#061016" : Theme.Colors.text
+                font.family: Theme.Typography.bodyFamily
+                font.pixelSize: Theme.Typography.body
+                font.bold: itemDelegate.itemAvailable
+                verticalAlignment: Text.AlignVCenter
+                elide: Text.ElideRight
+                wrapMode: Text.NoWrap
+                Layout.fillWidth: true
+            }
+
+            Text {
+                visible: itemDelegate.itemNote.length > 0
+                text: itemDelegate.itemNote
+                color: itemDelegate.highlighted ? "#14323a" : Theme.Colors.textSoft
+                font.family: Theme.Typography.bodyFamily
+                font.pixelSize: Theme.Typography.micro
+                elide: Text.ElideRight
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                Layout.fillWidth: true
+            }
         }
 
         background: Rectangle {
+            anchors.fill: parent
             radius: 12
             color: itemDelegate.highlighted ? Theme.Colors.accent
                                             : itemDelegate.hovered ? Theme.Colors.panelRaised
                                                                    : "transparent"
+            border.color: itemDelegate.highlighted ? Theme.Colors.accentStrong
+                                                   : itemDelegate.hovered ? Theme.Colors.accent
+                                                                          : "transparent"
+            border.width: itemDelegate.highlighted || itemDelegate.hovered ? 1 : 0
         }
     }
 
     popup: Popup {
         y: control.height + 8
-        width: control.width
+        width: Math.min(560, Math.max(control.width, 380))
         padding: 6
         implicitHeight: Math.min(contentItem.implicitHeight + topPadding + bottomPadding, 280)
         clip: true
@@ -100,6 +178,7 @@ ComboBox {
             model: control.delegateModel
             currentIndex: control.highlightedIndex
             boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
             ScrollBar.vertical: AppScrollBar {}
         }
     }

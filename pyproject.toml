@@ -13,8 +13,10 @@ dependencies = [
   "PySide6==6.11.0",
   "pillow>=12.2.0,<13",
   "openai>=2.30.0,<3",
+  "httpx>=0.28.1,<0.29",
   "sounddevice>=0.5.5,<0.6",
   "vosk>=0.3.45,<0.4",
+  "pyttsx3>=2.99,<3",
 ]
 
 [project.optional-dependencies]
@@ -30,12 +32,16 @@ packages = [
   "core",
   "core.actions",
   "core.ai",
+  "core.intent",
   "core.models",
+  "core.pc_control",
+  "core.reminders",
   "core.registration",
   "core.routing",
   "core.services",
   "core.settings",
   "core.state",
+  "core.telegram",
   "core.updates",
   "core.voice",
   "ui",

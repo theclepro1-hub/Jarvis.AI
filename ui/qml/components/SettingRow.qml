@@ -7,7 +7,10 @@ Rectangle {
 
     property string title: ""
     property string description: ""
+    property string helpText: description
     default property alias content: contentLayout.data
+    signal helpRequested(string text)
+    signal helpCleared()
 
     color: Theme.Colors.card
     radius: Theme.Spacing.radius
@@ -15,6 +18,16 @@ Rectangle {
     border.width: 1
 
     implicitHeight: Math.max(78, wrapper.implicitHeight + 26)
+
+    HoverHandler {
+        onHoveredChanged: {
+            if (hovered && root.helpText.length > 0) {
+                root.helpRequested(root.helpText)
+            } else {
+                root.helpCleared()
+            }
+        }
+    }
 
     ColumnLayout {
         id: wrapper

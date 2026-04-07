@@ -51,10 +51,23 @@ Rectangle {
             }
         }
 
-        QuickActionStrip {
+        RowLayout {
             Layout.fillWidth: true
-            model: chatBridge.quickActions
-            onTrigger: (actionId) => chatBridge.triggerQuickAction(actionId)
+            spacing: 10
+
+            QuickActionStrip {
+                Layout.fillWidth: true
+                model: chatBridge.quickActions
+                onTrigger: (actionId) => chatBridge.triggerQuickAction(actionId)
+            }
+
+            SecondaryButton {
+                objectName: "clearChatButton"
+                text: "Очистить чат"
+                compact: true
+                Layout.preferredWidth: 150
+                onClicked: chatBridge.clearHistory()
+            }
         }
 
         Rectangle {
@@ -64,6 +77,7 @@ Rectangle {
             radius: 28
             border.color: Theme.Colors.borderSoft
             border.width: 1
+            clip: true
 
             ListView {
                 id: listView
@@ -73,33 +87,97 @@ Rectangle {
                 spacing: 16
                 clip: true
                 model: chatBridge.messages
-                onCountChanged: positionViewAtEnd()
+                orientation: ListView.Vertical
+                boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.VerticalFlick
+                onCountChanged: Qt.callLater(positionViewAtEnd)
+                onWidthChanged: Qt.callLater(positionViewAtEnd)
+                onContentXChanged: {
+                    if (contentX !== 0) {
+                        contentX = 0
+                    }
+                }
 
                 delegate: Item {
                     required property var modelData
                     readonly property bool isUser: !!modelData && modelData.role === "user"
+                    readonly property bool isExecution: !!modelData && modelData.type === "execution"
 
-                    width: listView.width
+                    width: Math.max(0, listView.width)
                     implicitHeight: bubble.implicitHeight
+                    objectName: isExecution ? "chatExecutionCard_" + index : "chatMessage_" + index
 
                     Rectangle {
                         id: bubble
-                        width: Math.min(listView.width * 0.68, 620)
-                        implicitHeight: textColumn.implicitHeight + 32
+                        width: Math.max(260, Math.min(listView.width * 0.72, Math.min(640, listView.width - 28)))
+                        implicitHeight: bubbleColumn.implicitHeight + 32
                         anchors.right: isUser ? parent.right : undefined
                         anchors.left: isUser ? undefined : parent.left
+                        anchors.rightMargin: isUser ? 4 : 0
+                        anchors.leftMargin: isUser ? 0 : 4
                         radius: 22
                         color: isUser ? Qt.rgba(0.21, 0.85, 1.0, 0.16) : Theme.Colors.card
                         border.color: isUser ? Qt.rgba(0.21, 0.85, 1.0, 0.32) : Theme.Colors.border
                         border.width: 1
 
                         ColumnLayout {
-                            id: textColumn
+                            id: bubbleColumn
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 10
 
+                            ColumnLayout {
+                                visible: isExecution
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData && modelData.title ? modelData.title : modelData.text
+                                    wrapMode: Text.WordWrap
+                                    color: Theme.Colors.text
+                                    font.family: Theme.Typography.displayFamily
+                                    font.pixelSize: Theme.Typography.body
+                                    font.bold: true
+                                }
+
+                                Repeater {
+                                    model: isExecution && modelData && modelData.steps ? modelData.steps : []
+
+                                    Rectangle {
+                                        required property var modelData
+                                        Layout.fillWidth: true
+                                        radius: 14
+                                        color: Qt.rgba(0.41, 0.94, 0.82, 0.08)
+                                        border.color: Qt.rgba(0.41, 0.94, 0.82, 0.22)
+                                        border.width: 1
+                                        implicitHeight: stepRow.implicitHeight + 18
+
+                                        RowLayout {
+                                            id: stepRow
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            spacing: 10
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.title || modelData.text || ""
+                                                wrapMode: Text.WordWrap
+                                                color: Theme.Colors.text
+                                                font.family: Theme.Typography.bodyFamily
+                                                font.pixelSize: Theme.Typography.small
+                                            }
+
+                                            StatusPill {
+                                                text: modelData.status || "готово"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             Text {
+                                visible: !isExecution
                                 Layout.fillWidth: true
                                 text: modelData ? modelData.text : ""
                                 wrapMode: Text.WordWrap

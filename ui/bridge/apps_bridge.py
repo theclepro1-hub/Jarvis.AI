@@ -2,24 +2,37 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from core.actions.launcher_discovery import target_from_file_url
+
 
 class AppsBridge(QObject):
     catalogChanged = Signal()
     feedbackChanged = Signal()
+    discoveredChanged = Signal()
+    defaultMusicAppChanged = Signal()
 
     def __init__(self, services, chat_bridge) -> None:
         super().__init__()
         self.services = services
         self.chat_bridge = chat_bridge
         self._feedback = ""
+        self._discovered: list[dict[str, str]] = []
 
     @Property("QVariantList", notify=catalogChanged)
     def catalog(self) -> list[dict[str, str]]:
         return self.services.actions.app_catalog()
 
+    @Property("QVariantList", notify=discoveredChanged)
+    def discovered(self) -> list[dict[str, str]]:
+        return self._discovered
+
     @Property(str, notify=feedbackChanged)
     def feedback(self) -> str:
         return self._feedback
+
+    @Property(str, notify=defaultMusicAppChanged)
+    def defaultMusicAppId(self) -> str:
+        return str(self.services.settings.get("default_music_app", "")).strip()
 
     @Slot(str, str, str)
     def addCustomApp(self, title: str, target: str, aliases: str) -> None:
@@ -33,10 +46,76 @@ class AppsBridge(QObject):
         self.catalogChanged.emit()
         self.chat_bridge.refreshCatalog()
 
-    @Slot(str)
-    def removeCustomApp(self, app_id: str) -> None:
-        self.services.actions.remove_custom_app(app_id)
-        self._feedback = "Кастомное приложение удалено."
+    @Slot(str, str, str, str)
+    def updateCustomApp(self, app_id: str, title: str, target: str, aliases: str) -> None:
+        if not title.strip() or not target.strip():
+            self._feedback = "Нужны хотя бы название и цель запуска."
+            self.feedbackChanged.emit()
+            return
+        if not self.services.actions.update_custom_app(app_id, title, target, aliases):
+            self._feedback = "Не удалось изменить приложение."
+            self.feedbackChanged.emit()
+            return
+        self._feedback = f"Изменено: {title.strip()}"
         self.feedbackChanged.emit()
         self.catalogChanged.emit()
         self.chat_bridge.refreshCatalog()
+
+    @Slot(str)
+    def removeCustomApp(self, app_id: str) -> None:
+        self.services.actions.remove_custom_app(app_id)
+        self._feedback = "Пользовательское приложение удалено."
+        self.feedbackChanged.emit()
+        self.catalogChanged.emit()
+        self.chat_bridge.refreshCatalog()
+
+    @Slot(str)
+    def launchApp(self, app_id: str) -> None:
+        outcome = self.services.actions.test_item(app_id)
+        self._feedback = outcome.title if outcome.success else outcome.detail
+        self.feedbackChanged.emit()
+
+    @Slot()
+    def scanApplications(self) -> None:
+        result = self.services.actions.scan_and_import_apps()
+        review = result.get("review", [])
+        self._discovered = review if isinstance(review, list) else []
+        self._feedback = str(result.get("summary") or "Новых безопасных приложений не найдено.")
+        self.feedbackChanged.emit()
+        self.discoveredChanged.emit()
+        self.catalogChanged.emit()
+        self.chat_bridge.refreshCatalog()
+
+    @Slot(str)
+    def importDiscoveredApp(self, candidate_id: str) -> None:
+        candidate = next((item for item in self._discovered if item.get("id") == candidate_id), None)
+        if not candidate:
+            self._feedback = "Кандидат не найден. Запустите поиск ещё раз."
+            self.feedbackChanged.emit()
+            return
+        if not self.services.actions.import_discovered_app(candidate):
+            self._feedback = "Это приложение уже добавлено или найденный путь пустой."
+            self.feedbackChanged.emit()
+            return
+        self._discovered = [item for item in self._discovered if item.get("id") != candidate_id]
+        self._feedback = f"Добавлено: {candidate.get('title', 'приложение')}"
+        self.feedbackChanged.emit()
+        self.discoveredChanged.emit()
+        self.catalogChanged.emit()
+        self.chat_bridge.refreshCatalog()
+
+    @Slot(str)
+    def setDefaultMusicApp(self, app_id: str) -> None:
+        if not self.services.actions.set_default_music_app(app_id):
+            self._feedback = "Выберите приложение из категории музыки."
+            self.feedbackChanged.emit()
+            return
+        self._feedback = "Основное музыкальное приложение сохранено."
+        self.feedbackChanged.emit()
+        self.defaultMusicAppChanged.emit()
+        self.catalogChanged.emit()
+        self.chat_bridge.refreshCatalog()
+
+    @Slot(str, result=str)
+    def targetFromFileUrl(self, file_url: str) -> str:
+        return target_from_file_url(file_url)

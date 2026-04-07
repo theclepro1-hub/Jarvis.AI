@@ -19,7 +19,13 @@ class FakeStore:
             "voice_mode": "balance",
             "command_style": "one_shot",
             "wake_word_enabled": True,
-            "microphone_name": "Системный по умолчанию",
+            "microphone_name": "Системный микрофон",
+            "voice_output_name": "Системный вывод",
+            "voice_response_enabled": False,
+            "tts_engine": "system",
+            "tts_voice_name": "Голос по умолчанию",
+            "tts_rate": 185,
+            "tts_volume": 85,
             "registration": {
                 "groq_api_key": "",
                 "telegram_user_id": "",
@@ -64,8 +70,8 @@ def test_wake_service_reports_missing_model_without_network(tmp_path, monkeypatc
     result = wake.start(lambda _pre_roll: None)
 
     assert wake.phase == "error"
-    assert "wake-модель" in result
-    assert "wake-модель" in wake.status()
+    assert "модель слова активации" in result
+    assert "модель слова активации" in wake.status()
 
 
 def test_wake_service_prefers_bundled_model_path(tmp_path, monkeypatch):

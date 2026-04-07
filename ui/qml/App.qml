@@ -15,13 +15,20 @@ ApplicationWindow {
     visible: true
     color: Theme.Colors.page
     title: "JARVIS Unity v" + appBridge.version
+    property string contextHelpText: ""
+
+    Binding {
+        target: Theme.Colors
+        property: "themeMode"
+        value: settingsBridge.themeMode
+    }
 
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#07101a" }
-            GradientStop { position: 0.55; color: "#050811" }
-            GradientStop { position: 1.0; color: "#02040a" }
+            GradientStop { position: 0.0; color: Theme.Colors.panel }
+            GradientStop { position: 0.55; color: Theme.Colors.pageMid }
+            GradientStop { position: 1.0; color: Theme.Colors.pageDeep }
         }
     }
 
@@ -41,8 +48,8 @@ ApplicationWindow {
             navItems: appBridge.navigationItems
             currentScreen: appBridge.currentScreen
             registrationRequired: appBridge.registrationRequired
+            contextHelpText: window.contextHelpText
             onNavigate: (screen) => appBridge.navigate(screen)
-            onOpenSettings: () => appBridge.openSettings()
         }
 
         ColumnLayout {
@@ -53,7 +60,7 @@ ApplicationWindow {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 92
-                color: "#09111d"
+                color: Theme.Colors.panel
                 radius: 28
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
@@ -70,7 +77,7 @@ ApplicationWindow {
                         spacing: 4
 
                         Text {
-                            text: appBridge.currentScreen === "registration" ? "Подключение" :
+                            text: appBridge.currentScreen === "registration" ? "Подключения" :
                                   appBridge.currentScreen === "voice" ? "Голос" :
                                   appBridge.currentScreen === "apps" ? "Приложения" :
                                   appBridge.currentScreen === "settings" ? "Настройки" : "Диалог"
@@ -82,11 +89,11 @@ ApplicationWindow {
 
                         Text {
                             text: appBridge.currentScreen === "registration"
-                                  ? "Первый запуск без лишних окон: заполните ключи или настройте позже."
+                                  ? "Ключи и подключения. Можно заполнить сразу или вернуться позже в обычные настройки."
                                   : appBridge.currentScreen === "voice"
                                     ? "Настройте микрофон, слово активации и способ распознавания."
                                   : appBridge.currentScreen === "apps"
-                                    ? "Быстрые запускатели, алиасы и пользовательские действия."
+                                    ? "Быстрые запускатели, другие названия и пользовательские действия."
                                   : appBridge.currentScreen === "settings"
                                     ? "Короткие настройки без технической свалки."
                                   : "Диалог, быстрые действия и короткий статус без лишних панелей."
@@ -107,7 +114,7 @@ ApplicationWindow {
                         StatusPill {
                             Layout.alignment: Qt.AlignRight
                             text: appBridge.currentScreen === "registration"
-                                  ? "Подключение"
+                                  ? "Подключения"
                                   : appBridge.assistantStatus
                         }
                     }
@@ -133,6 +140,20 @@ ApplicationWindow {
                     default:
                         return "screens/ChatScreen.qml"
                     }
+                }
+                onLoaded: window.contextHelpText = ""
+            }
+
+            Connections {
+                target: screenLoader.item
+                ignoreUnknownSignals: true
+
+                function onHelpRequested(text) {
+                    window.contextHelpText = text
+                }
+
+                function onHelpCleared() {
+                    window.contextHelpText = ""
                 }
             }
         }

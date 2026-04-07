@@ -6,6 +6,9 @@ from dataclasses import dataclass
 @dataclass(slots=True)
 class RegistrationModel:
     groq_api_key: str = ""
+    cerebras_api_key: str = ""
+    gemini_api_key: str = ""
+    openrouter_api_key: str = ""
     telegram_user_id: str = ""
     telegram_bot_token: str = ""
     skipped: bool = False

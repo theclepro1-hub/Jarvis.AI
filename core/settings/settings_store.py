@@ -13,23 +13,50 @@ from ctypes import wintypes
 DEFAULT_SETTINGS: dict[str, Any] = {
     "theme_mode": "midnight",
     "startup_enabled": False,
+    "minimize_to_tray_enabled": True,
+    "start_minimized_enabled": True,
     "privacy_mode": "balance",
-    "ai_provider": "groq",
+    "ai_provider": "auto",
+    "ai_mode": "auto",
     "ai_model": "openai/gpt-oss-20b",
+    "ai_max_attempts": 1,
+    "network": {
+        "proxy_mode": "system",
+        "proxy_url": "",
+        "no_proxy": "localhost,127.0.0.1,::1",
+        "timeout_seconds": 12.0,
+    },
     "voice_mode": "balance",
     "command_style": "one_shot",
     "wake_word_enabled": True,
-    "microphone_name": "Системный по умолчанию",
+    "microphone_name": "Системный микрофон",
+    "voice_output_name": "Системный вывод",
+    "voice_response_enabled": False,
+    "tts_engine": "system",
+    "tts_voice_name": "Голос по умолчанию",
+    "tts_rate": 185,
+    "tts_volume": 85,
     "custom_apps": [],
+    "default_music_app": "",
     "registration": {
         "groq_api_key": "",
+        "cerebras_api_key": "",
+        "gemini_api_key": "",
+        "openrouter_api_key": "",
         "telegram_user_id": "",
         "telegram_bot_token": "",
         "skipped": False,
     },
 }
 
-SECRET_REGISTRATION_FIELDS = ("groq_api_key", "telegram_user_id", "telegram_bot_token")
+SECRET_REGISTRATION_FIELDS = (
+    "groq_api_key",
+    "cerebras_api_key",
+    "gemini_api_key",
+    "openrouter_api_key",
+    "telegram_user_id",
+    "telegram_bot_token",
+)
 PROTECTED_SECRET_PREFIX = "dpapi:"
 
 
@@ -62,7 +89,10 @@ class SettingsStore:
         self._restore_registration_secrets(merged)
         microphone_name = str(merged.get("microphone_name", "")).strip()
         if not microphone_name:
-            merged["microphone_name"] = "Системный по умолчанию"
+            merged["microphone_name"] = "Системный микрофон"
+        output_name = str(merged.get("voice_output_name", "")).strip()
+        if not output_name:
+            merged["voice_output_name"] = "Системный вывод"
         return merged
 
     def save(self, payload: dict[str, Any]) -> None:

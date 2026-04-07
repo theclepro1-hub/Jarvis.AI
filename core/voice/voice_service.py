@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import re
-import tempfile
+import importlib.util
 import threading
-import wave
-from pathlib import Path
 from typing import Callable
 
-import numpy as np
 import sounddevice as sd
-from openai import OpenAI
+
+from core.voice.audio_device_service import AudioDeviceService
+from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
+from core.voice.stt_service import STTService
+from core.voice.tts_service import TTSService
+from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult
 
 
 class VoiceService:
@@ -18,16 +19,12 @@ class VoiceService:
     BLOCK_FRAMES = 1600
     MANUAL_MAX_SECONDS = 8.0
     SILENCE_SECONDS = 0.9
+    WAKE_MAX_SECONDS = 3.0
+    WAKE_SILENCE_SECONDS = 0.45
     ENERGY_THRESHOLD = 160.0
-    DEFAULT_MICROPHONE_LABEL = "Системный по умолчанию"
-    SYSTEM_ENDPOINT_MARKERS = (
-        "@system32",
-        "\\drivers\\",
-        "input (@",
-        "driver dump",
-        "system capture",
-        "переназначение звуковых устр",
-    )
+    DEFAULT_INPUT_LABEL = "Системный микрофон"
+    DEFAULT_OUTPUT_LABEL = "Системный вывод"
+    DEFAULT_TTS_TEXT = "Я на связи."
 
     def __init__(self, settings_service) -> None:
         self.settings = settings_service
@@ -35,40 +32,78 @@ class VoiceService:
         self._manual_thread: threading.Thread | None = None
         self._recording = False
         self._wake_phase = "idle"
-        self._wake_detail = "Локальный wake runtime не запущен"
+        self._wake_detail = "Слово активации не запущено"
         self._wake_ready = False
-        self._microphone_lookup: dict[str, str] = {}
-        self.microphones = self._detect_microphones()
+
+        self.audio_devices = AudioDeviceService(
+            query_devices=lambda: sd.query_devices(),
+            query_hostapis=lambda: sd.query_hostapis(),
+            default_device_getter=lambda: sd.default.device,
+        )
+        self.capture_service = SpeechCaptureService(
+            resolve_input_device=self._resolve_input_device,
+            stop_event=self._manual_stop_event,
+            config=CaptureConfig(
+                sample_rate=self.SAMPLE_RATE,
+                channels=self.CHANNELS,
+                block_frames=self.BLOCK_FRAMES,
+                max_seconds=self.MANUAL_MAX_SECONDS,
+                silence_seconds=self.SILENCE_SECONDS,
+                energy_threshold=self.ENERGY_THRESHOLD,
+            ),
+        )
+        self.stt_service = STTService(self.settings)
+        self.tts_service = TTSService(self.settings)
+
+        self.microphone_device_models = self.audio_devices.microphone_models
+        self.output_device_models = self.audio_devices.output_models
+        self.microphones = self.audio_devices.microphones
+        self.output_devices = self.audio_devices.output_devices
 
     @property
     def is_recording(self) -> bool:
         return self._recording
 
     def set_wake_runtime_status(self, phase: str, ready: bool = False, detail: str | None = None) -> None:
-        self._wake_phase = phase
+        normalized = {
+            "waiting": "waiting_wake",
+            "listening": "capturing_command",
+        }.get(phase, phase)
+        self._wake_phase = normalized
         self._wake_ready = ready
         if detail is not None:
             self._wake_detail = detail
 
     def wake_status_text(self) -> str:
         labels = {
-            "preparing": "Готовлю локальный контур",
-            "waiting": "Жду «Джарвис»",
-            "listening": "Слушаю",
+            "preparing": "Готовлю слово активации",
+            "waiting_wake": "Жду «Джарвис»",
+            "capturing_command": "Слушаю команду",
             "transcribing": self._wake_detail or "Распознаю команду",
+            "routing": self._wake_detail or "Распознаю команду",
+            "executing": self._wake_detail or "Выполняю",
+            "not_heard": self._wake_detail or "Не расслышал",
             "error": self._wake_detail or "Ошибка слова активации",
             "no_key": "Нужен ключ Groq",
-            "idle": self._wake_detail or "Локальный wake runtime не запущен",
+            "idle": self._wake_detail or "Слово активации не запущено",
         }
         return labels.get(self._wake_phase, self._wake_detail or "Готов")
 
     def command_status_text(self) -> str:
-        if self._has_groq_key():
-            return "Локально после активации + распознавание Groq"
+        engine = self.stt_service.engine()
+        if engine in {"groq_whisper", "local_vosk"}:
+            return self.stt_service.status_text()
+        if self.stt_service._groq_key():
+            return self.stt_service.status_text()
         return "Нужен ключ Groq"
 
     def model_status_text(self) -> str:
-        return "распознавание Groq готово" if self._has_groq_key() else "не подключена"
+        engine = self.stt_service.engine()
+        if engine in {"groq_whisper", "local_vosk"}:
+            return "загружена" if self.stt_service.can_transcribe() else "не подключена"
+        if self.stt_service._groq_key():
+            return "загружена"
+        return "не подключена"
 
     def summary(self) -> str:
         mode = self.settings.get("voice_mode", "balance")
@@ -79,24 +114,73 @@ class VoiceService:
         }.get(mode, mode)
         style = self.settings.get("command_style", "one_shot")
         style_label = "одной фразой" if style == "one_shot" else "в два шага"
-        return f"Слово активации: {self.wake_status_text()}. Распознавание: {self.command_status_text()}. Режим: {mode_label}. Сценарий: {style_label}."
+        return (
+            f"Слово активации: {self.wake_status_text()}. "
+            f"Распознавание речи: {self.command_status_text()}. "
+            f"Режим: {mode_label}. Сценарий: {style_label}."
+        )
 
     def runtime_status(self) -> dict[str, str]:
         return {
             "wakeWord": self.wake_status_text(),
             "command": self.command_status_text(),
-            "ai": "Groq или локальный резерв",
+            "ai": "Groq или резервный локальный маршрут",
             "model": self.model_status_text(),
+            "tts": self.tts_status_text(),
         }
 
     def test_wake_word(self) -> str:
-        if self._wake_phase == "listening" and self._wake_ready:
-            return "Локальный контур активации ждёт «Джарвис»."
+        if self._wake_phase == "waiting_wake" and self._wake_ready:
+            return "Слово активации ждёт «Джарвис»."
         if self._wake_phase == "preparing":
-            return "Контур активации ещё готовится. Модель загружается локально при первом запуске."
+            return "Слово активации ещё готовится."
         if self._wake_phase == "error":
             return self._wake_detail or "Ошибка слова активации."
-        return "Контур активации готов."
+        if self._wake_phase == "not_heard":
+            return self._wake_detail or "Не расслышал команду после слова активации."
+        return "Слово активации сейчас не запущено."
+
+    def tts_status_text(self) -> str:
+        return self.tts_service.status_text()
+
+    def available_tts_engines(self) -> list[dict[str, object]]:
+        return [
+            {
+                "key": engine.key,
+                "title": engine.title,
+                "note": engine.note,
+                "supportsOutputDevice": engine.supports_output_device,
+                "available": engine.available,
+            }
+            for engine in self.tts_service.available_engines()
+        ]
+
+    def available_tts_voices(self) -> list[str]:
+        return self.tts_service.available_voices()
+
+    def voice_response_enabled(self) -> bool:
+        return self.tts_service.voice_response_enabled()
+
+    def tts_engine(self) -> str:
+        return self.tts_service.tts_engine()
+
+    def can_route_tts_output(self) -> bool:
+        return self.tts_service.can_route_output()
+
+    def tts_voice_name(self) -> str:
+        return self.tts_service.tts_voice_name()
+
+    def tts_rate(self) -> int:
+        return self.tts_service.tts_rate()
+
+    def tts_volume(self) -> int:
+        return self.tts_service.tts_volume()
+
+    def speak(self, text: str, force: bool = False) -> str:
+        return self.tts_service.speak(text, force=force).message
+
+    def test_jarvis_voice(self) -> str:
+        return self.tts_service.test_voice(self.DEFAULT_TTS_TEXT).message
 
     def start_manual_capture(
         self,
@@ -125,17 +209,47 @@ class VoiceService:
         return "Останавливаю запись..."
 
     def capture_after_wake(self, pre_roll: bytes) -> str:
-        combined = self._capture_until_silence(
-            pre_roll=pre_roll,
-            max_seconds=4.5,
-            silence_seconds=self.SILENCE_SECONDS,
-            energy_threshold=self.ENERGY_THRESHOLD,
-        )
-        if not combined:
-            return ""
+        return self.capture_after_wake_result(pre_roll).text
 
-        text = self._transcribe_pcm_bytes(combined)
-        return self._strip_wake_word(text)
+    def capture_after_wake_result(self, pre_roll: bytes) -> TranscriptionResult:
+        wake_capture = SpeechCaptureService(
+            resolve_input_device=self._resolve_input_device,
+            stop_event=self._manual_stop_event,
+            config=CaptureConfig(
+                sample_rate=self.SAMPLE_RATE,
+                channels=self.CHANNELS,
+                block_frames=self.BLOCK_FRAMES,
+                max_seconds=self.WAKE_MAX_SECONDS,
+                silence_seconds=self.WAKE_SILENCE_SECONDS,
+                energy_threshold=self.ENERGY_THRESHOLD,
+            ),
+        )
+        capture = wake_capture.capture_until_silence(pre_roll=pre_roll)
+        if not capture.ok:
+            self._set_wake_error_from_capture(capture)
+            return TranscriptionResult(status=capture.status, detail=capture.detail, engine="capture")
+
+        self.set_wake_runtime_status("transcribing", ready=False, detail="Распознаю команду")
+        transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
+        if transcription.ok:
+            self.set_wake_runtime_status("routing", ready=False, detail="Распознаю команду")
+            transcription = TranscriptionResult(
+                status="ok",
+                text=self._strip_wake_word(transcription.text),
+                detail=transcription.detail,
+                engine=transcription.engine,
+            )
+            return transcription
+
+        if transcription.status == "no_speech":
+            self.set_wake_runtime_status(
+                "not_heard",
+                ready=False,
+                detail="Не расслышал команду после слова активации",
+            )
+        else:
+            self.set_wake_runtime_status("error", ready=False, detail=transcription.detail)
+        return transcription
 
     def _manual_capture_worker(
         self,
@@ -144,31 +258,64 @@ class VoiceService:
         on_finish: Callable[[], None] | None,
     ) -> None:
         try:
-            combined = self._capture_until_silence(
-                max_seconds=self.MANUAL_MAX_SECONDS,
-                silence_seconds=self.SILENCE_SECONDS,
-                energy_threshold=self.ENERGY_THRESHOLD,
-            )
-            if not combined:
+            capture = self.capture_service.capture_until_silence()
+            if not capture.ok:
                 if on_note is not None:
-                    on_note("Не удалось получить текст из записи. Проверьте микрофон или Groq API Key.")
+                    on_note(self._capture_note_from_result(capture))
                 return
 
-            text = self._transcribe_pcm_bytes(combined)
-            if text:
+            transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
+            if transcription.ok:
                 if on_text is not None:
-                    on_text(text)
+                    on_text(transcription.text)
             elif on_note is not None:
-                on_note("Не удалось получить текст из записи. Проверьте микрофон или Groq API Key.")
-        except Exception:
-            if on_note is not None:
-                on_note("Не удалось открыть микрофон. Проверьте выбранное устройство.")
+                on_note(self._stt_note_from_result(transcription))
         finally:
             self._recording = False
             self._manual_thread = None
             self._manual_stop_event.clear()
             if on_finish is not None:
                 on_finish()
+
+    def _capture_note_from_result(self, result: SpeechCaptureResult) -> str:
+        if result.status == "mic_open_failed":
+            return "Не удалось открыть микрофон. Проверьте выбранное устройство."
+        if result.status == "cancelled":
+            return "Запись остановлена."
+        if result.status == "no_speech":
+            return "Не удалось получить текст. Проверьте микрофон или ключ Groq."
+        return result.detail or "Не удалось получить текст."
+
+    def _stt_note_from_result(self, result: TranscriptionResult) -> str:
+        if result.status == "stt_key_missing":
+            return "Нужен ключ Groq."
+        if result.status == "model_missing":
+            return "Нужен ключ Groq или локальная модель распознавания."
+        if result.status == "no_speech":
+            return "Не удалось получить текст. Проверьте микрофон или ключ Groq."
+        return result.detail or "Не удалось распознать речь."
+
+    def _set_wake_error_from_capture(self, capture: SpeechCaptureResult) -> None:
+        if capture.status == "mic_open_failed":
+            self.set_wake_runtime_status("error", ready=False, detail="Не удалось открыть микрофон.")
+        elif capture.status == "cancelled":
+            self.set_wake_runtime_status("idle", ready=False, detail="Запись остановлена.")
+        else:
+            self.set_wake_runtime_status("not_heard", ready=False, detail=capture.detail or "Не расслышал команду.")
+
+    def _resolve_input_device(self) -> int | None:
+        selected = self.settings.get("microphone_name", self.DEFAULT_INPUT_LABEL)
+        return self.audio_devices.resolve_input_device(str(selected))
+
+    def _resolve_output_device(self) -> int | None:
+        selected = self.settings.get("voice_output_name", self.DEFAULT_OUTPUT_LABEL)
+        return self.audio_devices.resolve_output_device(str(selected))
+
+    def normalize_microphone_selection(self, value: str) -> str:
+        return self.audio_devices.normalize_microphone_selection(value)
+
+    def normalize_output_selection(self, value: str) -> str:
+        return self.audio_devices.normalize_output_selection(value)
 
     def _capture_until_silence(
         self,
@@ -177,77 +324,24 @@ class VoiceService:
         silence_seconds: float = 0.9,
         energy_threshold: float = 160.0,
     ) -> bytes:
-        chunks: list[bytes] = [pre_roll] if pre_roll else []
-        speech_started = bool(pre_roll and self._chunk_energy(pre_roll) > energy_threshold)
-        silence_for = 0.0
-        max_iterations = int(max_seconds * self.SAMPLE_RATE / self.BLOCK_FRAMES)
-
-        try:
-            with sd.RawInputStream(
-                samplerate=self.SAMPLE_RATE,
+        custom = SpeechCaptureService(
+            resolve_input_device=self._resolve_input_device,
+            stop_event=self._manual_stop_event,
+            config=CaptureConfig(
+                sample_rate=self.SAMPLE_RATE,
                 channels=self.CHANNELS,
-                dtype="int16",
-                device=self._resolve_input_device(),
-                blocksize=self.BLOCK_FRAMES,
-            ) as stream:
-                for _ in range(max_iterations):
-                    if self._manual_stop_event.is_set():
-                        break
-
-                    data, _overflowed = stream.read(self.BLOCK_FRAMES)
-                    raw = bytes(data)
-                    chunks.append(raw)
-
-                    energy = self._chunk_energy(raw)
-                    if energy > energy_threshold:
-                        speech_started = True
-                        silence_for = 0.0
-                    elif speech_started:
-                        silence_for += self.BLOCK_FRAMES / self.SAMPLE_RATE
-                        if silence_for >= silence_seconds:
-                            break
-        except Exception:
-            return b""
-
-        if not speech_started:
-            return b""
-        return b"".join(chunks)
+                block_frames=self.BLOCK_FRAMES,
+                max_seconds=max_seconds,
+                silence_seconds=silence_seconds,
+                energy_threshold=energy_threshold,
+            ),
+        )
+        result = custom.capture_until_silence(pre_roll=pre_roll)
+        return result.raw_audio if result.ok else b""
 
     def _transcribe_pcm_bytes(self, raw_bytes: bytes) -> str:
-        if not self._has_groq_key():
-            return ""
-
-        temp_path = self._write_temp_wav(raw_bytes)
-        try:
-            client = OpenAI(
-                api_key=self.settings.get_registration()["groq_api_key"],
-                base_url="https://api.groq.com/openai/v1",
-            )
-            with temp_path.open("rb") as handle:
-                response = client.audio.transcriptions.create(
-                    file=handle,
-                    model="whisper-large-v3-turbo",
-                    response_format="json",
-                    language="ru",
-                    temperature=0.0,
-                )
-            text = getattr(response, "text", "") or ""
-            return text.strip()
-        except Exception:
-            return ""
-        finally:
-            temp_path.unlink(missing_ok=True)
-
-    def _write_temp_wav(self, raw_bytes: bytes) -> Path:
-        _fd, raw_path = tempfile.mkstemp(suffix=".wav", prefix="jarvis_unity_")
-        Path(raw_path).unlink(missing_ok=True)
-        path = Path(raw_path)
-        with wave.open(str(path), "wb") as wav_file:
-            wav_file.setnchannels(self.CHANNELS)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(self.SAMPLE_RATE)
-            wav_file.writeframes(raw_bytes)
-        return path
+        result = self.stt_service.transcribe_pcm_bytes(raw_bytes)
+        return result.text if result.ok else ""
 
     def _strip_wake_word(self, text: str) -> str:
         clean = text.strip()
@@ -258,131 +352,5 @@ class VoiceService:
                 break
         return clean
 
-    def _chunk_energy(self, raw_bytes: bytes) -> float:
-        if not raw_bytes:
-            return 0.0
-        samples = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32)
-        if samples.size == 0:
-            return 0.0
-        return float(np.sqrt(np.mean(samples * samples)))
-
-    def _has_groq_key(self) -> bool:
-        return bool(self.settings.get_registration().get("groq_api_key", "").strip())
-
-    def _detect_microphones(self) -> list[str]:
-        try:
-            devices = sd.query_devices()
-        except Exception:
-            devices = []
-
-        labels: list[str] = [self.DEFAULT_MICROPHONE_LABEL]
-        lookup: dict[str, str] = {
-            self.DEFAULT_MICROPHONE_LABEL.casefold(): "system_default",
-            self._microphone_key(self.DEFAULT_MICROPHONE_LABEL): "system_default",
-        }
-        seen: set[str] = set()
-
-        for device in devices:
-            if device.get("max_input_channels", 0) <= 0:
-                continue
-
-            raw_name = str(device.get("name", "")).strip()
-            if not raw_name or self._is_system_endpoint(raw_name):
-                continue
-
-            label = self._microphone_display_name(raw_name)
-            if not label:
-                continue
-
-            key = self._microphone_key(label)
-            if key in seen:
-                continue
-
-            seen.add(key)
-            labels.append(label)
-            lookup[label.casefold()] = raw_name
-            lookup[raw_name.casefold()] = raw_name
-            lookup[key] = raw_name
-
-        self._microphone_lookup = lookup
-        return labels
-
-    def normalize_microphone_selection(self, value: str) -> str:
-        if not value:
-            return self.DEFAULT_MICROPHONE_LABEL
-        if value == self.DEFAULT_MICROPHONE_LABEL:
-            return value
-
-        raw_name = self._microphone_lookup.get(value.casefold())
-        if raw_name is None:
-            raw_name = self._microphone_lookup.get(self._microphone_key(value))
-        if raw_name is None:
-            normalized = self._microphone_display_name(value)
-            return normalized or self.DEFAULT_MICROPHONE_LABEL
-
-        normalized = self._microphone_display_name(raw_name)
-        return normalized or self.DEFAULT_MICROPHONE_LABEL
-
-    def _resolve_input_device(self) -> int | None:
-        selected = self.normalize_microphone_selection(
-            self.settings.get("microphone_name", self.DEFAULT_MICROPHONE_LABEL)
-        )
-        if not selected or selected == self.DEFAULT_MICROPHONE_LABEL:
-            return None
-
-        try:
-            devices = sd.query_devices()
-            selected_key = self._microphone_key(selected)
-            for index, device in enumerate(devices):
-                if device.get("max_input_channels", 0) <= 0:
-                    continue
-
-                raw_name = str(device.get("name", "")).strip()
-                if not raw_name:
-                    continue
-
-                candidate = self._microphone_display_name(raw_name)
-                if self._microphone_key(candidate) == selected_key:
-                    return index
-                if raw_name.casefold() == selected.casefold():
-                    return index
-        except Exception:
-            return None
-        return None
-
-    def _microphone_display_name(self, raw_name: str) -> str:
-        cleaned = raw_name.strip()
-        cleaned = re.sub(r"\s+", " ", cleaned)
-        cleaned = re.sub(
-            r"^(microphone|микрофон|input|primary driver|переназначение звуковых устр\.\s*-\s*)\s*",
-            "",
-            cleaned,
-            flags=re.IGNORECASE,
-        )
-        cleaned = re.sub(r"^-\s*", "", cleaned)
-        cleaned = re.sub(r"^(microphone|микрофон|input)\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*@system32.*$", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*\(@.*$", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*-\s*(input|capture|render).*$", "", cleaned, flags=re.IGNORECASE)
-        cleaned = cleaned.strip("()[]{} -")
-        if cleaned.startswith("@"):
-            return ""
-        if len(cleaned) > 72:
-            cleaned = cleaned[:72].rstrip()
-        return cleaned
-
-    def _microphone_key(self, raw_name: str) -> str:
-        cleaned = raw_name.casefold()
-        cleaned = re.sub(r"\(.*?\)", " ", cleaned)
-        cleaned = re.sub(r"[^0-9a-zа-яё]+", " ", cleaned)
-        cleaned = re.sub(
-            r"\b(microphone|микрофон|input|primary|driver|переназначение|звуковых|устр|system|системный|по|умолчанию)\b",
-            " ",
-            cleaned,
-        )
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        return cleaned
-
-    def _is_system_endpoint(self, raw_name: str) -> bool:
-        lowered = raw_name.casefold()
-        return any(marker in lowered for marker in self.SYSTEM_ENDPOINT_MARKERS) or lowered.startswith("@system32")
+    def _module_available(self, module_name: str) -> bool:
+        return importlib.util.find_spec(module_name) is not None

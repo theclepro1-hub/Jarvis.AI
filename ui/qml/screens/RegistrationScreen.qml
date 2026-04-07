@@ -60,7 +60,7 @@ Rectangle {
                         Layout.fillWidth: true
                         label: "Ключ Groq"
                         text: registrationBridge.registration["groq_api_key"] || ""
-                        placeholderText: "gsk_..."
+                        placeholderText: "Вставьте ключ Groq"
                         secret: true
                     }
 

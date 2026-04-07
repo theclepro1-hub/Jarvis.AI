@@ -34,6 +34,7 @@ def test_gitignore_covers_release_and_runtime_temp_artifacts() -> None:
 def test_release_docs_exist() -> None:
     for relpath in [
         Path("docs/SECURITY.md"),
+        Path("docs/AI_NETWORK.md"),
         Path("docs/RELEASE_READINESS.md"),
         Path("docs/RELEASE_22.0.0.md"),
     ]:
@@ -43,8 +44,9 @@ def test_release_docs_exist() -> None:
 def test_build_script_keeps_expected_release_inputs() -> None:
     build_script = Path("build/build_release.ps1").read_text(encoding="utf-8")
 
-    assert "--collect-all PySide6" in build_script
     assert "--collect-all vosk" in build_script
+    assert "--hidden-import win32com.client" in build_script
+    assert "--hidden-import pythoncom" in build_script
     assert "MODEL_DOWNLOAD" in build_script
     assert "Test-ModelSourceReady" in build_script
     assert r"assets\\models\\$modelName" in build_script

@@ -7,12 +7,35 @@ $oneFileDistDir = Join-Path $root "dist_onefile"
 $buildDir = Join-Path $root "build\\pyinstaller"
 $oneFileBuildDir = Join-Path $root "build\\pyinstaller_onefile"
 $releaseDir = Join-Path $root "build\\release"
+$installerDir = Join-Path $root "build\\installer"
 $iconPath = Join-Path $root "assets\\icons\\jarvis_unity.ico"
 $modelName = "vosk-model-small-ru-0.22"
 $modelCacheDir = Join-Path $root "build\\model_cache"
 $modelPath = Join-Path $modelCacheDir $modelName
 $modelZip = Join-Path $modelCacheDir "$modelName.zip"
 $modelUrl = "https://alphacephei.com/vosk/models/$modelName.zip"
+$buildStamp = Get-Date -Format "yyyyMMdd_HHmmss"
+
+function Remove-Or-Fallback {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$FallbackPath
+    )
+
+    if (!(Test-Path $Path)) {
+        return $Path
+    }
+
+    try {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        return $Path
+    } catch {
+        Write-Host "PATH_LOCK_FALLBACK $Path -> $FallbackPath"
+        return $FallbackPath
+    }
+}
 
 function Test-ModelSourceReady {
     param(
@@ -26,6 +49,17 @@ function Test-ModelSourceReady {
 
     $sample = Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     return $null -ne $sample
+}
+
+function Assert-NativeSuccess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Step
+    )
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE"
+    }
 }
 
 if (!(Test-Path $venvPython)) {
@@ -49,23 +83,15 @@ if (!(Test-ModelSourceReady -Path $modelPath)) {
     throw "Vosk model source is missing or empty: $modelPath"
 }
 
-if (Test-Path $distDir) {
-    Remove-Item -Recurse -Force $distDir
-}
-if (Test-Path $buildDir) {
-    Remove-Item -Recurse -Force $buildDir
-}
-if (Test-Path $oneFileDistDir) {
-    Remove-Item -Recurse -Force $oneFileDistDir
-}
-if (Test-Path $oneFileBuildDir) {
-    Remove-Item -Recurse -Force $oneFileBuildDir
-}
-if (Test-Path $releaseDir) {
-    Remove-Item -Recurse -Force $releaseDir
-}
+$distDir = Remove-Or-Fallback -Path $distDir -FallbackPath (Join-Path $root "dist_fresh_$buildStamp")
+$buildDir = Remove-Or-Fallback -Path $buildDir -FallbackPath (Join-Path $root "build\\pyinstaller_fresh_$buildStamp")
+$oneFileDistDir = Remove-Or-Fallback -Path $oneFileDistDir -FallbackPath (Join-Path $root "dist_onefile_fresh_$buildStamp")
+$oneFileBuildDir = Remove-Or-Fallback -Path $oneFileBuildDir -FallbackPath (Join-Path $root "build\\pyinstaller_onefile_fresh_$buildStamp")
+$releaseDir = Remove-Or-Fallback -Path $releaseDir -FallbackPath (Join-Path $root "build\\release_fresh_$buildStamp")
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
+$nativeErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "SilentlyContinue"
 & $venvPython -m PyInstaller `
     --noconfirm `
     --noupx `
@@ -76,16 +102,31 @@ New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
     --workpath $buildDir `
     --specpath $buildDir `
     --paths $root `
-    --collect-all PySide6 `
     --collect-all vosk `
+    --hidden-import pyttsx3.drivers.sapi5 `
+    --hidden-import win32com.client `
+    --hidden-import pythoncom `
+    --hidden-import pywintypes `
     --add-data "$root\\ui;ui" `
     --add-data "$root\\assets;assets" `
     --add-data "$modelPath;assets\\models\\$modelName" `
     "$root\\app\\main.py"
+$pyInstallerExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorActionPreference
+if ($pyInstallerExit -ne 0) {
+    throw "PyInstaller portable failed with exit code $pyInstallerExit"
+}
+
+$portableDistPath = Join-Path $distDir "JarvisAi_Unity"
+if (!(Test-Path $portableDistPath)) {
+    throw "Portable dist folder missing: $portableDistPath"
+}
 
 $portableZip = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_portable.zip" -f $version)
-Compress-Archive -Path (Join-Path $distDir "JarvisAi_Unity") -DestinationPath $portableZip -Force
+Compress-Archive -Path $portableDistPath -DestinationPath $portableZip -Force
 
+$nativeErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "SilentlyContinue"
 & $venvPython -m PyInstaller `
     --noconfirm `
     --noupx `
@@ -97,16 +138,88 @@ Compress-Archive -Path (Join-Path $distDir "JarvisAi_Unity") -DestinationPath $p
     --workpath $oneFileBuildDir `
     --specpath $oneFileBuildDir `
     --paths $root `
-    --collect-all PySide6 `
     --collect-all vosk `
+    --hidden-import pyttsx3.drivers.sapi5 `
+    --hidden-import win32com.client `
+    --hidden-import pythoncom `
+    --hidden-import pywintypes `
     --add-data "$root\\ui;ui" `
     --add-data "$root\\assets;assets" `
     --add-data "$modelPath;assets\\models\\$modelName" `
     "$root\\app\\main.py"
+$pyInstallerExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorActionPreference
+if ($pyInstallerExit -ne 0) {
+    throw "PyInstaller onefile failed with exit code $pyInstallerExit"
+}
 
 $oneFileExe = Join-Path $oneFileDistDir "JarvisAi_Unity.exe"
+if (!(Test-Path $oneFileExe)) {
+    throw "Onefile executable missing: $oneFileExe"
+}
 $oneFileRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_onefile.exe" -f $version)
 Copy-Item $oneFileExe $oneFileRelease -Force
+
+$programFilesX86 = ${env:ProgramFiles(x86)}
+if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
+    $programFilesX86 = ${env:ProgramFiles}
+}
+$innoCompiler = Join-Path $programFilesX86 "Inno Setup 6\\ISCC.exe"
+$installerRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_installer.exe" -f $version)
+
+if (Test-Path $innoCompiler) {
+    Remove-Item -LiteralPath $installerDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+    $installerScript = Join-Path $installerDir "JarvisAi_Unity.iss"
+    $installerScriptContent = @"
+[Setup]
+AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}
+AppName=JARVIS Unity
+AppVersion=$version
+AppPublisher=theclepro1-hub
+AppPublisherURL=https://github.com/theclepro1-hub/Jarvis.AI
+AppSupportURL=https://github.com/theclepro1-hub/Jarvis.AI/issues
+AppUpdatesURL=https://github.com/theclepro1-hub/Jarvis.AI/releases
+DefaultDirName={autopf}\JARVIS Unity
+DefaultGroupName=JARVIS Unity
+DisableProgramGroupPage=yes
+OutputDir=$releaseDir
+OutputBaseFilename=JarvisAi_Unity_$version`_windows_installer
+SetupIconFile=$iconPath
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
+
+[Languages]
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+Source: "$portableDistPath\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"
+Name: "{group}\Uninstall JARVIS Unity"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\JarvisAi_Unity.exe"; Description: "{cm:LaunchProgram,JARVIS Unity}"; Flags: nowait postinstall skipifsilent
+"@
+    Set-Content -LiteralPath $installerScript -Value $installerScriptContent -Encoding UTF8
+    & $innoCompiler /Qp $installerScript
+    Assert-NativeSuccess -Step "Inno Setup installer"
+    if (!(Test-Path $installerRelease)) {
+        throw "Installer executable missing: $installerRelease"
+    }
+    Write-Host "ASSET_OK $installerRelease"
+} else {
+    Write-Host "INSTALLER_SKIPPED Inno Setup compiler not found: $innoCompiler"
+}
 
 Write-Host "BUILD_OK $distDir\\JarvisAi_Unity"
 Write-Host "ASSET_OK $portableZip"
