@@ -7,7 +7,7 @@ import httpx
 
 
 DEFAULT_GITHUB_REPOSITORY = "theclepro1-hub/Jarvis.AI"
-DEFAULT_VERSION = "22.1.0"
+DEFAULT_VERSION = "22.1.1"
 
 
 @dataclass(slots=True)

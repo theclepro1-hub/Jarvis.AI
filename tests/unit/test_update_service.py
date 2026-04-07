@@ -12,12 +12,12 @@ def test_update_service_reports_update_available_and_assets(monkeypatch) -> None
 
         def json(self) -> dict[str, object]:
             return {
-                "tag_name": "v22.1.0",
-                "html_url": "https://example.test/releases/v22.1.0",
-                "name": "JarvisAi Unity 22.1.0",
+                "tag_name": "v22.1.1",
+                "html_url": "https://example.test/releases/v22.1.1",
+                "name": "JarvisAi Unity 22.1.1",
                 "assets": [
                     {
-                        "name": "JarvisAi_Unity_22.1.0_windows_installer.exe",
+                        "name": "JarvisAi_Unity_22.1.1_windows_installer.exe",
                         "browser_download_url": "https://example.test/installer.exe",
                         "size": 123,
                         "content_type": "application/x-msdownload",
@@ -38,13 +38,13 @@ def test_update_service_reports_update_available_and_assets(monkeypatch) -> None
 
     assert result.ok is True
     assert result.update_available is True
-    assert result.latest_version == "22.1.0"
-    assert result.release_url == "https://example.test/releases/v22.1.0"
-    assert result.assets[0].name == "JarvisAi_Unity_22.1.0_windows_installer.exe"
+    assert result.latest_version == "22.1.1"
+    assert result.release_url == "https://example.test/releases/v22.1.1"
+    assert result.assets[0].name == "JarvisAi_Unity_22.1.1_windows_installer.exe"
     assert service.update_available() is True
-    assert service.latest_version() == "22.1.0"
-    assert service.release_url() == "https://example.test/releases/v22.1.0"
-    assert service.summary() == "Доступна версия 22.1.0 · текущая 22.0.0"
+    assert service.latest_version() == "22.1.1"
+    assert service.release_url() == "https://example.test/releases/v22.1.1"
+    assert service.summary() == "Доступна версия 22.1.1 · текущая 22.0.0"
     assert "api.github.com" in str(captured["url"])
 
 
@@ -53,7 +53,7 @@ def test_update_service_reports_error_honestly(monkeypatch) -> None:
         raise RuntimeError("network down")
 
     monkeypatch.setattr("core.updates.update_service.httpx.get", fake_get)
-    service = UpdateService(settings=None, current_version="22.1.0")
+    service = UpdateService(settings=None, current_version="22.1.1")
 
     result = service.check_now()
 

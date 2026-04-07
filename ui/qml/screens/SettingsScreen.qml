@@ -84,7 +84,7 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Подключения"
                 description: "Groq и Telegram для чата, уведомлений и первого запуска."
-                expanded: true
+                expanded: false
 
                 SettingRow {
                     Layout.fillWidth: true
@@ -229,7 +229,7 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Telegram"
                 description: "Статус подключения, последняя реакция и тестовый пуш."
-                expanded: true
+                expanded: false
 
                 SettingRow {
                     Layout.fillWidth: true
@@ -285,7 +285,7 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "ИИ"
                 description: "Режим, провайдер и модель — без лишнего зоопарка."
-                expanded: true
+                expanded: false
 
                 SettingRow {
                     Layout.fillWidth: true
@@ -345,7 +345,7 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Голос и система"
                 description: "Голос JARVIS, автозапуск, старт свернутым и трей."
-                expanded: true
+                expanded: false
 
                 SettingRow {
                     Layout.fillWidth: true

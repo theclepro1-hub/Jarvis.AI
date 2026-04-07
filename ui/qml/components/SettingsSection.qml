@@ -7,7 +7,7 @@ Rectangle {
 
     property string title: ""
     property string description: ""
-    property bool expanded: true
+    property bool expanded: false
     default property alias content: contentColumn.data
 
     signal toggled(bool expanded)

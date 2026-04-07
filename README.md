@@ -54,12 +54,13 @@ powershell -ExecutionPolicy Bypass -File C:\JarvisAi_Unity\build\build_release.p
 
 The release build produces:
 
-- `JarvisAi_Unity_22.1.0_windows_installer.exe`
-- `JarvisAi_Unity_22.1.0_windows_onefile.exe`
-- `JarvisAi_Unity_22.1.0_windows_portable.zip`
+- `JarvisAi_Unity_22.1.1_windows_installer.exe`
+- `JarvisAi_Unity_22.1.1_windows_onefile.exe`
+- `JarvisAi_Unity_22.1.1_windows_portable.zip`
 
 ## Release Notes
 
+- [Release 22.1.1](docs/RELEASE_22.1.1.md)
 - [Release 22.1.0](docs/RELEASE_22.1.0.md)
 - [Release 22.0.0](docs/RELEASE_22.0.0.md)
 - [Release Readiness](docs/RELEASE_READINESS.md)

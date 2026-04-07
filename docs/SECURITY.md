@@ -7,7 +7,7 @@
 - Groq API requests are sent only after the user has filled registration data or explicitly uses AI/voice capture.
 - Windows startup is controlled through the current user `Run` registry key.
 
-## What is acceptable for `22.1.0`
+## What is acceptable for `22.1.1`
 
 - Secrets are not committed to git.
 - Registration secrets are protected at rest with Windows DPAPI in the Windows build.

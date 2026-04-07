@@ -24,7 +24,7 @@
 - no temp data left tracked in git
 - no raw driver dump in microphone picker
 
-## Known risks accepted for `22.1.0`
+## Known risks accepted for `22.1.1`
 
 - wake model is bundled at build time; if the download fails, build must fail before release
 - PySide6 packaging is large because the UI runtime is bundled conservatively
