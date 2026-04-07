@@ -14,12 +14,12 @@ Rectangle {
     border.color: Theme.Colors.borderSoft
     border.width: 1
 
-    implicitHeight: wrapper.implicitHeight + 28
+    implicitHeight: Math.max(78, wrapper.implicitHeight + 26)
 
     ColumnLayout {
         id: wrapper
         anchors.fill: parent
-        anchors.margins: 14
+        anchors.margins: 16
         spacing: 10
 
         Text {

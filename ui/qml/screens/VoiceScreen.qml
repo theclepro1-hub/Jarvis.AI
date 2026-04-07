@@ -13,6 +13,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
             width: voiceScroll.availableWidth
@@ -21,7 +22,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Режим голоса"
-                description: "Приватный, баланс или качество. Маршрут меняется, но интерфейс не раздувается."
+                description: "Приватный, баланс или качество. Интерфейс не раздувается, меняется только маршрут распознавания."
 
                 Item { Layout.fillWidth: true }
 
@@ -64,7 +65,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Микрофон"
-                description: "Always-on wake и ручной микрофон используют одно устройство. Выбор сохраняется сразу."
+                description: "Один и тот же выбор используется для слова активации и ручной записи."
 
                 Item { Layout.fillWidth: true }
 
@@ -81,7 +82,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Слово активации"
-                description: "Wake word остаётся локальным и не превращает приложение в лабораторию."
+                description: "Слово активации остаётся локальным и не превращает приложение в лабораторию."
 
                 Item { Layout.fillWidth: true }
 
@@ -95,6 +96,7 @@ Rectangle {
                 PrimaryButton {
                     objectName: "wakeWordTestButton"
                     text: "Проверить"
+                    compact: true
                     onClicked: voiceBridge.runWakeWordTest()
                 }
             }
@@ -109,7 +111,7 @@ Rectangle {
                     spacing: 6
 
                     Text {
-                        text: "Wake word: " + voiceBridge.runtimeStatus["wakeWord"]
+                        text: "Слово активации: " + voiceBridge.runtimeStatus["wakeWord"]
                         color: Theme.Colors.text
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
@@ -127,7 +129,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "AI: " + voiceBridge.runtimeStatus["ai"]
+                        text: "ИИ: " + voiceBridge.runtimeStatus["ai"]
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small

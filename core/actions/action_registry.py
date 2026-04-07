@@ -47,7 +47,7 @@ class ActionRegistry:
             {
                 "id": "music",
                 "title": "Музыка",
-                "aliases": ["музыка", "music", "плеер"],
+                "aliases": ["музыка", "музыку", "music", "плеер"],
                 "kind": "uri",
                 "target": "mswindowsmusic:",
             },

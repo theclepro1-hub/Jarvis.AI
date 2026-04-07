@@ -13,6 +13,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
             width: settingsScroll.availableWidth
@@ -21,17 +22,17 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Внешний вид"
-                description: "Новый JARVIS должен ощущаться как единое приложение, а не как набор чужих панелей."
+                description: "JARVIS должен ощущаться как единое приложение, а не как набор чужих панелей."
 
                 Item { Layout.fillWidth: true }
 
                 AppComboBox {
                     id: themeCombo
                     objectName: "themeCombo"
-                    Layout.preferredWidth: 220
+                    Layout.preferredWidth: 280
                     model: [
-                        { key: "midnight", title: "Midnight Glow" },
-                        { key: "steel", title: "Steel Orbit" }
+                        { key: "midnight", title: "Полуночное свечение" },
+                        { key: "steel", title: "Стальной орбит" }
                     ]
                     textRole: "title"
                     currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.themeMode))
@@ -42,7 +43,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Автозапуск"
-                description: "Новый продукт должен стартовать вместе с Windows без двойного запуска и старых хвостов."
+                description: "Приложение должно стартовать вместе с Windows без двойных запусков и старых хвостов."
 
                 Item { Layout.fillWidth: true }
 
@@ -56,8 +57,8 @@ Rectangle {
 
             SettingRow {
                 Layout.fillWidth: true
-                title: "AI-модель"
-                description: "Быстрый контур идёт через OpenAI-compatible Groq. Локальный advanced-mode можно усилять потом, не раздувая shell."
+                title: "Модель ИИ"
+                description: "Быстрый контур идёт через Groq. Локальный расширенный режим можно усиливать потом, не раздувая интерфейс."
 
                 AppTextField {
                     id: aiModelField
@@ -78,7 +79,7 @@ Rectangle {
 
                 StatusPill {
                     objectName: "updatePill"
-                    text: "Стабильный канал · 22.0.0"
+                    text: "Стабильный канал • 22.0.0"
                 }
             }
 

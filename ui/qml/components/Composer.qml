@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme" as Theme
 
@@ -16,23 +15,24 @@ Rectangle {
     border.color: Theme.Colors.border
     border.width: 1
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
+        anchors.margins: 10
+        spacing: 6
 
-        ColumnLayout {
+        RowLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 10
 
             AppTextArea {
                 id: input
                 objectName: "composerInput"
                 Layout.fillWidth: true
-                Layout.preferredHeight: 96
-                placeholderText: "Напишите команду, просьбу или мысль. Например: открой YouTube и запусти музыку."
+                Layout.preferredHeight: 56
+                placeholderText: "Напишите команду или вопрос. Например: открой YouTube и запусти музыку."
                 Keys.onPressed: function(event) {
-                    if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Return) {
+                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                            && !(event.modifiers & Qt.ShiftModifier)) {
                         root.submit(input.text)
                         input.clear()
                         event.accepted = true
@@ -40,48 +40,37 @@ Rectangle {
                 }
             }
 
-            Text {
-                Layout.fillWidth: true
-                text: root.recording ? (root.recordingHint.length ? root.recordingHint : "Идёт запись...")
-                                     : (root.recordingHint.length ? root.recordingHint : "Ctrl+Enter отправляет текст сразу.")
-                color: root.recording ? Theme.Colors.accent : Theme.Colors.textSoft
-                font.family: Theme.Typography.bodyFamily
-                font.pixelSize: Theme.Typography.micro
-            }
-        }
-
-        ColumnLayout {
-            spacing: 10
-
-            Button {
+            UiButton {
                 objectName: "composerSendButton"
-                text: "↗"
+                text: ""
+                iconOnly: true
+                kind: "primary"
+                iconName: "send"
+                Layout.preferredWidth: 48
+                Layout.preferredHeight: 48
                 onClicked: {
                     root.submit(input.text)
                     input.clear()
                 }
-                contentItem: Text {
-                    text: parent.text
-                    color: Theme.Colors.text
-                    font.pixelSize: 20
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    radius: 18
-                    color: Theme.Colors.panel
-                    border.color: Theme.Colors.border
-                    border.width: 1
-                }
-                implicitWidth: 54
-                implicitHeight: 54
             }
 
             MicButton {
                 objectName: "composerMicButton"
                 active: root.recording
+                Layout.preferredWidth: 48
+                Layout.preferredHeight: 48
                 onClicked: root.micPressed()
             }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            text: root.recording ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
+                                 : (root.recordingHint.length ? root.recordingHint : "Enter отправляет, Shift+Enter переносит строку.")
+            color: root.recording ? Theme.Colors.accent : Theme.Colors.textSoft
+            font.family: Theme.Typography.bodyFamily
+            font.pixelSize: Theme.Typography.micro
+            elide: Text.ElideRight
         }
     }
 }

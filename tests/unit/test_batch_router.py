@@ -40,3 +40,11 @@ def test_expand_open_command_with_multiple_targets():
         "открой steam",
         "открой discord",
     ]
+
+
+def test_expand_open_command_keeps_verb_for_inflected_music_target():
+    router = make_router()
+    assert router.split("открой ютуб и музыку") == [
+        "открой ютуб",
+        "открой музыку",
+    ]

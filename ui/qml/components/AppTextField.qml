@@ -12,6 +12,8 @@ TextField {
     font.pixelSize: Theme.Typography.body
     padding: 14
     selectByMouse: true
+    selectionColor: Qt.rgba(0.21, 0.85, 1.0, 0.28)
+    selectedTextColor: Theme.Colors.text
 
     background: Rectangle {
         radius: Theme.Spacing.radiusSmall

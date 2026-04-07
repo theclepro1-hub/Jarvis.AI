@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+import sys
 
 from core.settings.settings_service import SettingsService
 from core.voice.voice_service import VoiceService
@@ -49,3 +52,41 @@ def test_wake_service_ignores_non_matching_payload():
 
     payload = json.dumps({"text": "просто разговор"}, ensure_ascii=False)
     assert wake._contains_wake(payload) is False  # noqa: SLF001
+
+
+def test_wake_service_reports_missing_model_without_network(tmp_path, monkeypatch):
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    result = wake.start(lambda _pre_roll: None)
+
+    assert wake.phase == "error"
+    assert "wake-модель" in result
+    assert "wake-модель" in wake.status()
+
+
+def test_wake_service_prefers_bundled_model_path(tmp_path, monkeypatch):
+    bundled_model = tmp_path / "assets" / "models" / "vosk-model-small-ru-0.22"
+    bundled_model.mkdir(parents=True)
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    assert wake.model_path == bundled_model
+
+
+def test_wake_service_reports_transcribing_status_truthfully():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    wake._set_phase("transcribing", "Распознаю команду", ready=False)  # noqa: SLF001
+
+    assert wake.phase == "transcribing"
+    assert wake.status() == "Распознаю команду"
+    assert voice.runtime_status()["wakeWord"] == "Распознаю команду"

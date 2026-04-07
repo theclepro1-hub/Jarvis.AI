@@ -7,4 +7,5 @@ class UpdateService:
         self.channel = "stable"
 
     def summary(self) -> str:
-        return f"Версия {self.current_version} · канал {self.channel}"
+        channel = "стабильный" if self.channel == "stable" else self.channel
+        return f"Версия {self.current_version} · канал {channel}"

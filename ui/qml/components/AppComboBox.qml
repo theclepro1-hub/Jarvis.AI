@@ -9,6 +9,7 @@ ComboBox {
     implicitWidth: 220
     leftPadding: 14
     rightPadding: 38
+    hoverEnabled: true
     font.family: Theme.Typography.bodyFamily
     font.pixelSize: Theme.Typography.body
 
@@ -22,11 +23,11 @@ ComboBox {
         elide: Text.ElideRight
     }
 
-    indicator: Text {
-        text: "▾"
-        color: Theme.Colors.textSoft
-        font.family: Theme.Typography.displayFamily
-        font.pixelSize: 14
+    indicator: JarvisIcon {
+        name: "chevron"
+        iconColor: Theme.Colors.textSoft
+        width: 16
+        height: 16
         anchors.right: parent.right
         anchors.rightMargin: 14
         anchors.verticalCenter: parent.verticalCenter
@@ -82,6 +83,8 @@ ComboBox {
         y: control.height + 8
         width: control.width
         padding: 6
+        implicitHeight: Math.min(contentItem.implicitHeight + topPadding + bottomPadding, 280)
+        clip: true
 
         background: Rectangle {
             radius: Theme.Spacing.radiusSmall
@@ -92,11 +95,12 @@ ComboBox {
 
         contentItem: ListView {
             implicitHeight: contentHeight
+            height: Math.min(contentHeight, 280)
             clip: true
             model: control.delegateModel
             currentIndex: control.highlightedIndex
             boundsBehavior: Flickable.StopAtBounds
-            ScrollIndicator.vertical: ScrollIndicator {}
+            ScrollBar.vertical: AppScrollBar {}
         }
     }
 }

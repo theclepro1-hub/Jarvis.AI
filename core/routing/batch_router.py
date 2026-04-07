@@ -52,5 +52,5 @@ class BatchRouter:
 
     def _looks_like_short_action(self, text: str) -> bool:
         return text.startswith(SHORT_ACTION_PREFIXES) or any(
-            token in text for token in ("громче", "тише", "mute", "музыку", "музыка")
+            token in text for token in ("громче", "тише", "mute")
         )

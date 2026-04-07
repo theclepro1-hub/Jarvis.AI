@@ -41,8 +41,15 @@ C:\JarvisAi_Unity\.venv\Scripts\pytest.exe -q
 powershell -ExecutionPolicy Bypass -File C:\JarvisAi_Unity\build\build_release.ps1
 ```
 
+## Release Notes
+
+- [Release 22.0.0](docs/RELEASE_22.0.0.md)
+- [Release Readiness](docs/RELEASE_READINESS.md)
+- [Security Notes](docs/SECURITY.md)
+
 ## Voice runtime
 
 - manual mic capture uses `sounddevice`
 - transcription uses Groq Whisper STT after capture
-- always-on local wake word uses Vosk and downloads the Russian small model on first start
+- always-on local wake word uses a bundled Vosk Russian model and reports readiness only after the local model and microphone stream are actually available
+- registration secrets are protected with Windows DPAPI in the Windows build

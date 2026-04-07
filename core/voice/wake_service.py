@@ -5,16 +5,14 @@ import os
 import queue
 import threading
 import time
-import zipfile
 from collections import deque
 from pathlib import Path
-from urllib.request import urlopen
+import sys
 
 import sounddevice as sd
 from vosk import KaldiRecognizer, Model, SetLogLevel
 
 
-MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
 MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
 
 
@@ -31,12 +29,16 @@ class WakeService:
         else:
             self.base_dir = Path.home() / "AppData" / "Roaming" / "JarvisAi_Unity" / "models"
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.model_path = self.base_dir / MODEL_DIR_NAME
+        self.user_model_path = self.base_dir / MODEL_DIR_NAME
+        self.bundled_model_path = self._find_bundled_model_path()
+        self.model_path = self.bundled_model_path if self.bundled_model_path.exists() else self.user_model_path
         self._callback = None
         self._status_callback = None
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._running = False
+        self._phase = "idle"
+        self._detail = "Локальный wake runtime не запущен"
         self._buffer = deque(maxlen=18)
         self._last_detected_at = 0.0
         SetLogLevel(-1)
@@ -45,41 +47,44 @@ class WakeService:
     def is_running(self) -> bool:
         return self._running
 
+    @property
+    def phase(self) -> str:
+        return self._phase
+
     def start(self, on_detected, on_status=None) -> str:
         self._callback = on_detected
         self._status_callback = on_status
         if self._thread and self._thread.is_alive():
-            return "Local wake runtime уже работает."
+            return self.status()
+        if not self.model_path.exists():
+            self._set_phase("error", "Локальная wake-модель не загружена", ready=False)
+            return self.status()
+
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        return "Local wake runtime запускается."
+        return "Готовлю локальный wake runtime"
 
     def stop(self) -> None:
         self._stop_event.set()
         self._running = False
+        if self._phase != "error":
+            self._set_phase("idle", "Локальный wake runtime не запущен", ready=False)
         if self._thread and self._thread.is_alive() and threading.current_thread() is not self._thread:
             self._thread.join(timeout=2.0)
 
     def status(self) -> str:
-        if self._running:
-            return "локально активно"
-        if self.model_path.exists():
-            return "локально готово"
-        return "локальная модель не скачана"
+        return self._detail
+
+    def model_status(self) -> str:
+        return "загружена" if self.model_path.exists() else "не загружена"
 
     def _run(self) -> None:
         try:
-            self.voice.set_wake_runtime_status("локальная модель подготавливается", False)
-            self._emit_status()
-            if not self.model_path.exists():
-                self.voice.set_wake_runtime_status("скачиваю локальную модель", False)
-                self._emit_status()
-            self._ensure_model()
-            if self._stop_event.is_set():
-                return
+            self._set_phase("preparing", "Готовлю локальный wake runtime", ready=False)
             model = Model(str(self.model_path))
             recognizer = self._new_recognizer(model)
+
             audio_queue: queue.Queue[bytes] = queue.Queue()
 
             def callback(indata, frames, time_info, status):  # noqa: ARG001
@@ -96,13 +101,14 @@ class WakeService:
                 callback=callback,
             ):
                 self._running = True
-                self.voice.set_wake_runtime_status("локально активно", True)
-                self._emit_status()
+                self._set_phase("waiting", "Жду «Джарвис»", ready=True)
+
                 while not self._stop_event.is_set():
                     try:
                         data = audio_queue.get(timeout=0.3)
                     except queue.Empty:
                         continue
+
                     self._buffer.append(data)
                     if recognizer.AcceptWaveform(data):
                         detected = self._contains_wake(recognizer.Result())
@@ -113,31 +119,28 @@ class WakeService:
                         self._last_detected_at = time.time()
                         pre_roll = b"".join(self._buffer)
                         self._buffer.clear()
+                        self._set_phase("transcribing", "Распознаю команду", ready=False)
                         self._running = False
                         if self._callback is not None:
                             self._callback(pre_roll)
                         return
-        except Exception:
-            self.voice.set_wake_runtime_status("local wake runtime недоступен", False)
-            self._emit_status()
+        except Exception as exc:
+            self._set_phase("error", f"Ошибка wake runtime: {exc}", ready=False)
         finally:
             self._running = False
+            if self._phase not in {"error", "transcribing"} and not self._stop_event.is_set():
+                self._set_phase("idle", "Локальный wake runtime не запущен", ready=False)
 
-    def _ensure_model(self) -> None:
-        if self.model_path.exists():
-            return
-
-        archive_path = self.base_dir / f"{MODEL_DIR_NAME}.zip"
-        with urlopen(MODEL_URL, timeout=90) as response, archive_path.open("wb") as out:
-            while True:
-                chunk = response.read(1024 * 128)
-                if not chunk:
-                    break
-                out.write(chunk)
-
-        with zipfile.ZipFile(archive_path, "r") as zip_handle:
-            zip_handle.extractall(self.base_dir)
-        archive_path.unlink(missing_ok=True)
+    def _find_bundled_model_path(self) -> Path:
+        candidates = []
+        frozen_root = getattr(sys, "_MEIPASS", None)
+        if frozen_root:
+            candidates.append(Path(frozen_root) / "assets" / "models" / MODEL_DIR_NAME)
+        candidates.append(Path(__file__).resolve().parents[2] / "assets" / "models" / MODEL_DIR_NAME)
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        return candidates[-1]
 
     def _new_recognizer(self, model: Model) -> KaldiRecognizer:
         return KaldiRecognizer(model, self.SAMPLE_RATE, '["джарвис", "[unk]"]')
@@ -148,8 +151,14 @@ class WakeService:
         except json.JSONDecodeError:
             return False
         key = "partial" if partial else "text"
-        text = str(data.get(key, "")).lower()
-        return "джарвис" in text
+        text = str(data.get(key, "")).casefold()
+        return "джарвис" in text or "jarvis" in text
+
+    def _set_phase(self, phase: str, detail: str, ready: bool) -> None:
+        self._phase = phase
+        self._detail = detail
+        self.voice.set_wake_runtime_status(phase, ready=ready, detail=detail)
+        self._emit_status()
 
     def _emit_status(self) -> None:
         if self._status_callback is not None:

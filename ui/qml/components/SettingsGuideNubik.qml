@@ -47,18 +47,19 @@ Rectangle {
                     { title: "Регистрация", action: "registration" }
                 ]
 
-                SecondaryButton {
+                UiButton {
                     required property var modelData
                     objectName: "nubik_" + modelData.action
                     text: modelData.title
                     Layout.fillWidth: true
                     Layout.preferredWidth: 1
+                    compact: true
+                    kind: "secondary"
                     onClicked: {
                         if (modelData.action === "voice") root.openVoice()
                         if (modelData.action === "apps") root.openApps()
                         if (modelData.action === "registration") root.openRegistration()
                     }
-                    implicitHeight: 44
                 }
             }
         }

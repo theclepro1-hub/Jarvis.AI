@@ -13,6 +13,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
 
         ColumnLayout {
             width: appsScroll.availableWidth
@@ -55,7 +56,7 @@ Rectangle {
                             id: targetField
                             objectName: "customAppTargetField"
                             Layout.fillWidth: true
-                            placeholderText: "URL, путь или URI"
+                            placeholderText: "Ссылка, путь или системная команда"
                         }
                     }
 
@@ -67,7 +68,7 @@ Rectangle {
                             id: aliasesField
                             objectName: "customAppAliasesField"
                             Layout.fillWidth: true
-                            placeholderText: "Алиасы через запятую"
+                            placeholderText: "Другие названия через запятую"
                         }
 
                         PrimaryButton {
@@ -125,7 +126,7 @@ Rectangle {
                             }
 
                             Text {
-                                text: "Алиасы: " + appCard.modelData.aliases
+                                text: "Другие названия: " + appCard.modelData.aliases
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
                                 font.pixelSize: Theme.Typography.small

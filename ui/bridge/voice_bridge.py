@@ -76,11 +76,13 @@ class VoiceBridge(QObject):
 
     @Property(str, notify=selectedMicrophoneChanged)
     def selectedMicrophone(self) -> str:
-        return self.services.settings.get("microphone_name", "Системный по умолчанию")
+        selected = self.services.settings.get("microphone_name", "Системный по умолчанию")
+        return self.services.voice.normalize_microphone_selection(selected)
 
     @selectedMicrophone.setter
     def selectedMicrophone(self, value: str) -> None:
-        self.services.settings.set("microphone_name", value)
+        normalized = self.services.voice.normalize_microphone_selection(value)
+        self.services.settings.set("microphone_name", normalized)
         self.selectedMicrophoneChanged.emit()
         self.summaryChanged.emit()
         self.statusChanged.emit()
@@ -94,7 +96,10 @@ class VoiceBridge(QObject):
 
     @Property("QVariantMap", notify=statusChanged)
     def runtimeStatus(self) -> dict[str, str]:
-        return self.services.voice.runtime_status()
+        status = self.services.voice.runtime_status()
+        status["wakeWord"] = self.services.wake.status()
+        status["model"] = self.services.wake.model_status()
+        return status
 
     @Property(str, notify=testResultChanged)
     def testResult(self) -> str:
@@ -133,18 +138,21 @@ class VoiceBridge(QObject):
     def toggleManualCapture(self) -> None:
         if not self.services.voice.is_recording:
             self.services.wake.stop()
-            self._recording_hint = self.services.voice.start_manual_capture()
+            self._recording_hint = self.services.voice.start_manual_capture(
+                on_text=self.transcribedTextReady.emit,
+                on_note=self.voiceNoteReady.emit,
+                on_finish=self.captureFinished.emit,
+            )
             self.recordingHintChanged.emit()
             self.recordingChanged.emit()
             self.state.status = "Слушаю"
             return
 
-        self._recording_hint = "Распознаю запись..."
+        self._recording_hint = "Останавливаю запись..."
         self.recordingHintChanged.emit()
         self.recordingChanged.emit()
-        self.state.status = "Распознаю"
-        thread = threading.Thread(target=self._finish_recording, daemon=True)
-        thread.start()
+        self.state.status = "Останавливаю"
+        self.services.voice.stop_manual_capture()
 
     def startWakeRuntime(self) -> None:
         if not self.services.settings.get("wake_word_enabled", True):
@@ -158,16 +166,6 @@ class VoiceBridge(QObject):
     @Slot()
     def shutdown(self) -> None:
         self.services.wake.stop()
-
-    def _finish_recording(self) -> None:
-        text = self.services.voice.stop_manual_capture()
-        if text:
-            self.transcribedTextReady.emit(text)
-        else:
-            self.voiceNoteReady.emit(
-                "Не удалось получить текст из записи. Проверьте микрофон или Groq API Key."
-            )
-        self.captureFinished.emit()
 
     def _deliver_transcribed_text(self, text: str) -> None:
         if self._chat_bridge is not None:
@@ -197,6 +195,7 @@ class VoiceBridge(QObject):
         self._recording_hint = "Слово активации найдено. Подхватываю команду..."
         self.recordingHintChanged.emit()
         self.state.status = "Слушаю"
+        self.services.voice.set_wake_runtime_status("transcribing", ready=False, detail="Распознаю команду")
         thread = threading.Thread(target=self._finish_after_wake, args=(pre_roll,), daemon=True)
         thread.start()
 

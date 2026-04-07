@@ -120,14 +120,14 @@ Rectangle {
                     }
                 }
 
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: AppScrollBar {}
             }
         }
 
         Composer {
             objectName: "chatComposer"
             Layout.fillWidth: true
-            Layout.preferredHeight: 122
+            Layout.preferredHeight: 96
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint
             onSubmit: (text) => chatBridge.sendMessage(text)

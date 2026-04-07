@@ -52,7 +52,7 @@ class AppBridge(QObject):
 
     @Slot(str)
     def navigate(self, screen: str) -> None:
-        if self.state.registrationRequired and screen != "registration":
+        if self.state.registrationRequired and screen not in {"registration", "settings"}:
             return
         self.state.currentScreen = screen
 

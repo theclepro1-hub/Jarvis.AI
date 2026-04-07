@@ -27,6 +27,24 @@ def _wait_for(app: QGuiApplication, predicate, timeout_ms: int = 1500) -> None:
     raise AssertionError("Timed out waiting for UI condition")
 
 
+def _wait_for_object(app: QGuiApplication, root: QObject, name: str, timeout_ms: int = 3000) -> QObject:
+    found: dict[str, QObject | None] = {"obj": None}
+
+    def predicate() -> bool:
+        obj = root.findChild(QObject, name)
+        if obj is None:
+            for item in _walk_items(root):
+                if item.objectName() == name:
+                    obj = item
+                    break
+        found["obj"] = obj
+        return obj is not None
+
+    _wait_for(app, predicate, timeout_ms)
+    assert found["obj"] is not None
+    return found["obj"]
+
+
 def _find(root: QObject, name: str) -> QObject:
     obj = root.findChild(QObject, name)
     if obj is not None:
@@ -65,6 +83,29 @@ def _walk_items(root: QObject) -> list[QQuickItem]:
 
     visit(root)
     return items
+
+
+def _walk_qobjects(root: QObject) -> list[QObject]:
+    objects: list[QObject] = []
+
+    def visit(node: QObject) -> None:
+        objects.append(node)
+        for child in node.children():
+            visit(child)
+
+    visit(root)
+    return objects
+
+
+def _find_popup(root: QObject) -> QObject:
+    for obj in _walk_qobjects(root):
+        try:
+            class_name = obj.metaObject().className()
+        except RuntimeError:
+            continue
+        if "Popup" in class_name:
+            return obj
+    raise AssertionError("Popup object not found")
 
 
 def _click(app: QGuiApplication, window, obj: QObject) -> None:
@@ -110,6 +151,8 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     window.setWidth(1260)
     window.setHeight(720)
     _pump(app, 120)
+    _wait_for_object(app, window, "screenLoader")
+    _wait_for_object(app, window, "registrationSkipButton")
 
     try:
         yield app, runtime, window
@@ -154,6 +197,22 @@ def test_registration_save_path_is_clickable(ui_runtime) -> None:
     assert runtime.services.registration.load().is_complete is True
 
 
+def test_registration_continue_requires_all_fields_and_shows_feedback(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSaveButton"))
+    assert runtime.state.currentScreen == "registration"
+    assert "Нужны все три поля" in _find(window, "registrationFeedback").property("text")
+
+    _find(window, "groqField").setProperty("text", "gsk_test_key")
+    _find(window, "userIdField").setProperty("text", "123456789")
+    _find(window, "botTokenField").setProperty("text", "123:abc")
+    _click(app, window, _find(window, "registrationSaveButton"))
+
+    assert runtime.state.currentScreen == "chat"
+    assert "Подключение сохранено" in runtime.registration_bridge.feedback
+
+
 def test_chat_welcome_message_renders_and_ctrl_v_works(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
@@ -176,6 +235,50 @@ def test_chat_welcome_message_renders_and_ctrl_v_works(ui_runtime) -> None:
     _pump(app, 120)
 
     assert composer.property("text") == "вставка через ctrl v"
+
+
+def test_composer_enter_sends_and_shift_enter_inserts_newline(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+    composer = _find(window, "composerInput")
+    assert isinstance(composer, QQuickItem)
+    composer.forceActiveFocus()
+    _pump(app, 80)
+
+    before = len(runtime.chat_bridge.messages)
+    composer.setProperty("text", "открой YouTube")
+    QTest.keyClick(window, Qt.Key_Return)
+    _wait_for(app, lambda: len(runtime.chat_bridge.messages) > before)
+    assert any(
+        message["role"] == "user" and message["text"] == "открой YouTube"
+        for message in runtime.chat_bridge.messages
+    )
+    assert composer.property("text") == ""
+
+    composer.setProperty("text", "первая строка")
+    before_shift = len(runtime.chat_bridge.messages)
+    QTest.keyClick(window, Qt.Key_Return, Qt.ShiftModifier)
+    _pump(app, 150)
+    assert len(runtime.chat_bridge.messages) == before_shift
+    assert "\n" in composer.property("text")
+
+
+def test_nav_spam_clicks_keep_screen_state_sane(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 150)
+
+    targets = ["navButton_chat", "navButton_voice", "navButton_apps", "sidebarSettingsButton"]
+    for _ in range(5):
+        for name in targets:
+            _click(app, window, _find(window, name))
+            _pump(app, 20)
+
+    assert runtime.state.currentScreen in {"chat", "voice", "apps", "settings"}
 
 
 def test_apps_screen_add_button_and_feedback_work(ui_runtime) -> None:
@@ -202,7 +305,7 @@ def test_settings_nubik_and_voice_controls_are_clickable(ui_runtime) -> None:
     _pump(app, 200)
     _click(app, window, _find(window, "sidebarSettingsButton"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
-    settings_scroll = _find(window, "settingsScroll")
+    settings_scroll = _wait_for_object(app, window, "settingsScroll")
     settings_flickable = settings_scroll.property("contentItem")
     settings_flickable.setProperty("contentY", settings_flickable.property("contentHeight") - settings_flickable.property("height"))
     _pump(app, 120)
@@ -223,8 +326,9 @@ def test_scroll_views_accept_scroll_input(ui_runtime) -> None:
     _click(app, window, _find(window, "registrationSkipButton"))
     _pump(app, 200)
     _click(app, window, _find(window, "navButton_voice"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "voice")
 
-    voice_scroll = _find(window, "voiceScroll")
+    voice_scroll = _wait_for_object(app, window, "voiceScroll")
     flickable = voice_scroll.property("contentItem")
     before = flickable.property("contentY")
 
@@ -232,3 +336,21 @@ def test_scroll_views_accept_scroll_input(ui_runtime) -> None:
 
     after = flickable.property("contentY")
     assert after >= before
+
+
+def test_voice_microphone_combo_popup_is_visible_and_scrollable(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 200)
+    _click(app, window, _find(window, "navButton_voice"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "voice")
+
+    combo = _wait_for_object(app, window, "microphoneCombo")
+    _click(app, window, combo)
+    _pump(app, 200)
+    popup = _find_popup(combo)
+    assert popup.property("visible") is True
+    content_item = popup.property("contentItem")
+    assert content_item is not None
+    assert content_item.property("contentHeight") >= content_item.property("height")

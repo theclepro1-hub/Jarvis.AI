@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme" as Theme
 
@@ -14,26 +13,14 @@ RowLayout {
     Repeater {
         model: root.model
 
-        Button {
+        UiButton {
             required property var modelData
             objectName: "quickAction_" + modelData.id
             text: modelData.title
+            kind: "secondary"
+            compact: true
+            Layout.preferredWidth: Math.max(90, implicitWidth)
             onClicked: root.trigger(modelData.id)
-            contentItem: Text {
-                text: parent.text
-                color: Theme.Colors.text
-                font.family: Theme.Typography.bodyFamily
-                font.pixelSize: Theme.Typography.small
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                radius: Theme.Spacing.radiusSmall
-                color: Qt.rgba(0.41, 0.94, 0.82, 0.06)
-                border.color: Theme.Colors.border
-                border.width: 1
-            }
-            padding: 12
         }
     }
 }

@@ -20,7 +20,7 @@ ApplicationWindow {
         anchors.fill: parent
         gradient: Gradient {
             GradientStop { position: 0.0; color: "#07101a" }
-            GradientStop { position: 0.5; color: "#050811" }
+            GradientStop { position: 0.55; color: "#050811" }
             GradientStop { position: 1.0; color: "#02040a" }
         }
     }
@@ -30,31 +30,13 @@ ApplicationWindow {
         onActivated: palette.open()
     }
 
-    Rectangle {
-        width: 360
-        height: 360
-        radius: 180
-        x: width - 420
-        y: -120
-        color: Qt.rgba(0.21, 0.85, 1.0, 0.08)
-    }
-
-    Rectangle {
-        width: 420
-        height: 420
-        radius: 210
-        x: -120
-        y: height - 320
-        color: Qt.rgba(0.41, 0.94, 0.82, 0.06)
-    }
-
     RowLayout {
         anchors.fill: parent
         anchors.margins: 18
         spacing: 18
 
         Sidebar {
-            Layout.preferredWidth: 250
+            Layout.preferredWidth: 280
             Layout.fillHeight: true
             navItems: appBridge.navigationItems
             currentScreen: appBridge.currentScreen
@@ -70,7 +52,7 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 110
+                Layout.preferredHeight: 92
                 color: "#09111d"
                 radius: 28
                 border.color: Theme.Colors.borderSoft
@@ -78,12 +60,14 @@ ApplicationWindow {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 18
+                    anchors.margins: 16
+                    spacing: 14
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: 6
+                        Layout.fillHeight: true
+                        Layout.minimumWidth: 0
+                        spacing: 4
 
                         Text {
                             text: appBridge.currentScreen === "registration" ? "Подключение" :
@@ -92,12 +76,20 @@ ApplicationWindow {
                                   appBridge.currentScreen === "settings" ? "Настройки" : "Диалог"
                             color: Theme.Colors.text
                             font.family: Theme.Typography.displayFamily
-                            font.pixelSize: 20
+                            font.pixelSize: 22
                             font.bold: true
                         }
 
                         Text {
-                            text: "Новый контур JARVIS: тихий shell, быстрые действия, компактный статус и один живой центр управления."
+                            text: appBridge.currentScreen === "registration"
+                                  ? "Первый запуск без лишних окон: заполните ключи или настройте позже."
+                                  : appBridge.currentScreen === "voice"
+                                    ? "Настройте микрофон, слово активации и способ распознавания."
+                                  : appBridge.currentScreen === "apps"
+                                    ? "Быстрые запускатели, алиасы и пользовательские действия."
+                                  : appBridge.currentScreen === "settings"
+                                    ? "Короткие настройки без технической свалки."
+                                  : "Диалог, быстрые действия и короткий статус без лишних панелей."
                             color: Theme.Colors.textSoft
                             font.family: Theme.Typography.bodyFamily
                             font.pixelSize: Theme.Typography.small
@@ -107,40 +99,16 @@ ApplicationWindow {
                     }
 
                     ColumnLayout {
-                        spacing: 8
+                        Layout.alignment: Qt.AlignTop | Qt.AlignRight
+                        Layout.preferredWidth: 120
+                        Layout.minimumWidth: 0
+                        spacing: 6
 
                         StatusPill {
-                            text: appBridge.assistantStatus
-                        }
-
-                        Rectangle {
-                            Layout.preferredWidth: 260
-                            Layout.preferredHeight: 56
-                            radius: 18
-                            color: Theme.Colors.cardAlt
-                            border.color: Theme.Colors.border
-                            border.width: 1
-
-                            Column {
-                                anchors.left: parent.left
-                                anchors.leftMargin: 14
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 4
-
-                                Text {
-                                    text: "Wake word: " + voiceBridge.runtimeStatus["wakeWord"]
-                                    color: Theme.Colors.text
-                                    font.pixelSize: Theme.Typography.small
-                                    font.family: Theme.Typography.bodyFamily
-                                }
-
-                                Text {
-                                    text: "Команда: " + voiceBridge.runtimeStatus["command"]
-                                    color: Theme.Colors.textSoft
-                                    font.pixelSize: Theme.Typography.micro
-                                    font.family: Theme.Typography.bodyFamily
-                                }
-                            }
+                            Layout.alignment: Qt.AlignRight
+                            text: appBridge.currentScreen === "registration"
+                                  ? "Подключение"
+                                  : appBridge.assistantStatus
                         }
                     }
                 }

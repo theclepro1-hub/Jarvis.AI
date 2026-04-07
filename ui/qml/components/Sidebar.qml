@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme" as Theme
 
@@ -17,6 +16,7 @@ Rectangle {
     border.color: Theme.Colors.borderSoft
     border.width: 1
     radius: 30
+    clip: true
 
     ColumnLayout {
         anchors.fill: parent
@@ -33,13 +33,31 @@ Rectangle {
                 font.family: Theme.Typography.displayFamily
                 font.pixelSize: 28
                 font.bold: true
+                Layout.fillWidth: true
+                elide: Text.ElideRight
             }
 
-            Text {
-                text: "v" + appBridge.version + " • рабочее пространство Unity"
-                color: Theme.Colors.textSoft
-                font.family: Theme.Typography.bodyFamily
-                font.pixelSize: Theme.Typography.small
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+
+                Text {
+                    text: "v" + appBridge.version
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.small
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    text: "рабочее пространство Unity"
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.micro
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
             }
         }
 
@@ -52,56 +70,28 @@ Rectangle {
         Repeater {
             model: root.navItems
 
-            Button {
+            UiButton {
                 required property var modelData
                 objectName: "navButton_" + modelData.id
                 Layout.fillWidth: true
-                implicitHeight: 52
                 text: modelData.title
+                compact: true
+                selected: root.currentScreen === modelData.id
                 enabled: !root.registrationRequired
                 onClicked: root.navigate(modelData.id)
-                contentItem: Text {
-                    text: parent.text
-                    color: root.currentScreen === modelData.id ? "#061016" : Theme.Colors.text
-                    font.family: Theme.Typography.bodyFamily
-                    font.pixelSize: Theme.Typography.body
-                    font.bold: root.currentScreen === modelData.id
-                    leftPadding: 12
-                    verticalAlignment: Text.AlignVCenter
-                }
-                background: Rectangle {
-                    radius: Theme.Spacing.radiusSmall
-                    color: root.currentScreen === modelData.id ? Theme.Colors.accent : Theme.Colors.card
-                    border.color: root.currentScreen === modelData.id ? "#a4f8ea" : Theme.Colors.borderSoft
-                    border.width: 1
-                }
-                padding: 14
+                kind: root.currentScreen === modelData.id ? "primary" : "nav"
             }
         }
 
         Item { Layout.fillHeight: true }
 
-        Button {
+        UiButton {
             objectName: "sidebarSettingsButton"
             Layout.fillWidth: true
-            implicitHeight: 52
             text: "Настройки"
+            compact: true
             onClicked: root.openSettings()
-            contentItem: Text {
-                text: parent.text
-                color: Theme.Colors.text
-                font.family: Theme.Typography.bodyFamily
-                font.pixelSize: Theme.Typography.body
-                leftPadding: 12
-                verticalAlignment: Text.AlignVCenter
-            }
-            background: Rectangle {
-                radius: Theme.Spacing.radiusSmall
-                color: Theme.Colors.panelRaised
-                border.color: Theme.Colors.border
-                border.width: 1
-            }
-            padding: 14
+            kind: "secondary"
         }
     }
 }
