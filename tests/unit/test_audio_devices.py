@@ -14,7 +14,7 @@ def test_audio_device_service_groups_physical_devices_and_hides_duplicates():
     backend = FakeAudioBackend(
         devices=[
             {"name": "Microphone (Logitech PRO X Gaming Headset)", "max_input_channels": 2, "hostapi": 0},
-            {"name": "РњРёРєСЂРѕС„РѕРЅ (Logitech PRO X Gaming Headset)", "max_input_channels": 2, "hostapi": 0},
+            {"name": "Микрофон (Logitech PRO X Gaming Headset)", "max_input_channels": 2, "hostapi": 0},
             {"name": "Stereo Mix (Realtek HD Audio Stereo input)", "max_input_channels": 2, "hostapi": 0},
             {"name": "Line In (Realtek HD Audio Line input)", "max_input_channels": 2, "hostapi": 0},
             {"name": "Headphones (G435 Wireless Gaming Headset)", "max_output_channels": 2, "hostapi": 0},

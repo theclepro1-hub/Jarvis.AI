@@ -65,6 +65,32 @@ JUNK_TARGET_TERMS = (
     "redistributable",
     "redistributables",
 )
+NATURAL_ALIAS_TEMPLATES = (
+    (
+        ("counter-strike 2", "counter strike 2", "cs2"),
+        ("кс", "кска", "кс2", "кс 2", "каэс", "контра", "контру", "counter strike", "counter-strike", "cs2", "cs 2"),
+    ),
+    (
+        ("deadlock",),
+        ("дедлок", "дедлока", "делочек", "дедлочек", "дэдлок", "deadlock"),
+    ),
+    (
+        ("fortnite",),
+        ("фортнайт", "фортик", "форт", "fortnite"),
+    ),
+    (
+        ("dead by daylight", "dbd"),
+        ("дбд", "дбдшка", "дбдшку", "дед бай дейлайт", "dead by daylight", "dbd"),
+    ),
+    (
+        ("apple music",),
+        ("эпл музыка", "эпл мьюзик", "эйпл мьюзик", "apple music"),
+    ),
+    (
+        ("soundcloud",),
+        ("саундклауд", "саунд клоуд", "soundcloud"),
+    ),
+)
 
 
 @dataclass(slots=True)
@@ -525,11 +551,21 @@ def _canonical_title(title: str) -> str:
 
 def _default_other_names(title: str, *extra: str) -> list[str]:
     names = [title.strip(), title.casefold().strip(), *extra]
+    names.extend(_natural_aliases_for_title(title))
     if "ё" in title:
         names.append(title.replace("ё", "е").casefold())
     if title.casefold().startswith("the "):
         names.append(title[4:].casefold())
     return _dedupe_strings(names)
+
+
+def _natural_aliases_for_title(title: str) -> list[str]:
+    normalized_title = re.sub(r"[\s_\-]+", " ", title.casefold()).strip()
+    aliases: list[str] = []
+    for title_tokens, natural_aliases in NATURAL_ALIAS_TEMPLATES:
+        if any(token in normalized_title for token in title_tokens):
+            aliases.extend(alias.casefold() for alias in natural_aliases)
+    return aliases
 
 
 def _stable_candidate_id(source: str, title: str, target: str) -> str:

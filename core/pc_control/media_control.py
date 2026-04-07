@@ -6,6 +6,8 @@ from ctypes import wintypes
 
 
 class MediaControl:
+    VOLUME_DELTA = 0.10
+    VOLUME_KEY_FALLBACK_STEPS = 5
     VK_VOLUME_UP = 0xAF
     VK_VOLUME_DOWN = 0xAE
     VK_VOLUME_MUTE = 0xAD
@@ -23,10 +25,16 @@ class MediaControl:
         return self.send_key(self.VK_MEDIA_PREV_TRACK)
 
     def volume_up(self) -> bool:
-        return self._change_endpoint_volume("up") or self.send_key(self.VK_VOLUME_UP)
+        return self._change_endpoint_volume("up") or self._send_repeated_key(
+            self.VK_VOLUME_UP,
+            self.VOLUME_KEY_FALLBACK_STEPS,
+        )
 
     def volume_down(self) -> bool:
-        return self._change_endpoint_volume("down") or self.send_key(self.VK_VOLUME_DOWN)
+        return self._change_endpoint_volume("down") or self._send_repeated_key(
+            self.VK_VOLUME_DOWN,
+            self.VOLUME_KEY_FALLBACK_STEPS,
+        )
 
     def mute(self) -> bool:
         return self._change_endpoint_volume("mute") or self.send_key(self.VK_VOLUME_MUTE)
@@ -38,6 +46,11 @@ class MediaControl:
             return self._send_input(virtual_key)
         except Exception:
             return False
+
+    def _send_repeated_key(self, virtual_key: int, count: int) -> bool:
+        if count <= 0:
+            return False
+        return all(self.send_key(virtual_key) for _ in range(count))
 
     def _send_input(self, virtual_key: int) -> bool:
         INPUT_KEYBOARD = 1
@@ -120,6 +133,7 @@ class _GUID(ctypes.Structure):
 
 
 class _EndpointVolumeController:
+    VOLUME_DELTA = MediaControl.VOLUME_DELTA
     CLSCTX_ALL = 0x17
     E_RENDER = 0
     E_CONSOLE = 0
@@ -148,9 +162,9 @@ class _EndpointVolumeController:
             device = self._default_render_device(enumerator)
             endpoint = self._endpoint_volume(device)
             if action == "up":
-                return self._call_endpoint(endpoint, "VolumeStepUp")
+                return self._change_volume_by(endpoint, self.VOLUME_DELTA)
             if action == "down":
-                return self._call_endpoint(endpoint, "VolumeStepDown")
+                return self._change_volume_by(endpoint, -self.VOLUME_DELTA)
             return self._toggle_mute(endpoint)
         finally:
             for pointer in (endpoint, device, enumerator):
@@ -223,6 +237,32 @@ class _EndpointVolumeController:
             ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, ctypes.c_void_p),
         )
         return method(endpoint, None) == 0
+
+    def _change_volume_by(self, endpoint, delta: float) -> bool:
+        get_volume = self._method(
+            endpoint,
+            9,
+            ctypes.WINFUNCTYPE(
+                ctypes.HRESULT,
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_float),
+            ),
+        )
+        set_volume = self._method(
+            endpoint,
+            7,
+            ctypes.WINFUNCTYPE(
+                ctypes.HRESULT,
+                ctypes.c_void_p,
+                ctypes.c_float,
+                ctypes.c_void_p,
+            ),
+        )
+        current = ctypes.c_float()
+        if get_volume(endpoint, ctypes.byref(current)) != 0:
+            return False
+        next_value = min(1.0, max(0.0, float(current.value) + delta))
+        return set_volume(endpoint, ctypes.c_float(next_value), None) == 0
 
     def _toggle_mute(self, endpoint) -> bool:
         get_mute = self._method(

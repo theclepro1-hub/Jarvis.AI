@@ -305,7 +305,7 @@ class TTSService:
             )
         return TTSResult(
             status="unsupported",
-            message="Онлайн-голос найден, но этот маршрут пока отключён, чтобы не обещать нерабочую озвучку.",
+            message="Онлайн-голос найден, но пока отключён, чтобы не обещать нерабочую озвучку.",
             engine="edge",
             available=True,
             supports_output_device=False,

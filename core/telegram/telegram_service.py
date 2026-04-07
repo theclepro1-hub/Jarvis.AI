@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,9 @@ from typing import Callable, Protocol
 import httpx
 
 from core.telegram.telegram_models import TelegramDispatchResult, TelegramUpdate
+
+DEFAULT_POLL_INTERVAL_MS = 1000
+DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 2.0
 
 
 class TelegramTransport(Protocol):
@@ -49,21 +53,27 @@ class TelegramOffsetStore:
         if data_dir:
             base_dir = Path(data_dir)
         else:
-            base_dir = Path(os.environ.get("APPDATA", Path.home())) / "JarvisAi_Unity"
+            base_dir = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home())) / "JarvisAi_Unity"
         return base_dir / "telegram_state.json"
 
 
 class HttpTelegramTransport:
-    def __init__(self, bot_token: str, timeout_seconds: float = 12.0) -> None:
+    def __init__(
+        self,
+        bot_token: str,
+        timeout_seconds: float = 12.0,
+        poll_timeout_seconds: float = DEFAULT_LONG_POLL_TIMEOUT_SECONDS,
+    ) -> None:
         self.bot_token = bot_token.strip()
         self.timeout_seconds = timeout_seconds
+        self.poll_timeout_seconds = max(0.0, float(poll_timeout_seconds))
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
 
     def get_updates(self, offset: int | None = None) -> list[TelegramUpdate]:
         if not self.bot_token:
             return []
         params: dict[str, object] = {
-            "timeout": 0,
+            "timeout": int(self.poll_timeout_seconds),
             "allowed_updates": json.dumps(["message"]),
         }
         if offset is not None:
@@ -116,6 +126,7 @@ class TelegramService:
         self.offset_store = offset_store or TelegramOffsetStore()
         self.handler = handler
         self._offset: int | None = self.offset_store.load_offset()
+        self._configuration_signature = self._current_configuration_signature()
 
     def telegram_user_id(self) -> str:
         registration = self._registration()
@@ -127,6 +138,21 @@ class TelegramService:
 
     def is_configured(self) -> bool:
         return bool(self.telegram_user_id() and self.bot_token())
+
+    def poll_interval_ms(self) -> int:
+        return DEFAULT_POLL_INTERVAL_MS
+
+    def refresh_configuration(self) -> bool:
+        next_signature = self._current_configuration_signature()
+        if next_signature == self._configuration_signature:
+            return False
+
+        previous_token = self._configuration_signature[0]
+        next_token = next_signature[0]
+        self._configuration_signature = next_signature
+        if previous_token != next_token:
+            self._refresh_http_transport(next_token)
+        return True
 
     def is_authorized(self, user_id: int | str) -> bool:
         configured = self.telegram_user_id()
@@ -194,7 +220,7 @@ class TelegramService:
             )
 
         try:
-            reply = self.handler(text)
+            reply = self._call_handler(text, update.chat_id)
         except Exception as exc:
             return TelegramDispatchResult(
                 update_id=update.update_id,
@@ -218,7 +244,37 @@ class TelegramService:
             reply_text=reply_text,
         )
 
+    def _call_handler(self, text: str, chat_id: int) -> str | None:
+        if self.handler is None:
+            return None
+        try:
+            parameter_count = len(inspect.signature(self.handler).parameters)
+        except (TypeError, ValueError):
+            parameter_count = 1
+        if parameter_count >= 2:
+            return self.handler(text, str(chat_id))
+        return self.handler(text)
+
     def _registration(self) -> dict[str, object]:
         if hasattr(self.settings, "get_registration"):
             return dict(self.settings.get_registration())
         return {}
+
+    def _current_configuration_signature(self) -> tuple[str, str]:
+        return (self.bot_token(), self.telegram_user_id())
+
+    def _refresh_http_transport(self, token: str) -> None:
+        if self.transport is not None and not isinstance(self.transport, HttpTelegramTransport):
+            return
+        self.transport = self._create_http_transport(token)
+        self.load_offset()
+
+    def _create_http_transport(self, token: str) -> HttpTelegramTransport | None:
+        token = str(token or "").strip()
+        if not token:
+            return None
+        network = {}
+        if hasattr(self.settings, "get"):
+            network = self.settings.get("network", {}) or {}
+        timeout = float(network.get("timeout_seconds", 12.0)) if isinstance(network, dict) else 12.0
+        return HttpTelegramTransport(token, timeout_seconds=timeout)

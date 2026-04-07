@@ -32,8 +32,8 @@ class CommandRouter:
         self.intent_router = IntentRouter(action_registry)
         self.pc = pc_control or PcControlService(action_registry)
 
-    def handle(self, text: str) -> RouteResult:
-        reminder_result = self._handle_reminder(text)
+    def handle(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult:
+        reminder_result = self._handle_reminder(text, source=source, telegram_chat_id=telegram_chat_id)
         if reminder_result is not None:
             return reminder_result
 
@@ -92,7 +92,7 @@ class CommandRouter:
 
         return RouteResult("ai", commands, [], queue_items)
 
-    def _handle_reminder(self, text: str) -> RouteResult | None:
+    def _handle_reminder(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult | None:
         clean = text.strip()
         if not clean.casefold().startswith("напомни"):
             return None
@@ -108,7 +108,7 @@ class CommandRouter:
             result = ExecutionResult("local", [clean], [step], [step.title], [clean])
             return RouteResult("local", [clean], result.assistant_lines, [clean], result)
 
-        created = self.reminders.create_from_text(clean)
+        created = self.reminders.create_from_text(clean, source=source, telegram_chat_id=telegram_chat_id)
         if created.ok:
             title = created.message or "Напоминание создано."
             step = ExecutionStep(

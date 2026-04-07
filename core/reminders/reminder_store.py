@@ -170,5 +170,5 @@ class ReminderStore:
         if data_dir:
             base_dir = Path(data_dir)
         else:
-            base_dir = Path(os.environ.get("APPDATA", Path.home())) / "JarvisAi_Unity"
+            base_dir = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home())) / "JarvisAi_Unity"
         return base_dir / "reminders.sqlite3"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import re
 import webbrowser
 from typing import Iterable
 
@@ -10,13 +11,39 @@ from core.models.action_models import ActionOutcome
 
 
 OPEN_VERBS = ("открой", "открыть", "запусти", "запустить", "включи", "включить")
-MUSIC_WORDS = ("музыка", "музыку", "music", "плеер")
+MUSIC_WORDS = ("музыка", "музыку", "музычку", "музычка", "музычки", "music", "плеер", "плейлист")
 EXACT_MUSIC_ALIASES = (
     ("яндекс", "yandex"),
     ("spotify", "спотифай", "спотик"),
     ("windows music", "музыка windows"),
 )
 QUICK_ACTION_IDS = ("youtube", "browser", "music", "steam", "discord")
+NATURAL_ALIAS_TEMPLATES = (
+    (
+        ("counter-strike 2", "counter strike 2", "cs2"),
+        ("кс", "кска", "кс2", "кс 2", "каэс", "контра", "контру", "counter strike", "counter-strike", "cs2", "cs 2"),
+    ),
+    (
+        ("deadlock",),
+        ("дедлок", "дедлока", "делочек", "дедлочек", "дэдлок", "deadlock"),
+    ),
+    (
+        ("fortnite",),
+        ("фортнайт", "фортик", "форт", "fortnite"),
+    ),
+    (
+        ("dead by daylight", "dbd"),
+        ("дбд", "дбдшка", "дбдшку", "дед бай дейлайт", "dead by daylight", "dbd"),
+    ),
+    (
+        ("apple music",),
+        ("эпл музыка", "эпл мьюзик", "эйпл мьюзик", "apple music"),
+    ),
+    (
+        ("soundcloud",),
+        ("саундклауд", "саунд клоуд", "soundcloud"),
+    ),
+)
 
 
 class ActionRegistry:
@@ -308,7 +335,8 @@ class ActionRegistry:
     def _normalize_catalog_item(self, item: dict[str, str]) -> dict[str, str]:
         normalized = dict(item)
         title = str(normalized.get("title", "")).strip()
-        aliases = [str(alias).casefold() for alias in normalized.get("aliases", [])]
+        aliases = self._normalized_aliases(title, normalized.get("aliases", []))
+        normalized["aliases"] = aliases
         normalized.setdefault("category", self._infer_category(title, aliases))
         normalized.setdefault("kind", self._infer_kind(str(normalized.get("target", ""))))
         normalized.setdefault("custom", True)
@@ -316,10 +344,13 @@ class ActionRegistry:
 
     def _append_custom_item(self, item: dict[str, object]) -> None:
         custom_apps = list(self.settings.get("custom_apps", []))
+        title = str(item.get("title", "")).strip()
+        normalized_item = dict(item)
+        normalized_item["aliases"] = self._normalized_aliases(title, normalized_item.get("aliases", []))
         custom_apps.append(
             {
                 "id": f"custom_{len(custom_apps) + 1}",
-                **item,
+                **normalized_item,
             }
         )
         self.settings.set("custom_apps", custom_apps)
@@ -363,6 +394,7 @@ class ActionRegistry:
     def _aliases_from_input(self, title: str, aliases_input: str) -> list[str]:
         aliases = [part.strip().casefold() for part in aliases_input.split(",") if part.strip()]
         aliases.append(title.strip().casefold())
+        aliases.extend(self._natural_aliases_for_title(title))
         return list(dict.fromkeys(alias for alias in aliases if alias))
 
     def _strip_open_verb(self, command: str) -> str:
@@ -404,6 +436,10 @@ class ActionRegistry:
             return "Spotify"
         if "яндекс" in target_text and any(token in target_text for token in ("музык", "music", "плеер")):
             return "Яндекс Музыка"
+        if any(token in target_text for token in ("apple music", "эпл музыка", "эпл мьюзик", "эйпл мьюзик")):
+            return "Apple Music"
+        if any(token in target_text for token in ("soundcloud", "саундклауд", "саунд клоуд")):
+            return "SoundCloud"
         return ""
 
     def _alias_matches(self, item: dict[str, str], alias: str, target_text: str, full_text: str) -> bool:
@@ -417,7 +453,33 @@ class ActionRegistry:
                 return False
             if alias in {"epic", "эпик"} and target_text in {"epic", "epic games", "эпик", "эпик геймс"}:
                 return False
-        return alias in full_text
+        return self._alias_in_text(alias, full_text)
+
+    def _alias_in_text(self, alias: str, text: str) -> bool:
+        if not alias:
+            return False
+        if " " not in alias and "-" not in alias and len(alias) <= 4:
+            return bool(re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", text, flags=re.IGNORECASE))
+        return alias in text
+
+    def _normalized_aliases(self, title: str, raw_aliases: object) -> list[str]:
+        if isinstance(raw_aliases, str):
+            aliases = [part.strip().casefold() for part in raw_aliases.split(",") if part.strip()]
+        elif raw_aliases is None:
+            aliases = []
+        else:
+            aliases = [str(alias).strip().casefold() for alias in raw_aliases if str(alias).strip()]
+        aliases.append(title.strip().casefold())
+        aliases.extend(self._natural_aliases_for_title(title))
+        return list(dict.fromkeys(alias for alias in aliases if alias))
+
+    def _natural_aliases_for_title(self, title: str) -> list[str]:
+        normalized_title = re.sub(r"[\s_\-]+", " ", title.casefold()).strip()
+        aliases: list[str] = []
+        for title_tokens, natural_aliases in NATURAL_ALIAS_TEMPLATES:
+            if any(token in normalized_title for token in title_tokens):
+                aliases.extend(alias.casefold() for alias in natural_aliases)
+        return aliases
 
     def _default_music_item(self) -> dict[str, str] | None:
         default_id = str(self.settings.get("default_music_app", "")).strip()

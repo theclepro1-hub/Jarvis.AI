@@ -32,7 +32,7 @@ class FakeStore:
 def test_registration_completes_when_all_fields_are_filled():
     settings = SettingsService(FakeStore())
     service = RegistrationService(settings)
-    result = service.save("gsk_key", "123", "bot_token")
+    result = service.save("fake_groq_key", "123", "bot_token")
     assert result.is_complete is True
 
 

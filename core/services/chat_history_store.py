@@ -20,7 +20,7 @@ class ChatHistoryStore:
         if data_dir:
             self.base_dir = Path(data_dir)
         else:
-            appdata = Path(os.environ.get("APPDATA", Path.home()))
+            appdata = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
             self.base_dir = appdata / "JarvisAi_Unity"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.history_path = self.base_dir / "chat_history.json"

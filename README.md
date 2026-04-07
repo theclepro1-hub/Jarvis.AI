@@ -8,7 +8,7 @@
 - No direct UI migration from `C:\jarvisAI`
 - Chat-first layout
 - Fast local command routing
-- Clean registration flow
+- Clean registration flow with editable connections in Settings
 - Compact settings with an optional `Нубик` guide
 
 ## Stack
@@ -21,6 +21,15 @@
 - `vosk` for always-on local wake word
 - bundled `Golos Text` font for stable Cyrillic rendering in QML
 - generated Windows icon in `assets/icons/jarvis_unity.ico`
+
+## User Data
+
+- Installed app: `C:\Program Files\JARVIS Unity` by default when using the installer
+- User settings and protected secrets: `%LOCALAPPDATA%\JarvisAi_Unity\settings.json`
+- Chat history: `%LOCALAPPDATA%\JarvisAi_Unity\chat_history.json`
+- Telegram polling state: `%LOCALAPPDATA%\JarvisAi_Unity\telegram_state.json`
+
+Deleting `%LOCALAPPDATA%\JarvisAi_Unity` resets first-run registration.
 
 ## Run
 

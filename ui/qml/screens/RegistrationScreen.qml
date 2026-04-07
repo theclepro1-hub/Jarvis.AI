@@ -71,25 +71,7 @@ Rectangle {
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
                         wrapMode: Text.WrapAnywhere
-                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                    }
-
-                    InputField {
-                        id: userIdField
-                        objectName: "userIdField"
                         Layout.fillWidth: true
-                        label: "Telegram ID"
-                        text: registrationBridge.registration["telegram_user_id"] || ""
-                        placeholderText: "123456789"
-                    }
-
-                    Text {
-                        text: 'Узнать свой Telegram ID можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://t.me/userinfobot">@userinfobot</a>'
-                        textFormat: Text.RichText
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WrapAnywhere
                         onLinkActivated: function(link) { Qt.openUrlExternally(link) }
                     }
 
@@ -99,7 +81,7 @@ Rectangle {
                         Layout.fillWidth: true
                         label: "Токен Telegram-бота"
                         text: registrationBridge.registration["telegram_bot_token"] || ""
-                        placeholderText: "bot-token"
+                        placeholderText: "Вставьте токен от @BotFather"
                         secret: true
                     }
 
@@ -110,6 +92,27 @@ Rectangle {
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
                         wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
+                        onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                    }
+
+                    InputField {
+                        id: userIdField
+                        objectName: "userIdField"
+                        Layout.fillWidth: true
+                        label: "Telegram ID"
+                        text: registrationBridge.registration["telegram_user_id"] || ""
+                        placeholderText: "Вставьте ваш Telegram ID"
+                    }
+
+                    Text {
+                        text: 'Узнать свой Telegram ID можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://t.me/userinfobot">@userinfobot</a>'
+                        textFormat: Text.RichText
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WrapAnywhere
+                        Layout.fillWidth: true
                         onLinkActivated: function(link) { Qt.openUrlExternally(link) }
                     }
 

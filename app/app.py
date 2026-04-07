@@ -62,6 +62,7 @@ class JarvisUnityApplication:
         self._close_filter = None
         self._force_quit = False
         self._background_timer = None
+        self._telegram_timer = None
         self._telegram_polling = False
         _load_embedded_fonts()
         _boot_log("app:init:fonts")
@@ -193,14 +194,25 @@ class JarvisUnityApplication:
 
     def _install_background_services(self) -> None:
         self._background_timer = QTimer()
-        self._background_timer.setInterval(5000)
-        self._background_timer.timeout.connect(self._tick_background_services)
+        self._background_timer.setInterval(1000)
+        self._background_timer.timeout.connect(self._fire_due_reminders)
         self._background_timer.start()
-        QTimer.singleShot(1000, self._tick_background_services)
+        self._telegram_timer = QTimer()
+        self._telegram_timer.setInterval(self._telegram_poll_interval_ms())
+        self._telegram_timer.timeout.connect(self._poll_telegram_async)
+        self._telegram_timer.start()
+        QTimer.singleShot(250, self._poll_telegram_async)
+        QTimer.singleShot(1000, self._fire_due_reminders)
 
     def _tick_background_services(self) -> None:
         self._fire_due_reminders()
         self._poll_telegram_async()
+
+    def _telegram_poll_interval_ms(self) -> int:
+        telegram = getattr(self.services, "telegram", None)
+        if telegram is None or not hasattr(telegram, "poll_interval_ms"):
+            return 1000
+        return max(750, int(telegram.poll_interval_ms()))
 
     def _fire_due_reminders(self) -> None:
         reminders = getattr(self.services, "reminders", None)
@@ -219,6 +231,8 @@ class JarvisUnityApplication:
 
     def _send_telegram_note_async(self, record, message: str) -> None:  # noqa: ANN001
         telegram = getattr(self.services, "telegram", None)
+        if telegram is not None and hasattr(telegram, "refresh_configuration"):
+            telegram.refresh_configuration()
         transport = getattr(telegram, "transport", None)
         if telegram is None or transport is None:
             return
@@ -238,7 +252,11 @@ class JarvisUnityApplication:
 
     def _poll_telegram_async(self) -> None:
         telegram = getattr(self.services, "telegram", None)
-        if telegram is None or not telegram.is_configured() or getattr(telegram, "transport", None) is None:
+        if telegram is None:
+            return
+        if hasattr(telegram, "refresh_configuration"):
+            telegram.refresh_configuration()
+        if not telegram.is_configured() or getattr(telegram, "transport", None) is None:
             return
         if self._telegram_polling:
             return

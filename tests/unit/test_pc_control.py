@@ -29,8 +29,8 @@ def test_media_control_uses_send_input_contract(monkeypatch):
     assert media.next_track() is True
     assert media.previous_track() is True
     assert calls == [
-        MediaControl.VK_VOLUME_UP,
-        MediaControl.VK_VOLUME_DOWN,
+        *([MediaControl.VK_VOLUME_UP] * MediaControl.VOLUME_KEY_FALLBACK_STEPS),
+        *([MediaControl.VK_VOLUME_DOWN] * MediaControl.VOLUME_KEY_FALLBACK_STEPS),
         MediaControl.VK_VOLUME_MUTE,
         MediaControl.VK_MEDIA_PLAY_PAUSE,
         MediaControl.VK_MEDIA_NEXT_TRACK,

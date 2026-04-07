@@ -48,11 +48,18 @@ class ServiceContainer:
         self.wake = WakeService(self.settings, self.voice)
         self.updates = UpdateService()
 
-    def handle_external_command(self, text: str) -> str:
-        route = self.command_router.handle(text)
+    def handle_external_command(self, text: str, telegram_chat_id: str = "") -> str:
+        route = self.command_router.handle(text, source="telegram", telegram_chat_id=telegram_chat_id)
         if route.assistant_lines:
             return "\n".join(route.assistant_lines)
         return self.ai.generate_reply(text, [])
+
+    def refresh_telegram_transport(self) -> None:
+        if hasattr(self.telegram, "refresh_configuration"):
+            self.telegram.refresh_configuration()
+            return
+        self.telegram.transport = self._create_telegram_transport()
+        self.telegram.load_offset()
 
     def _create_telegram_transport(self) -> HttpTelegramTransport | None:
         registration = self.settings.get_registration()

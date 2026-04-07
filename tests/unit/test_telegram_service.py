@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.telegram.telegram_models import TelegramUpdate
-from core.telegram.telegram_service import TelegramService
+from core.telegram.telegram_service import DEFAULT_POLL_INTERVAL_MS, HttpTelegramTransport, TelegramService
 
 
 class FakeSettings:
@@ -13,9 +13,17 @@ class FakeSettings:
             "telegram_user_id": telegram_user_id,
             "telegram_bot_token": telegram_bot_token,
         }
+        self._settings = {"network": {"timeout_seconds": 12.0}}
 
     def get_registration(self) -> dict[str, str]:
         return dict(self._registration)
+
+    def get(self, key: str, default=None):  # noqa: ANN001, ANN201
+        return self._settings.get(key, default)
+
+    def set_registration(self, telegram_user_id: str, telegram_bot_token: str) -> None:
+        self._registration["telegram_user_id"] = telegram_user_id
+        self._registration["telegram_bot_token"] = telegram_bot_token
 
 
 class FakeOffsetStore:
@@ -75,6 +83,28 @@ def test_authorized_telegram_command_routes_through_handler(tmp_path: Path) -> N
     assert results[0].handled is True
 
 
+def test_authorized_telegram_command_can_pass_chat_id_to_handler() -> None:
+    updates = [TelegramUpdate(update_id=11, chat_id=777, user_id=123456789, text="напомни мне чай через 1 минуту")]
+    transport = FakeTransport(updates)
+    received: list[tuple[str, str]] = []
+
+    def handler(text: str, chat_id: str) -> str:
+        received.append((text, chat_id))
+        return "Напомню через 1 мин.: чай"
+
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=11),
+        handler=handler,
+    )
+
+    service.poll_once()
+
+    assert received == [("напомни мне чай через 1 минуту", "777")]
+    assert transport.sent_messages == [(777, "Напомню через 1 мин.: чай")]
+
+
 def test_unauthorized_user_is_ignored_but_offset_advances() -> None:
     updates = [TelegramUpdate(update_id=5, chat_id=777, user_id=42, text="открой ютуб")]
     transport = FakeTransport(updates)
@@ -117,3 +147,53 @@ def test_offset_persistence_is_loaded_before_polling() -> None:
 
     assert transport.requested_offsets == [14]
     assert offset_store.saved[-1] == 15
+
+
+def test_telegram_poll_interval_contract_is_fast_without_busy_loop() -> None:
+    service = TelegramService(FakeSettings(), transport=FakeTransport([]), offset_store=FakeOffsetStore())
+
+    assert 750 <= service.poll_interval_ms() <= DEFAULT_POLL_INTERVAL_MS
+
+
+def test_http_transport_uses_short_long_poll_timeout(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"ok": True, "result": []}
+
+    def fake_get(url, params, timeout):  # noqa: ANN001, ANN202
+        captured["url"] = url
+        captured["params"] = params
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("core.telegram.telegram_service.httpx.get", fake_get)
+    transport = HttpTelegramTransport("bot_secret", timeout_seconds=12.0, poll_timeout_seconds=2.0)
+
+    assert transport.get_updates(offset=40) == []
+
+    assert captured["params"]["timeout"] == 2
+    assert captured["params"]["offset"] == 40
+    assert captured["timeout"] == 12.0
+    assert "bot_secret" in captured["url"]
+
+
+def test_refresh_configuration_rebuilds_http_transport_without_restart() -> None:
+    settings = FakeSettings(telegram_user_id="123", telegram_bot_token="old_token")
+    service = TelegramService(
+        settings,
+        transport=HttpTelegramTransport("old_token"),
+        offset_store=FakeOffsetStore(offset=7),
+    )
+
+    settings.set_registration("456", "new_token")
+
+    assert service.refresh_configuration() is True
+    assert isinstance(service.transport, HttpTelegramTransport)
+    assert service.transport.bot_token == "new_token"
+    assert service.is_authorized("456") is True
+    assert service.is_authorized("123") is False

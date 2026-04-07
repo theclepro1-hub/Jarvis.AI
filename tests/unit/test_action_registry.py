@@ -293,6 +293,122 @@ def test_exact_spotify_ignores_default_yandex_music() -> None:
     assert items[0]["title"] == "Spotify"
 
 
+def test_natural_game_alias_templates_resolve_common_russian_names() -> None:
+    registry, service = make_registry()
+    service.set(
+        "custom_apps",
+        [
+            {
+                "id": "custom_cs2",
+                "title": "Counter-Strike 2",
+                "aliases": [],
+                "kind": "uri",
+                "target": "steam://rungameid/730",
+                "custom": True,
+                "category": "game",
+            },
+            {
+                "id": "custom_deadlock",
+                "title": "Deadlock",
+                "aliases": [],
+                "kind": "uri",
+                "target": "steam://rungameid/1422450",
+                "custom": True,
+                "category": "game",
+            },
+            {
+                "id": "custom_fortnite",
+                "title": "Fortnite",
+                "aliases": [],
+                "kind": "file",
+                "target": r"D:\Fortnite\FortniteLauncher.exe",
+                "custom": True,
+                "category": "game",
+            },
+            {
+                "id": "custom_dbd",
+                "title": "Dead by Daylight",
+                "aliases": [],
+                "kind": "uri",
+                "target": "steam://rungameid/381210",
+                "custom": True,
+                "category": "game",
+            },
+        ],
+    )
+    registry.catalog = registry._merged_catalog()
+
+    cases = {
+        "открой кс": "Counter-Strike 2",
+        "открой кска": "Counter-Strike 2",
+        "открой делочек": "Deadlock",
+        "открой фортик": "Fortnite",
+        "открой дбдшка": "Dead by Daylight",
+    }
+    for command, expected_title in cases.items():
+        items, question = registry.resolve_open_command(command)
+        assert question == ""
+        assert [item["title"] for item in items] == [expected_title]
+
+
+def test_short_cs_alias_does_not_match_inside_other_words() -> None:
+    registry, service = make_registry()
+    service.set(
+        "custom_apps",
+        [
+            {
+                "id": "custom_cs2",
+                "title": "Counter-Strike 2",
+                "aliases": [],
+                "kind": "uri",
+                "target": "steam://rungameid/730",
+                "custom": True,
+                "category": "game",
+            }
+        ],
+    )
+    registry.catalog = registry._merged_catalog()
+
+    items, question = registry.resolve_open_command("открой текст")
+
+    assert question == ""
+    assert items == []
+
+
+def test_inflected_music_alias_uses_default_music_app() -> None:
+    registry, service = make_registry()
+    service.set(
+        "custom_apps",
+        [
+            {
+                "id": "custom_yandex_music",
+                "title": "Яндекс Музыка",
+                "aliases": ["яндекс музыка", "музыка"],
+                "kind": "file",
+                "target": r"C:\YandexMusic\Яндекс Музыка.exe",
+                "custom": True,
+                "category": "music",
+            },
+            {
+                "id": "custom_spotify",
+                "title": "Spotify",
+                "aliases": ["spotify", "спотифай", "спотик", "музыка"],
+                "kind": "file",
+                "target": r"C:\Spotify\Spotify.exe",
+                "custom": True,
+                "category": "music",
+            },
+        ],
+    )
+    service.set("default_music_app", "custom_yandex_music")
+    registry.catalog = registry._merged_catalog()
+
+    items, question = registry.resolve_open_command("включи музычку")
+
+    assert question == ""
+    assert [item["title"] for item in items] == ["Яндекс Музыка"]
+
+
 def test_missing_explicit_spotify_returns_honest_app_message() -> None:
     registry, service = make_registry()
     service.set(

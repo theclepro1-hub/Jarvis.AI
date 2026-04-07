@@ -12,6 +12,8 @@ class SettingsBridge(QObject):
     aiProviderChanged = Signal()
     aiProfileChanged = Signal()
     aiModelChanged = Signal()
+    connectionsChanged = Signal()
+    connectionFeedbackChanged = Signal()
     updateSummaryChanged = Signal()
 
     def __init__(self, state, services, app_bridge) -> None:
@@ -19,6 +21,7 @@ class SettingsBridge(QObject):
         self.state = state
         self.services = services
         self.app_bridge = app_bridge
+        self._connection_feedback = ""
 
     @Property(str, notify=themeModeChanged)
     def themeMode(self) -> str:
@@ -125,6 +128,98 @@ class SettingsBridge(QObject):
         self.services.settings.set("ai_model", value)
         self.aiModelChanged.emit()
 
+    @Property(str, notify=connectionsChanged)
+    def groqApiKey(self) -> str:
+        return str(self._registration().get("groq_api_key", "")).strip()
+
+    @Property(str, notify=connectionsChanged)
+    def groqApiKeyMasked(self) -> str:
+        return self._mask_secret(self.groqApiKey)
+
+    @Property(bool, notify=connectionsChanged)
+    def groqApiKeySet(self) -> bool:
+        return bool(self.groqApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def telegramBotToken(self) -> str:
+        return str(self._registration().get("telegram_bot_token", "")).strip()
+
+    @Property(str, notify=connectionsChanged)
+    def telegramBotTokenMasked(self) -> str:
+        return self._mask_secret(self.telegramBotToken)
+
+    @Property(bool, notify=connectionsChanged)
+    def telegramBotTokenSet(self) -> bool:
+        return bool(self.telegramBotToken)
+
+    @Property(str, notify=connectionsChanged)
+    def telegramUserId(self) -> str:
+        return str(self._registration().get("telegram_user_id", "")).strip()
+
+    @Property(bool, notify=connectionsChanged)
+    def telegramConfigured(self) -> bool:
+        telegram = getattr(self.services, "telegram", None)
+        if telegram is not None and hasattr(telegram, "is_configured"):
+            return bool(telegram.is_configured())
+        return bool(self.telegramBotToken and self.telegramUserId)
+
+    @Property("QVariantMap", notify=connectionsChanged)
+    def connections(self) -> dict[str, object]:
+        registration = self._registration()
+        return {
+            "groqApiKey": self.groqApiKey,
+            "groqApiKeyMasked": self.groqApiKeyMasked,
+            "groqApiKeySet": self.groqApiKeySet,
+            "telegramBotToken": self.telegramBotToken,
+            "telegramBotTokenMasked": self.telegramBotTokenMasked,
+            "telegramBotTokenSet": self.telegramBotTokenSet,
+            "telegramUserId": self.telegramUserId,
+            "telegramConfigured": self.telegramConfigured,
+            "skipped": bool(registration.get("skipped", False)),
+            # Snake-case keys keep this bridge usable from tests and older QML bindings.
+            "groq_api_key": self.groqApiKey,
+            "telegram_bot_token": self.telegramBotToken,
+            "telegram_user_id": self.telegramUserId,
+        }
+
+    @Property(str, notify=connectionFeedbackChanged)
+    def connectionFeedback(self) -> str:
+        return self._connection_feedback
+
+    @Slot(str, str, str, result=bool)
+    def saveConnections(self, groq_api_key: str, telegram_bot_token: str, telegram_user_id: str) -> bool:
+        registration = self._registration()
+        self.services.settings.save_registration(
+            {
+                "groq_api_key": self._resolve_secret_input(groq_api_key, str(registration.get("groq_api_key", ""))),
+                "telegram_bot_token": self._resolve_secret_input(
+                    telegram_bot_token,
+                    str(registration.get("telegram_bot_token", "")),
+                ),
+                "telegram_user_id": str(telegram_user_id or "").strip(),
+            },
+            skipped=False,
+        )
+        self._refresh_telegram_transport()
+        self._connection_feedback = "Подключения сохранены."
+        self.connectionsChanged.emit()
+        self.connectionFeedbackChanged.emit()
+        return True
+
+    @Slot()
+    def clearTelegramConnection(self) -> None:
+        registration = self._registration()
+        payload = {
+            "groq_api_key": str(registration.get("groq_api_key", "")).strip(),
+            "telegram_user_id": "",
+            "telegram_bot_token": "",
+        }
+        self.services.settings.save_registration(payload, skipped=False)
+        self._refresh_telegram_transport()
+        self._connection_feedback = "Telegram отключён."
+        self.connectionsChanged.emit()
+        self.connectionFeedbackChanged.emit()
+
     @Property(str, notify=updateSummaryChanged)
     def updateSummary(self) -> str:
         return self.services.updates.summary()
@@ -132,3 +227,23 @@ class SettingsBridge(QObject):
     @Slot(str)
     def openScreen(self, screen: str) -> None:
         self.app_bridge.navigate(screen)
+
+    def _registration(self) -> dict[str, object]:
+        return dict(self.services.settings.get_registration())
+
+    def _refresh_telegram_transport(self) -> None:
+        if hasattr(self.services, "refresh_telegram_transport"):
+            self.services.refresh_telegram_transport()
+            return
+        telegram = getattr(self.services, "telegram", None)
+        if telegram is not None and hasattr(telegram, "refresh_configuration"):
+            telegram.refresh_configuration()
+
+    def _resolve_secret_input(self, value: str, current: str) -> str:
+        clean = str(value or "").strip()
+        if clean and (clean == self._mask_secret(current) or set(clean) <= {"•", "*"}):
+            return str(current or "").strip()
+        return clean
+
+    def _mask_secret(self, value: str) -> str:
+        return "••••••••" if str(value or "").strip() else ""

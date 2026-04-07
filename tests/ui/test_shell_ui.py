@@ -337,7 +337,7 @@ def test_registration_and_navigation_clicks_work(ui_runtime) -> None:
 def test_registration_save_path_is_clickable(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _find(window, "groqField").setProperty("text", "gsk_test_key")
+    _find(window, "groqField").setProperty("text", "fake_groq_test_key")
     _find(window, "userIdField").setProperty("text", "123456789")
     _find(window, "botTokenField").setProperty("text", "123:abc")
     _click(app, window, _find(window, "registrationSaveButton"))
@@ -353,7 +353,7 @@ def test_registration_continue_requires_all_fields_and_shows_feedback(ui_runtime
     assert runtime.state.currentScreen == "registration"
     assert "Нужны все три поля" in _find(window, "registrationFeedback").property("text")
 
-    _find(window, "groqField").setProperty("text", "gsk_test_key")
+    _find(window, "groqField").setProperty("text", "fake_groq_test_key")
     _find(window, "userIdField").setProperty("text", "123456789")
     _find(window, "botTokenField").setProperty("text", "123:abc")
     _click(app, window, _find(window, "registrationSaveButton"))
@@ -476,6 +476,27 @@ def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
 
     _click(app, window, _find(window, "wakeWordTestButton"))
     assert _find(window, "voiceTestResult").property("text")
+
+
+def test_settings_connections_can_update_registration_fields(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 200)
+    _click(app, window, _find(window, "navButton_settings"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+
+    _find(window, "settingsGroqField").setProperty("text", "fake_groq_settings_key")
+    _find(window, "settingsTelegramBotTokenField").setProperty("text", "bot_settings_token")
+    _find(window, "settingsTelegramUserIdField").setProperty("text", "987654321")
+    _click(app, window, _find(window, "settingsConnectionsSaveButton"))
+    _pump(app, 120)
+
+    registration = runtime.services.registration.load()
+    assert registration.groq_api_key == "fake_groq_settings_key"
+    assert registration.telegram_bot_token == "bot_settings_token"
+    assert registration.telegram_user_id == "987654321"
+    assert "Подключения сохранены" in _find(window, "settingsConnectionsFeedback").property("text")
 
 
 def test_scroll_views_accept_scroll_input(ui_runtime) -> None:

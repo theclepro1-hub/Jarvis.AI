@@ -148,7 +148,7 @@ def test_release_gate_music_command_uses_default_music_app() -> None:
             "title": "Яндекс Музыка",
             "aliases": ["яндекс музыка", "музыка"],
             "kind": "file",
-            "target": r"C:\Users\thecl\AppData\Local\Programs\YandexMusic\Яндекс Музыка.exe",
+            "target": r"C:\Users\me\AppData\Local\Programs\YandexMusic\Яндекс Музыка.exe",
             "custom": True,
         }
     ]

@@ -53,6 +53,32 @@ def test_discovers_steam_libraries_from_libraryfolders_vdf(tmp_path: Path) -> No
     assert any(item.title == "Counter-Strike 2" and item.target == "steam://rungameid/730" for item in found)
 
 
+def test_discovery_adds_natural_game_aliases_from_templates(tmp_path: Path) -> None:
+    roots = make_roots(tmp_path)
+    steamapps = roots.program_files_x86 / "Steam" / "steamapps"
+    steamapps.mkdir(parents=True)
+    (steamapps / "appmanifest_730.acf").write_text(
+        '"AppState"\n{\n    "appid" "730"\n    "name" "Counter-Strike 2"\n}\n',
+        encoding="utf-8",
+    )
+    (steamapps / "appmanifest_381210.acf").write_text(
+        '"AppState"\n{\n    "appid" "381210"\n    "name" "Dead by Daylight"\n}\n',
+        encoding="utf-8",
+    )
+    (steamapps / "appmanifest_1422450.acf").write_text(
+        '"AppState"\n{\n    "appid" "1422450"\n    "name" "Deadlock"\n}\n',
+        encoding="utf-8",
+    )
+
+    found = LauncherDiscovery(roots).discover()
+    by_title = {item.title: item for item in found}
+
+    assert "кс" in by_title["Counter-Strike 2"].other_names
+    assert "кска" in by_title["Counter-Strike 2"].other_names
+    assert "делочек" in by_title["Deadlock"].other_names
+    assert "дбдшка" in by_title["Dead by Daylight"].other_names
+
+
 def test_discovers_epic_games_from_fake_manifest(tmp_path: Path) -> None:
     roots = make_roots(tmp_path)
     manifest_dir = roots.program_data / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
@@ -76,6 +102,32 @@ def test_discovers_epic_games_from_fake_manifest(tmp_path: Path) -> None:
     found = LauncherDiscovery(roots).discover()
 
     assert any(item.title == "Fortnite" and item.target == str(binary) for item in found)
+
+
+def test_epic_fortnite_discovery_adds_natural_alias(tmp_path: Path) -> None:
+    roots = make_roots(tmp_path)
+    manifest_dir = roots.program_data / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
+    install_dir = tmp_path / "EpicGames" / "Fortnite"
+    binary = install_dir / "FortniteGame" / "Binaries" / "Win64" / "FortniteClient-Win64-Shipping.exe"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("", encoding="utf-8")
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "fortnite.item").write_text(
+        json.dumps(
+            {
+                "DisplayName": "Fortnite",
+                "AppName": "Fortnite",
+                "InstallLocation": str(install_dir),
+                "LaunchExecutable": r"FortniteGame\Binaries\Win64\FortniteClient-Win64-Shipping.exe",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    found = LauncherDiscovery(roots).discover()
+    fortnite = next(item for item in found if item.title == "Fortnite")
+
+    assert "фортик" in fortnite.other_names
 
 
 def test_discovers_known_music_apps_without_disk_wide_scan(tmp_path: Path) -> None:

@@ -59,7 +59,7 @@ Rectangle {
                 Text {
                     visible: !voiceBridge.canRouteTtsOutput
                     Layout.fillWidth: true
-                    text: "Отдельный маршрут голоса пока недоступен. JARVIS будет говорить через системный вывод, пока это не будет реализовано полностью."
+                    text: "Выбор отдельной колонки пока недоступен. JARVIS будет говорить через системный вывод, пока эта функция не будет готова."
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.micro

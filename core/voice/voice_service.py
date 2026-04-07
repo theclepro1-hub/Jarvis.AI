@@ -124,7 +124,7 @@ class VoiceService:
         return {
             "wakeWord": self.wake_status_text(),
             "command": self.command_status_text(),
-            "ai": "Groq или резервный локальный маршрут",
+            "ai": "Groq или резервный локальный режим",
             "model": self.model_status_text(),
             "tts": self.tts_status_text(),
         }
