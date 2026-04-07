@@ -59,3 +59,31 @@ def test_user_runtime_files_default_to_local_appdata(monkeypatch, tmp_path) -> N
     assert history.history_path == expected_base / "chat_history.json"
     assert reminders.path == expected_base / "reminders.sqlite3"
     assert telegram.path == expected_base / "telegram_state.json"
+
+
+def test_settings_store_defaults_cover_history_and_pinned_commands() -> None:
+    payload = json.loads(json.dumps(DEFAULT_SETTINGS))
+
+    assert payload["save_history_enabled"] is True
+    assert payload["pinned_commands"] == []
+
+
+def test_delete_all_data_clears_only_safe_runtime_dir(monkeypatch, tmp_path) -> None:
+    runtime_dir = tmp_path / "JarvisAi_Unity"
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(runtime_dir))
+    store = SettingsStore()
+
+    nested_dir = store.base_dir / "nested"
+    nested_dir.mkdir(parents=True)
+    (nested_dir / "settings.json").write_text("{}", encoding="utf-8")
+    (store.base_dir / "chat_history.json").write_text("[]", encoding="utf-8")
+    outside_file = tmp_path / "outside.txt"
+    outside_file.write_text("keep me", encoding="utf-8")
+
+    result = store.delete_all_data()
+
+    assert result["restart_required"] is True
+    assert result["registration_required"] is True
+    assert outside_file.exists()
+    assert store.base_dir.exists()
+    assert list(store.base_dir.iterdir()) == []

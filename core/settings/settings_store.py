@@ -4,6 +4,7 @@ import base64
 import ctypes
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "startup_enabled": False,
     "minimize_to_tray_enabled": True,
     "start_minimized_enabled": True,
+    "save_history_enabled": True,
     "privacy_mode": "balance",
     "ai_provider": "auto",
     "ai_mode": "auto",
@@ -36,6 +38,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tts_voice_name": "Голос по умолчанию",
     "tts_rate": 185,
     "tts_volume": 85,
+    "pinned_commands": [],
     "custom_apps": [],
     "default_music_app": "",
     "registration": {
@@ -89,10 +92,10 @@ class SettingsStore:
         self._restore_registration_secrets(merged)
         microphone_name = str(merged.get("microphone_name", "")).strip()
         if not microphone_name:
-            merged["microphone_name"] = "Системный микрофон"
+            merged["microphone_name"] = DEFAULT_SETTINGS["microphone_name"]
         output_name = str(merged.get("voice_output_name", "")).strip()
         if not output_name:
-            merged["voice_output_name"] = "Системный вывод"
+            merged["voice_output_name"] = DEFAULT_SETTINGS["voice_output_name"]
         return merged
 
     def save(self, payload: dict[str, Any]) -> None:
@@ -101,6 +104,26 @@ class SettingsStore:
         with temp_path.open("w", encoding="utf-8") as handle:
             json.dump(payload_to_write, handle, ensure_ascii=False, indent=2)
         temp_path.replace(self.settings_path)
+
+    def delete_all_data(self) -> dict[str, Any]:
+        resolved_base_dir = self.base_dir.resolve()
+        if not self._is_safe_runtime_dir(resolved_base_dir):
+            raise ValueError(f"Refusing to clear unsafe runtime directory: {resolved_base_dir}")
+
+        deleted_files = 0
+        deleted_dirs = 0
+        if resolved_base_dir.exists():
+            for entry in sorted(resolved_base_dir.iterdir(), key=lambda path: path.name):
+                deleted_files, deleted_dirs = self._delete_entry(entry, deleted_files, deleted_dirs)
+
+        resolved_base_dir.mkdir(parents=True, exist_ok=True)
+        return {
+            "base_dir": str(resolved_base_dir),
+            "deleted_files": deleted_files,
+            "deleted_dirs": deleted_dirs,
+            "restart_required": True,
+            "registration_required": True,
+        }
 
     def _merge_defaults(self, data: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
         result = json.loads(json.dumps(defaults))
@@ -210,3 +233,36 @@ class SettingsStore:
         buffer = ctypes.create_string_buffer(raw, len(raw))
         blob = _DataBlob(len(raw), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char)))
         return blob, buffer
+
+    def _delete_entry(self, entry: Path, deleted_files: int, deleted_dirs: int) -> tuple[int, int]:
+        resolved_entry = entry.resolve()
+        if not self._is_safe_child_path(resolved_entry):
+            raise ValueError(f"Refusing to delete outside runtime directory: {resolved_entry}")
+
+        if resolved_entry.is_dir():
+            for child in sorted(resolved_entry.iterdir(), key=lambda path: path.name):
+                deleted_files, deleted_dirs = self._delete_entry(child, deleted_files, deleted_dirs)
+            shutil.rmtree(resolved_entry, ignore_errors=False)
+            return deleted_files, deleted_dirs + 1
+
+        resolved_entry.unlink(missing_ok=True)
+        return deleted_files + 1, deleted_dirs
+
+    def _is_safe_runtime_dir(self, resolved_path: Path) -> bool:
+        if resolved_path.name != "JarvisAi_Unity":
+            return False
+        if os.environ.get("JARVIS_UNITY_DATA_DIR"):
+            return True
+        appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if not appdata:
+            return False
+        try:
+            return resolved_path.is_relative_to(Path(appdata).resolve())
+        except ValueError:
+            return False
+
+    def _is_safe_child_path(self, resolved_path: Path) -> bool:
+        try:
+            return resolved_path.is_relative_to(self.base_dir.resolve())
+        except ValueError:
+            return False

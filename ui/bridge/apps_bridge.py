@@ -9,7 +9,9 @@ class AppsBridge(QObject):
     catalogChanged = Signal()
     feedbackChanged = Signal()
     discoveredChanged = Signal()
+    scanResultChanged = Signal()
     defaultMusicAppChanged = Signal()
+    pinnedCommandsChanged = Signal()
 
     def __init__(self, services, chat_bridge) -> None:
         super().__init__()
@@ -17,6 +19,7 @@ class AppsBridge(QObject):
         self.chat_bridge = chat_bridge
         self._feedback = ""
         self._discovered: list[dict[str, str]] = []
+        self._scan_result: dict[str, object] = {}
 
     @Property("QVariantList", notify=catalogChanged)
     def catalog(self) -> list[dict[str, str]]:
@@ -25,6 +28,10 @@ class AppsBridge(QObject):
     @Property("QVariantList", notify=discoveredChanged)
     def discovered(self) -> list[dict[str, str]]:
         return self._discovered
+
+    @Property("QVariantMap", notify=scanResultChanged)
+    def scanResult(self) -> dict[str, object]:
+        return self._scan_result
 
     @Property(str, notify=feedbackChanged)
     def feedback(self) -> str:
@@ -80,9 +87,11 @@ class AppsBridge(QObject):
         result = self.services.actions.scan_and_import_apps()
         review = result.get("review", [])
         self._discovered = review if isinstance(review, list) else []
+        self._scan_result = dict(result)
         self._feedback = str(result.get("summary") or "Новых безопасных приложений не найдено.")
         self.feedbackChanged.emit()
         self.discoveredChanged.emit()
+        self.scanResultChanged.emit()
         self.catalogChanged.emit()
         self.chat_bridge.refreshCatalog()
 
@@ -113,6 +122,28 @@ class AppsBridge(QObject):
         self._feedback = "Основное музыкальное приложение сохранено."
         self.feedbackChanged.emit()
         self.defaultMusicAppChanged.emit()
+        self.catalogChanged.emit()
+        self.chat_bridge.refreshCatalog()
+
+    @Slot(str)
+    def togglePinnedCommand(self, app_id: str) -> None:
+        item_id = str(app_id or "").strip()
+        if not item_id:
+            return
+        catalog = self.services.actions.app_catalog()
+        current = next((item for item in catalog if str(item.get("id", "")) == item_id), None)
+        if current is None:
+            self._feedback = "Команда не найдена."
+            self.feedbackChanged.emit()
+            return
+        if bool(current.get("isPinned", False)):
+            self.services.actions.unpin_command(item_id)
+            self._feedback = f"Откреплено: {current.get('title', item_id)}"
+        else:
+            self.services.actions.pin_command(item_id)
+            self._feedback = f"Закреплено: {current.get('title', item_id)}"
+        self.feedbackChanged.emit()
+        self.pinnedCommandsChanged.emit()
         self.catalogChanged.emit()
         self.chat_bridge.refreshCatalog()
 

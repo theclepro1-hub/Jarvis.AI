@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib.util
 import threading
@@ -351,6 +351,9 @@ class VoiceService:
                 clean = clean[len(wake) :].lstrip(" ,.:;!-")
                 break
         return clean
+
+    def strip_wake_word(self, text: str) -> str:
+        return self._strip_wake_word(text)
 
     def _module_available(self, module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None

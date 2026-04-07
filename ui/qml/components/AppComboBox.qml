@@ -6,7 +6,7 @@ import "../theme" as Theme
 ComboBox {
     id: control
 
-    implicitHeight: 46
+    implicitHeight: 48
     implicitWidth: 220
     leftPadding: 14
     rightPadding: 38
@@ -50,13 +50,13 @@ ComboBox {
 
         hoverEnabled: true
         padding: 0
-        leftPadding: 14
-        rightPadding: 14
-        topPadding: 8
-        bottomPadding: 8
-        width: ListView.view ? ListView.view.width - 8 : control.width - 8
+        leftPadding: 16
+        rightPadding: 16
+        topPadding: 12
+        bottomPadding: 12
+        width: ListView.view ? ListView.view.width : control.width
         implicitWidth: width
-        implicitHeight: Math.max(48, contentColumn.implicitHeight + topPadding + bottomPadding)
+        implicitHeight: Math.max(66, contentColumn.implicitHeight + topPadding + bottomPadding)
         highlighted: control.highlightedIndex === index
         opacity: itemDelegate.itemAvailable ? 1.0 : 0.68
 
@@ -146,6 +146,7 @@ ComboBox {
 
         background: Rectangle {
             anchors.fill: parent
+            anchors.margins: 2
             radius: 12
             color: itemDelegate.highlighted ? Theme.Colors.accent
                                             : itemDelegate.hovered ? Theme.Colors.panelRaised
@@ -158,10 +159,10 @@ ComboBox {
     }
 
     popup: Popup {
-        y: control.height + 8
+        y: control.height + 6
         width: Math.min(560, Math.max(control.width, 380))
         padding: 6
-        implicitHeight: Math.min(contentItem.implicitHeight + topPadding + bottomPadding, 280)
+        implicitHeight: Math.min(contentItem.implicitHeight + topPadding + bottomPadding, 300)
         clip: true
 
         background: Rectangle {
@@ -179,6 +180,7 @@ ComboBox {
             currentIndex: control.highlightedIndex
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.VerticalFlick
+            highlightMoveDuration: 0
             ScrollBar.vertical: AppScrollBar {}
         }
     }

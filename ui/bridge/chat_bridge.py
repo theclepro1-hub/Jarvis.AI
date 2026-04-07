@@ -14,6 +14,7 @@ class ChatBridge(QObject):
     appCatalogChanged = Signal()
     queueChanged = Signal()
     thinkingChanged = Signal()
+    saveHistoryEnabledChanged = Signal()
     workerReplyReady = Signal(str)
 
     def __init__(self, state, services, app_bridge) -> None:
@@ -47,6 +48,21 @@ class ChatBridge(QObject):
     @Property(bool, notify=thinkingChanged)
     def thinking(self) -> bool:
         return self._thinking
+
+    @Property(bool, notify=saveHistoryEnabledChanged)
+    def saveHistoryEnabled(self) -> bool:
+        settings = getattr(self.services, "settings", None)
+        if settings is None or not hasattr(settings, "get"):
+            return True
+        return bool(settings.get("save_history_enabled", True))
+
+    @saveHistoryEnabled.setter
+    def saveHistoryEnabled(self, value: bool) -> None:
+        settings = getattr(self.services, "settings", None)
+        if settings is None or not hasattr(settings, "set"):
+            return
+        settings.set("save_history_enabled", bool(value))
+        self.saveHistoryEnabledChanged.emit()
 
     @Slot(str)
     def sendMessage(self, text: str) -> None:
@@ -107,8 +123,9 @@ class ChatBridge(QObject):
 
     @Slot()
     def clearHistory(self) -> None:
+        if hasattr(self.services, "chat_history"):
+            self.services.chat_history.clear()
         self._messages = [self._welcome_message()]
-        self.services.chat_history.save(self._messages)
         self.messagesChanged.emit()
 
     def _resolve_ai_reply(self, text: str) -> None:
@@ -240,7 +257,7 @@ class ChatBridge(QObject):
                 "steps": steps or [],
             },
         ]
-        if os.environ.get("JARVIS_UNITY_DISABLE_CHAT_HISTORY") != "1":
+        if self._should_persist_history():
             self.services.chat_history.save(self._messages)
         self.messagesChanged.emit()
 
@@ -248,7 +265,7 @@ class ChatBridge(QObject):
         return datetime.now().strftime("%H:%M")
 
     def _load_history(self) -> list[dict[str, Any]]:
-        if os.environ.get("JARVIS_UNITY_DISABLE_CHAT_HISTORY") == "1":
+        if not self._should_persist_history():
             return [self._welcome_message()]
         messages = self.services.chat_history.load()
         if not messages:
@@ -300,3 +317,11 @@ class ChatBridge(QObject):
         self._app_catalog = self.services.actions.app_catalog()
         self.quickActionsChanged.emit()
         self.appCatalogChanged.emit()
+
+    def _should_persist_history(self) -> bool:
+        settings = getattr(self.services, "settings", None)
+        if settings is None or not hasattr(settings, "get"):
+            return os.environ.get("JARVIS_UNITY_DISABLE_CHAT_HISTORY") != "1"
+        if os.environ.get("JARVIS_UNITY_DISABLE_CHAT_HISTORY") == "1":
+            return False
+        return bool(settings.get("save_history_enabled", True))

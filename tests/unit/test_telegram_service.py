@@ -42,6 +42,8 @@ class FakeOffsetStore:
 @dataclass
 class FakeTransport:
     updates: list[TelegramUpdate]
+    fail_get_updates: Exception | None = None
+    fail_send_message: Exception | None = None
 
     def __post_init__(self) -> None:
         self.requested_offsets: list[int | None] = []
@@ -49,11 +51,15 @@ class FakeTransport:
 
     def get_updates(self, offset: int | None = None) -> list[TelegramUpdate]:
         self.requested_offsets.append(offset)
+        if self.fail_get_updates is not None:
+            raise self.fail_get_updates
         if offset is None:
             return list(self.updates)
         return [update for update in self.updates if update.update_id >= offset]
 
     def send_message(self, chat_id: int, text: str) -> None:
+        if self.fail_send_message is not None:
+            raise self.fail_send_message
         self.sent_messages.append((chat_id, text))
 
 
@@ -197,3 +203,55 @@ def test_refresh_configuration_rebuilds_http_transport_without_restart() -> None
     assert service.transport.bot_token == "new_token"
     assert service.is_authorized("456") is True
     assert service.is_authorized("123") is False
+
+
+def test_telegram_status_snapshot_tracks_last_command_reply_and_poll() -> None:
+    updates = [TelegramUpdate(update_id=21, chat_id=777, user_id=123456789, text="привет")]
+    transport = FakeTransport(updates)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=21),
+        handler=lambda text: f"ok:{text}",
+    )
+
+    results = service.poll_once()
+    snapshot = service.status_snapshot()
+
+    assert results[0].reply_text == "ok:привет"
+    assert snapshot.configured is True
+    assert snapshot.connected is True
+    assert snapshot.last_command == "привет"
+    assert snapshot.last_reply == "ok:привет"
+    assert snapshot.last_error == ""
+    assert snapshot.last_poll_at_utc is not None
+
+
+def test_telegram_service_exposes_failure_status_and_can_send_test_message() -> None:
+    transport = FakeTransport([], fail_get_updates=RuntimeError("network down"), fail_send_message=RuntimeError("send down"))
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=0),
+        handler=lambda text: f"ok:{text}",
+    )
+
+    results = service.poll_once()
+    assert results == []
+    assert service.is_connected() is False
+    assert "RuntimeError" in service.last_error()
+
+    assert service.send_test_message("777", "проверка telegram") is False
+    assert "RuntimeError" in service.last_error()
+
+
+def test_telegram_service_send_test_message_uses_configured_user_id() -> None:
+    transport = FakeTransport([])
+    service = TelegramService(
+        FakeSettings(telegram_user_id="987654321", telegram_bot_token="bot_token"),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=0),
+    )
+
+    assert service.send_test_message() is True
+    assert transport.sent_messages == [(987654321, "Тестовое сообщение JARVIS Unity")]

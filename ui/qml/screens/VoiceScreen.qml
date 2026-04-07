@@ -82,7 +82,7 @@ Rectangle {
                     spacing: 8
 
                     Text {
-                        text: "Проверка"
+                        text: "JARVIS меня слышит"
                         color: Theme.Colors.text
                         font.family: Theme.Typography.displayFamily
                         font.pixelSize: Theme.Typography.small
@@ -90,7 +90,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Кнопки ниже не выполняют команду. Они только проверяют: слышит ли JARVIS слово активации и умеет ли говорить тестовую фразу."
+                        text: "Скажите короткую фразу. JARVIS покажет, что услышал, как очистил текст и какое действие выбрал. Команда не выполняется."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
@@ -103,13 +103,13 @@ Rectangle {
                         spacing: 10
 
                         PrimaryButton {
-                            objectName: "wakeWordTestButton"
-                            text: "Проверить «Джарвис»"
+                            objectName: "voiceUnderstandingTestButton"
+                            text: "Проверить понимание"
                             compact: true
-                            onClicked: voiceBridge.runWakeWordTest()
+                            onClicked: voiceBridge.runVoiceUnderstandingTest()
                         }
 
-                        PrimaryButton {
+                        SecondaryButton {
                             objectName: "jarvisVoiceTestButton"
                             text: "Сказать «Я на связи»"
                             compact: true
@@ -319,6 +319,43 @@ Rectangle {
                         Layout.fillWidth: true
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
+                    }
+
+                    ColumnLayout {
+                        visible: voiceBridge.voiceTest.stage !== "idle"
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Text {
+                            text: voiceBridge.voiceTest.heardText.length > 0
+                                  ? "Услышал: " + voiceBridge.voiceTest.heardText
+                                  : "Слушаю..."
+                            color: Theme.Colors.text
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                        }
+
+                        Text {
+                            visible: voiceBridge.voiceTest.recognizedText.length > 0
+                            text: "После очистки: " + voiceBridge.voiceTest.recognizedText
+                            color: Theme.Colors.textSoft
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                        }
+
+                        Text {
+                            visible: voiceBridge.voiceTest.summary.length > 0
+                            text: "Что сделаю: " + voiceBridge.voiceTest.summary
+                            color: Theme.Colors.accent
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                        }
                     }
                 }
             }

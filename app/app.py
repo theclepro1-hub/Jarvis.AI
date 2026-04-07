@@ -64,6 +64,8 @@ class JarvisUnityApplication:
         self._background_timer = None
         self._telegram_timer = None
         self._telegram_polling = False
+        self._update_timer = None
+        self._update_checking = False
         _load_embedded_fonts()
         _boot_log("app:init:fonts")
         self.services = ServiceContainer()
@@ -81,7 +83,7 @@ class JarvisUnityApplication:
         _boot_log("app:init:apps-bridge")
         self.voice_bridge = VoiceBridge(self.state, self.services, self.chat_bridge)
         _boot_log("app:init:voice-bridge")
-        self.settings_bridge = SettingsBridge(self.state, self.services, self.app_bridge)
+        self.settings_bridge = SettingsBridge(self.state, self.services, self.app_bridge, self.chat_bridge)
         _boot_log("app:init:settings-bridge")
         self.registration_bridge = RegistrationBridge(self.state, self.services, self.app_bridge)
         _boot_log("app:init:registration-bridge")
@@ -203,6 +205,11 @@ class JarvisUnityApplication:
         self._telegram_timer.start()
         QTimer.singleShot(250, self._poll_telegram_async)
         QTimer.singleShot(1000, self._fire_due_reminders)
+        self._update_timer = QTimer()
+        self._update_timer.setInterval(self._update_check_interval_ms())
+        self._update_timer.timeout.connect(self._check_updates_async)
+        self._update_timer.start()
+        QTimer.singleShot(2500, self._check_updates_async)
 
     def _tick_background_services(self) -> None:
         self._fire_due_reminders()
@@ -233,8 +240,9 @@ class JarvisUnityApplication:
         telegram = getattr(self.services, "telegram", None)
         if telegram is not None and hasattr(telegram, "refresh_configuration"):
             telegram.refresh_configuration()
-        transport = getattr(telegram, "transport", None)
-        if telegram is None or transport is None:
+        if telegram is None or not hasattr(telegram, "send_message"):
+            return
+        if hasattr(telegram, "is_configured") and not telegram.is_configured():
             return
         chat_id = str(getattr(record, "telegram_chat_id", "") or "").strip()
         if not chat_id and hasattr(telegram, "telegram_user_id"):
@@ -244,7 +252,7 @@ class JarvisUnityApplication:
 
         def worker() -> None:
             try:
-                transport.send_message(int(chat_id), message)
+                telegram.send_message(chat_id, message)
             except Exception as exc:  # noqa: BLE001
                 _boot_log(f"app:telegram:reminder-send-failed:{exc!r}")
 
@@ -256,7 +264,9 @@ class JarvisUnityApplication:
             return
         if hasattr(telegram, "refresh_configuration"):
             telegram.refresh_configuration()
-        if not telegram.is_configured() or getattr(telegram, "transport", None) is None:
+        if hasattr(telegram, "is_configured") and not telegram.is_configured():
+            return
+        if getattr(telegram, "transport", None) is None:
             return
         if self._telegram_polling:
             return
@@ -269,6 +279,29 @@ class JarvisUnityApplication:
                 _boot_log(f"app:telegram:poll-failed:{exc!r}")
             finally:
                 self._telegram_polling = False
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_check_interval_ms(self) -> int:
+        return 6 * 60 * 60 * 1000
+
+    def _check_updates_async(self) -> None:
+        updates = getattr(self.services, "updates", None)
+        if updates is None or not hasattr(updates, "check_now"):
+            return
+        if self._update_checking:
+            return
+        self._update_checking = True
+
+        def worker() -> None:
+            try:
+                updates.check_now()
+            except Exception as exc:  # noqa: BLE001
+                _boot_log(f"app:updates:check-failed:{exc!r}")
+            finally:
+                self._update_checking = False
+                if hasattr(self, "settings_bridge") and hasattr(self.settings_bridge, "updateSummaryChanged"):
+                    self.settings_bridge.updateSummaryChanged.emit()
 
         threading.Thread(target=worker, daemon=True).start()
 

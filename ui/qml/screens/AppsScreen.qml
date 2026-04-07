@@ -580,6 +580,12 @@ Rectangle {
                                 }
 
                                 SecondaryButton {
+                                    text: appCard.modelData.isPinned ? "Открепить" : "Закрепить"
+                                    selected: appCard.modelData.isPinned
+                                    onClicked: appsBridge.togglePinnedCommand(appCard.modelData.id)
+                                }
+
+                                SecondaryButton {
                                     visible: appCard.modelData.category === "music" && appCard.modelData.id !== appsBridge.defaultMusicAppId
                                     text: "Сделать основным"
                                     onClicked: appsBridge.setDefaultMusicApp(appCard.modelData.id)

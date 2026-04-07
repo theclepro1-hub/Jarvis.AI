@@ -33,7 +33,17 @@ class CommandRouter:
         self.pc = pc_control or PcControlService(action_registry)
 
     def handle(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult:
-        reminder_result = self._handle_reminder(text, source=source, telegram_chat_id=telegram_chat_id)
+        return self._build_route(text, source=source, telegram_chat_id=telegram_chat_id, execute=True)
+
+    def preview(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult:
+        return self._build_route(text, source=source, telegram_chat_id=telegram_chat_id, execute=False)
+
+    def _build_route(self, text: str, *, source: str = "ui", telegram_chat_id: str = "", execute: bool) -> RouteResult:
+        reminder_result = (
+            self._handle_reminder(text, source=source, telegram_chat_id=telegram_chat_id)
+            if execute
+            else self._preview_reminder(text, source=source, telegram_chat_id=telegram_chat_id)
+        )
         if reminder_result is not None:
             return reminder_result
 
@@ -61,36 +71,37 @@ class CommandRouter:
                 )
                 continue
 
-            execution_steps.extend(self._execute_plan(plan))
+            if execute:
+                execution_steps.extend(self._execute_plan(plan))
+            else:
+                execution_steps.extend(self._preview_plan(plan))
 
-        if execution_steps:
-            if unsupported:
-                for unsupported_command in unsupported:
-                    execution_steps.append(
-                        ExecutionStep(
-                            id=self._step_id(unsupported_command, "unsupported"),
-                            kind="unsupported",
-                            title=f"Не понял: {unsupported_command}",
-                            detail="Нужен AI-разбор или уточнение.",
-                            status="needs_ai",
-                            supported=False,
-                        )
-                    )
-            summary = self._render_summary(execution_steps)
-            result = ExecutionResult(
-                kind="local",
-                commands=commands,
-                steps=execution_steps,
-                assistant_lines=[summary] if summary else [],
-                queue_items=queue_items,
-                requires_ai=bool(unsupported),
-            )
-            return RouteResult("local", commands, result.assistant_lines, queue_items, result)
+        if not execution_steps and not unsupported:
+            return RouteResult("ai" if execute else "preview", commands, [], queue_items)
 
         if unsupported:
-            return RouteResult("ai", commands, [], queue_items)
+            for unsupported_command in unsupported:
+                execution_steps.append(
+                    ExecutionStep(
+                        id=self._step_id(unsupported_command, "unsupported"),
+                        kind="unsupported",
+                        title=f"Не понял: {unsupported_command}",
+                        detail="Нужен AI-разбор или уточнение.",
+                        status="needs_ai",
+                        supported=False,
+                    )
+                )
 
-        return RouteResult("ai", commands, [], queue_items)
+        summary = self._render_summary(execution_steps, preview=not execute)
+        result = ExecutionResult(
+            kind="local" if execute else "preview",
+            commands=commands,
+            steps=execution_steps,
+            assistant_lines=[summary] if summary else [],
+            queue_items=queue_items,
+            requires_ai=bool(unsupported),
+        )
+        return RouteResult("local" if execute else "preview", commands, result.assistant_lines, queue_items, result)
 
     def _handle_reminder(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult | None:
         clean = text.strip()
@@ -138,6 +149,52 @@ class CommandRouter:
         result = ExecutionResult("local", [clean], [step], [title], [clean], question=title)
         return RouteResult("local", [clean], result.assistant_lines, [clean], result)
 
+    def _preview_reminder(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult | None:
+        clean = text.strip()
+        if not clean.casefold().startswith("напомни"):
+            return None
+
+        if self.reminders is None:
+            step = ExecutionStep(
+                id=self._step_id(clean, "reminder_unavailable"),
+                kind="reminder",
+                title="Напоминания пока недоступны.",
+                detail="Сервис напоминаний не подключён.",
+                status="failed",
+            )
+            result = ExecutionResult("preview", [clean], [step], [step.title], [clean])
+            return RouteResult("preview", [clean], result.assistant_lines, [clean], result)
+
+        parsed = self.reminders.preview(clean)
+        if parsed.ok and parsed.intent is not None:
+            title = self.reminders.confirmation_message(parsed.intent)
+            step = ExecutionStep(
+                id=self._step_id(clean, "reminder"),
+                kind="reminder",
+                title=title,
+                detail=title,
+                status="pending",
+                payload={"preview": True, "source": source, "telegram_chat_id": telegram_chat_id},
+            )
+            result = ExecutionResult("preview", [clean], [step], [title], [clean])
+            return RouteResult("preview", [clean], result.assistant_lines, [clean], result)
+
+        title = "Не понял время напоминания."
+        if parsed.error == "missing_text":
+            title = "Что напомнить?"
+        elif parsed.error == "bad_unit":
+            title = "Не понял единицу времени для напоминания."
+        step = ExecutionStep(
+            id=self._step_id(clean, "reminder_parse_failed"),
+            kind="reminder",
+            title=title,
+            detail=parsed.error,
+            status="needs_input",
+            supported=False,
+        )
+        result = ExecutionResult("preview", [clean], [step], [title], [clean], question=title)
+        return RouteResult("preview", [clean], result.assistant_lines, [clean], result)
+
     def _execute_plan(self, plan: ExecutionPlan) -> list[ExecutionStep]:
         step = plan.steps[0]
         if step.kind == "open_items":
@@ -162,33 +219,115 @@ class CommandRouter:
             return [self.pc.volume_down().to_step(step.id, step.kind, step.payload)]
         return [step]
 
-    def _render_summary(self, steps: list[ExecutionStep]) -> str:
+    def _preview_plan(self, plan: ExecutionPlan) -> list[ExecutionStep]:
+        step = plan.steps[0]
+        if step.kind == "open_items":
+            items = step.payload.get("items", [])
+            preview_steps: list[ExecutionStep] = []
+            for index, item in enumerate(items):
+                title = f"Открою {item.get('title', step.title)}"
+                preview_steps.append(
+                    ExecutionStep(
+                        id=self._step_id(step.id, index),
+                        kind=step.kind,
+                        title=title,
+                        detail=str(item.get("target", "")),
+                        status="pending",
+                        supported=True,
+                        payload=step.payload,
+                    )
+                )
+            return preview_steps
+        if step.kind == "open_url":
+            return [
+                ExecutionStep(
+                    id=step.id,
+                    kind=step.kind,
+                    title=step.title,
+                    detail=step.detail,
+                    status="pending",
+                    supported=True,
+                    payload=step.payload,
+                )
+            ]
+        if step.kind == "search_web":
+            return [
+                ExecutionStep(
+                    id=step.id,
+                    kind=step.kind,
+                    title=step.title,
+                    detail=step.detail,
+                    status="pending",
+                    supported=True,
+                    payload=step.payload,
+                )
+            ]
+        if step.kind in {"media_play_pause", "media_next", "media_previous", "media_mute", "volume_up", "volume_down"}:
+            return [
+                ExecutionStep(
+                    id=step.id,
+                    kind=step.kind,
+                    title=step.title,
+                    detail=step.detail,
+                    status="pending",
+                    supported=True,
+                    payload=step.payload,
+                )
+            ]
+        return [
+            ExecutionStep(
+                id=step.id,
+                kind=step.kind,
+                title=step.title,
+                detail=step.detail,
+                status="pending",
+                supported=True,
+                payload=step.payload,
+            )
+        ]
+
+    def _render_summary(self, steps: list[ExecutionStep], *, preview: bool = False) -> str:
         executable = [step for step in steps if step.supported and step.kind not in {"clarify", "unsupported"}]
         actionable = [step for step in executable if step.status in {"done", "sent_unverified"}]
+        previewable = [step for step in executable if step.status == "pending"]
         failed = [step for step in steps if step.supported and step.status == "failed"]
         questions = [step for step in steps if step.kind == "clarify"]
         needs_input = [step for step in steps if step.status == "needs_input" and step.kind != "clarify"]
         unsupported = [step for step in steps if step.kind == "unsupported"]
 
-        if questions and not actionable:
+        if questions and not (actionable or previewable):
             return questions[0].title
-        if needs_input and not actionable:
+        if needs_input and not (actionable or previewable):
             return needs_input[0].title
 
-        if len(executable) > 1:
-            titles = ", ".join(self._clean_title(step.title) for step in executable)
-            summary = f"Выполняю {len(executable)} {self._action_word(len(executable))}: {titles}"
-        elif len(actionable) == 1:
-            summary = actionable[0].title
-        elif len(executable) == 1 and failed:
-            summary = executable[0].title
+        if preview:
+            if len(executable) > 1:
+                titles = ", ".join(self._clean_title(step.title) for step in executable)
+                summary = f"Выполню {len(executable)} {self._action_word(len(executable))}: {titles}"
+            elif len(executable) == 1:
+                summary = executable[0].title
+            elif unsupported:
+                summary = f"Не понял: {', '.join(self._clean_title(step.title) for step in unsupported)}"
+            else:
+                summary = "Не удалось понять команду."
         else:
-            summary = "Не удалось выполнить команду."
+            if len(executable) > 1:
+                titles = ", ".join(self._clean_title(step.title) for step in executable)
+                summary = f"Выполняю {len(executable)} {self._action_word(len(executable))}: {titles}"
+            elif len(actionable) == 1:
+                summary = actionable[0].title
+            elif len(executable) == 1 and failed:
+                summary = executable[0].title
+            else:
+                summary = "Не удалось выполнить команду."
 
         failed_titles = [self._clean_title(step.title) for step in failed]
         if failed and summary not in {step.title for step in failed} and self._clean_title(summary) not in failed_titles:
             summary = f"{summary} | Не удалось: {', '.join(self._clean_title(step.title) for step in failed)}"
-        if unsupported:
+        if unsupported and not preview:
+            note = ", ".join(self._clean_title(step.title) for step in unsupported)
+            summary = f"{summary} | Не понял: {note}"
+        if unsupported and preview and len(executable) > 0:
             note = ", ".join(self._clean_title(step.title) for step in unsupported)
             summary = f"{summary} | Не понял: {note}"
         return summary
@@ -199,7 +338,7 @@ class CommandRouter:
         return "действий"
 
     def _clean_title(self, title: str) -> str:
-        for prefix in ("Не удалось: ", "Открываю ", "Ищу в интернете: "):
+        for prefix in ("Не удалось: ", "Открываю ", "Ищу в интернете: ", "Открою "):
             if title.startswith(prefix):
                 return title.removeprefix(prefix)
         return title

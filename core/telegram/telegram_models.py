@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import dataclass
 
 
@@ -21,3 +22,13 @@ class TelegramDispatchResult:
     handled: bool
     reply_text: str = ""
     error: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramStatusSnapshot:
+    configured: bool
+    connected: bool
+    last_command: str = ""
+    last_reply: str = ""
+    last_error: str = ""
+    last_poll_at_utc: datetime | None = None

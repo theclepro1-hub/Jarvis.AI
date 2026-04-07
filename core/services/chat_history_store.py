@@ -34,3 +34,7 @@ class ChatHistoryStore:
     def save(self, messages: list[dict[str, str]]) -> None:
         with self.history_path.open("w", encoding="utf-8") as handle:
             json.dump(messages[-80:], handle, ensure_ascii=False, indent=2)
+
+    def clear(self) -> None:
+        if self.history_path.exists():
+            self.history_path.unlink()

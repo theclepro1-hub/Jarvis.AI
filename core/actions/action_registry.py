@@ -18,6 +18,7 @@ EXACT_MUSIC_ALIASES = (
     ("windows music", "музыка windows"),
 )
 QUICK_ACTION_IDS = ("youtube", "browser", "music", "steam", "discord")
+QUICK_ACTION_LIMIT = 7
 NATURAL_ALIAS_TEMPLATES = (
     (
         ("counter-strike 2", "counter strike 2", "cs2"),
@@ -100,17 +101,27 @@ class ActionRegistry:
         self.discovery = LauncherDiscovery()
 
     def quick_actions(self) -> list[dict[str, str]]:
+        pinned = [self._find_by_id(action_id) for action_id in self._pinned_command_ids()]
         curated = [self._find_by_id(action_id) for action_id in QUICK_ACTION_IDS]
-        favorites = [
-            item
-            for item in self.catalog
-            if item and item.get("custom") and item.get("favorite") and self._is_safe_quick_action(item)
-        ][:2]
-        items = [item for item in curated if item is not None] + favorites
-        return [{"id": str(item["id"]), "title": str(item["title"])} for item in items[:7]]
+        items: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in [*pinned, *curated]:
+            if item is None:
+                continue
+            item_id = str(item["id"])
+            if item_id in seen:
+                continue
+            if not self._is_safe_quick_action(item):
+                continue
+            seen.add(item_id)
+            items.append(item)
+            if len(items) >= QUICK_ACTION_LIMIT:
+                break
+        return [{"id": str(item["id"]), "title": str(item["title"])} for item in items]
 
     def app_catalog(self) -> list[dict[str, str]]:
         default_music_id = str(self.settings.get("default_music_app", "")).strip()
+        pinned_ids = set(self._pinned_command_ids())
         return [
             {
                 "id": str(item["id"]),
@@ -121,6 +132,7 @@ class ActionRegistry:
                 "category": str(item.get("category", "app")),
                 "section": self._catalog_section(item),
                 "isDefaultMusic": str(item["id"]) == default_music_id,
+                "isPinned": str(item["id"]) in pinned_ids,
                 "canBeDefaultMusic": str(item.get("category", "")) == "music" and not item.get("builtin_default", False),
             }
             for item in self._user_visible_catalog()
@@ -259,21 +271,28 @@ class ActionRegistry:
 
     def scan_and_import_apps(self) -> dict[str, object]:
         existing = self._existing_keys()
-        candidates = [
-            candidate
-            for candidate in self.discovery.discover()
-            if not self._candidate_exists(candidate, existing) and not self._is_windows_music_candidate(candidate)
-        ]
+        candidates = list(self.discovery.discover())
         imported: list[dict[str, str]] = []
         review: list[dict[str, str]] = []
+        skipped = 0
+        already_existing = 0
 
         for candidate in candidates:
+            candidate_dict = candidate.to_dict()
+            if self._candidate_exists(candidate, existing):
+                already_existing += 1
+                continue
+            if self._is_windows_music_candidate(candidate):
+                skipped += 1
+                continue
             if self._can_auto_import(candidate):
                 if self.add_discovered_app(candidate):
-                    imported.append(candidate.to_dict())
+                    imported.append(candidate_dict)
                     existing = self._existing_keys()
+                else:
+                    skipped += 1
                 continue
-            review.append(candidate.to_dict())
+            review.append(candidate_dict)
 
         self._maybe_set_single_music_default()
         review_limited = review[:8]
@@ -290,10 +309,19 @@ class ActionRegistry:
             summary = "Новых безопасных приложений не найдено. Уже добавленное показано в категориях ниже."
         if conflicts:
             summary = f"{summary} Выберите основное музыкальное приложение в разделе «Музыка»."
+        skipped_total = skipped + len(review)
+        summary = (
+            f"Добавлено: {len(imported)}, уже было: {already_existing}, "
+            f"пропущено: {skipped_total}, конфликтов: {len(conflicts)}. {summary}"
+        )
         return {
             "imported": imported,
             "review": review_limited,
             "conflicts": conflicts,
+            "added": len(imported),
+            "already_existing": already_existing,
+            "skipped": skipped_total,
+            "conflict_count": len(conflicts),
             "summary": summary,
         }
 
@@ -327,6 +355,25 @@ class ActionRegistry:
             return False
         self.settings.set("default_music_app", app_id)
         return True
+
+    def set_pinned_commands(self, command_ids: list[str]) -> list[str]:
+        normalized = [str(command_id).strip() for command_id in command_ids if str(command_id).strip()]
+        self.settings.set_pinned_commands(normalized[:QUICK_ACTION_LIMIT])
+        return self.settings.get_pinned_commands()
+
+    def pin_command(self, command_id: str) -> list[str]:
+        return self.settings.pin_command(command_id)
+
+    def unpin_command(self, command_id: str) -> list[str]:
+        return self.settings.unpin_command(command_id)
+
+    def pinned_commands(self) -> list[dict[str, str]]:
+        items = []
+        for command_id in self.settings.get_pinned_commands():
+            item = self._find_by_id(command_id)
+            if item is not None:
+                items.append({"id": str(item["id"]), "title": str(item["title"])})
+        return items
 
     def _merged_catalog(self) -> list[dict[str, str]]:
         custom_apps = [self._normalize_catalog_item(item) for item in self.settings.get("custom_apps", [])]
@@ -517,6 +564,15 @@ class ActionRegistry:
         if len(custom_music) <= 1 or self.settings.get("default_music_app"):
             return []
         return [{"id": str(item["id"]), "title": str(item["title"])} for item in custom_music]
+
+    def _pinned_command_ids(self) -> list[str]:
+        getter = getattr(self.settings, "get_pinned_commands", None)
+        if getter is None:
+            return []
+        pinned = getter()
+        if not isinstance(pinned, list):
+            return []
+        return [str(item).strip() for item in pinned if str(item).strip()]
 
     def _can_auto_import(self, candidate: DiscoveredApp) -> bool:
         if candidate.category == "music":

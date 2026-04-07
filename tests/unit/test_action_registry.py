@@ -537,4 +537,4 @@ def test_scan_summary_mentions_review_candidates_when_auto_import_skips_them() -
 
     assert result["imported"] == []
     assert result["review"][0]["title"] == "Very Long Utility Launcher Name That Needs Review"
-    assert result["summary"].startswith("Найдено для проверки:")
+    assert "Найдено для проверки:" in result["summary"]

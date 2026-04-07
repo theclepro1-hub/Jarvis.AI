@@ -65,3 +65,8 @@ class AppBridge(QObject):
     def finishRegistration(self) -> None:
         self.state.registrationRequired = False
         self.state.currentScreen = "chat"
+
+    @Slot()
+    def restartRegistration(self) -> None:
+        self.state.registrationRequired = True
+        self.state.currentScreen = "registration"

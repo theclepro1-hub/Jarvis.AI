@@ -8,6 +8,7 @@ class SettingsBridge(QObject):
     startupEnabledChanged = Signal()
     minimizeToTrayEnabledChanged = Signal()
     startMinimizedEnabledChanged = Signal()
+    saveHistoryEnabledChanged = Signal()
     aiModeChanged = Signal()
     aiProviderChanged = Signal()
     aiProfileChanged = Signal()
@@ -15,12 +16,16 @@ class SettingsBridge(QObject):
     connectionsChanged = Signal()
     connectionFeedbackChanged = Signal()
     updateSummaryChanged = Signal()
+    telegramStatusChanged = Signal()
+    pinnedCommandsChanged = Signal()
+    dataSafetyChanged = Signal()
 
-    def __init__(self, state, services, app_bridge) -> None:
+    def __init__(self, state, services, app_bridge, chat_bridge=None) -> None:
         super().__init__()
         self.state = state
         self.services = services
         self.app_bridge = app_bridge
+        self.chat_bridge = chat_bridge
         self._connection_feedback = ""
 
     @Property(str, notify=themeModeChanged)
@@ -61,6 +66,17 @@ class SettingsBridge(QObject):
         if self.startupEnabled:
             self.services.startup.set_enabled(True, minimized=value)
         self.startMinimizedEnabledChanged.emit()
+
+    @Property(bool, notify=saveHistoryEnabledChanged)
+    def saveHistoryEnabled(self) -> bool:
+        return bool(self.services.settings.save_history_enabled())
+
+    @saveHistoryEnabled.setter
+    def saveHistoryEnabled(self, value: bool) -> None:
+        self.services.settings.set_save_history_enabled(bool(value))
+        self.saveHistoryEnabledChanged.emit()
+        self.connectionsChanged.emit()
+        self.dataSafetyChanged.emit()
 
     @Property(str, notify=aiModeChanged)
     def aiMode(self) -> str:
@@ -163,6 +179,31 @@ class SettingsBridge(QObject):
             return bool(telegram.is_configured())
         return bool(self.telegramBotToken and self.telegramUserId)
 
+    @Property("QVariantMap", notify=telegramStatusChanged)
+    def telegramStatus(self) -> dict[str, object]:
+        telegram = getattr(self.services, "telegram", None)
+        if telegram is not None and hasattr(telegram, "status_snapshot"):
+            snapshot = telegram.status_snapshot()
+            last_poll = getattr(snapshot, "last_poll_at_utc", None)
+            return {
+                "configured": bool(getattr(snapshot, "configured", False)),
+                "connected": bool(getattr(snapshot, "connected", False)),
+                "lastCommand": str(getattr(snapshot, "last_command", "")),
+                "lastReply": str(getattr(snapshot, "last_reply", "")),
+                "lastError": str(getattr(snapshot, "last_error", "")),
+                "lastPollAt": last_poll.isoformat() if last_poll is not None else "",
+            }
+        return {
+            "configured": self.telegramConfigured,
+            "connected": False,
+            "lastCommand": "",
+            "lastReply": "",
+            "lastError": "telegram service unavailable",
+            "lastPollAt": "",
+            "lastUpdateId": 0,
+            "lastChatId": "",
+        }
+
     @Property("QVariantMap", notify=connectionsChanged)
     def connections(self) -> dict[str, object]:
         registration = self._registration()
@@ -175,16 +216,42 @@ class SettingsBridge(QObject):
             "telegramBotTokenSet": self.telegramBotTokenSet,
             "telegramUserId": self.telegramUserId,
             "telegramConfigured": self.telegramConfigured,
+            "saveHistoryEnabled": self.saveHistoryEnabled,
             "skipped": bool(registration.get("skipped", False)),
-            # Snake-case keys keep this bridge usable from tests and older QML bindings.
             "groq_api_key": self.groqApiKey,
             "telegram_bot_token": self.telegramBotToken,
             "telegram_user_id": self.telegramUserId,
         }
 
+    @Property("QVariantList", notify=pinnedCommandsChanged)
+    def pinnedCommands(self) -> list[dict[str, str]]:
+        actions = getattr(self.services, "actions", None)
+        if actions is None or not hasattr(actions, "pinned_commands"):
+            return []
+        return list(actions.pinned_commands())
+
     @Property(str, notify=connectionFeedbackChanged)
     def connectionFeedback(self) -> str:
         return self._connection_feedback
+
+    @Property(str, notify=updateSummaryChanged)
+    def updateSummary(self) -> str:
+        return self.services.updates.summary()
+
+    @Property("QVariantMap", notify=updateSummaryChanged)
+    def updateStatus(self) -> dict[str, object]:
+        updates = getattr(self.services, "updates", None)
+        if updates is not None and hasattr(updates, "status_snapshot"):
+            return dict(updates.status_snapshot())
+        return {
+            "current_version": "",
+            "latest_version": "",
+            "release_url": "",
+            "update_available": False,
+            "last_error": "update service unavailable",
+            "last_checked_at_utc": "",
+            "assets": [],
+        }
 
     @Slot(str, str, str, result=bool)
     def saveConnections(self, groq_api_key: str, telegram_bot_token: str, telegram_user_id: str) -> bool:
@@ -204,6 +271,7 @@ class SettingsBridge(QObject):
         self._connection_feedback = "Подключения сохранены."
         self.connectionsChanged.emit()
         self.connectionFeedbackChanged.emit()
+        self.telegramStatusChanged.emit()
         return True
 
     @Slot()
@@ -219,10 +287,111 @@ class SettingsBridge(QObject):
         self._connection_feedback = "Telegram отключён."
         self.connectionsChanged.emit()
         self.connectionFeedbackChanged.emit()
+        self.telegramStatusChanged.emit()
 
-    @Property(str, notify=updateSummaryChanged)
-    def updateSummary(self) -> str:
-        return self.services.updates.summary()
+    @Slot(result=bool)
+    def sendTelegramTest(self) -> bool:
+        telegram = getattr(self.services, "telegram", None)
+        if telegram is None or not hasattr(telegram, "send_test_message"):
+            self._connection_feedback = "Telegram-сервис недоступен."
+            self.connectionFeedbackChanged.emit()
+            self.telegramStatusChanged.emit()
+            return False
+        ok = bool(telegram.send_test_message(text="JARVIS Unity на связи. Тест Telegram прошёл."))
+        if ok:
+            self._connection_feedback = "Тестовое сообщение отправлено в Telegram."
+        else:
+            error = ""
+            if hasattr(telegram, "last_error"):
+                error = str(telegram.last_error()).strip()
+            self._connection_feedback = f"Telegram не ответил: {error or 'проверьте токен и ID'}"
+        self.connectionFeedbackChanged.emit()
+        self.telegramStatusChanged.emit()
+        return ok
+
+    @Slot(result=bool)
+    def checkForUpdates(self) -> bool:
+        updates = getattr(self.services, "updates", None)
+        if updates is None or not hasattr(updates, "check_now"):
+            self.updateSummaryChanged.emit()
+            return False
+        result = updates.check_now()
+        self.updateSummaryChanged.emit()
+        return bool(getattr(result, "ok", False))
+
+    @Slot(bool)
+    def setSaveHistoryEnabled(self, value: bool) -> None:
+        self.saveHistoryEnabled = value
+        self.connectionsChanged.emit()
+        self.dataSafetyChanged.emit()
+
+    @Slot()
+    def clearChatHistory(self) -> None:
+        if hasattr(self.services, "chat_history"):
+            self.services.chat_history.clear()
+        if self.chat_bridge is not None and hasattr(self.chat_bridge, "clearHistory"):
+            self.chat_bridge.clearHistory()
+        self.dataSafetyChanged.emit()
+
+    @Slot()
+    def deleteAllData(self) -> dict[str, object]:
+        result = self.services.settings.clear_runtime_data()
+        self.services.settings.reload()
+        if hasattr(self.services, "actions"):
+            self.services.actions.catalog = self.services.actions._merged_catalog()
+        if hasattr(self.services, "chat_history"):
+            self.services.chat_history.clear()
+        if self.chat_bridge is not None and hasattr(self.chat_bridge, "clearHistory"):
+            self.chat_bridge.clearHistory()
+        self._refresh_telegram_transport()
+        if self.app_bridge is not None and hasattr(self.app_bridge, "restartRegistration"):
+            self.app_bridge.restartRegistration()
+        self._connection_feedback = "Все данные удалены. Нужна повторная регистрация."
+        self.themeModeChanged.emit()
+        self.startupEnabledChanged.emit()
+        self.minimizeToTrayEnabledChanged.emit()
+        self.startMinimizedEnabledChanged.emit()
+        self.saveHistoryEnabledChanged.emit()
+        self.aiModeChanged.emit()
+        self.aiProviderChanged.emit()
+        self.aiProfileChanged.emit()
+        self.aiModelChanged.emit()
+        self.connectionsChanged.emit()
+        self.connectionFeedbackChanged.emit()
+        self.telegramStatusChanged.emit()
+        self.dataSafetyChanged.emit()
+        self.pinnedCommandsChanged.emit()
+        return result
+
+    @Slot(str)
+    def pinCommand(self, command_id: str) -> None:
+        actions = getattr(self.services, "actions", None)
+        if actions is None or not hasattr(actions, "pin_command"):
+            return
+        actions.pin_command(command_id)
+        if self.chat_bridge is not None and hasattr(self.chat_bridge, "refreshCatalog"):
+            self.chat_bridge.refreshCatalog()
+        self.pinnedCommandsChanged.emit()
+        self.connectionsChanged.emit()
+
+    @Slot(str)
+    def unpinCommand(self, command_id: str) -> None:
+        actions = getattr(self.services, "actions", None)
+        if actions is None or not hasattr(actions, "unpin_command"):
+            return
+        actions.unpin_command(command_id)
+        if self.chat_bridge is not None and hasattr(self.chat_bridge, "refreshCatalog"):
+            self.chat_bridge.refreshCatalog()
+        self.pinnedCommandsChanged.emit()
+        self.connectionsChanged.emit()
+
+    @Slot(str)
+    def togglePinnedCommand(self, command_id: str) -> None:
+        pinned_ids = [item.get("id", "") for item in self.pinnedCommands]
+        if str(command_id).strip() in pinned_ids:
+            self.unpinCommand(command_id)
+            return
+        self.pinCommand(command_id)
 
     @Slot(str)
     def openScreen(self, screen: str) -> None:

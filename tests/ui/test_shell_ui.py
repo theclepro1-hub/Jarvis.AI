@@ -119,8 +119,10 @@ class _TestVoiceService:
 
     def start_manual_capture(self, on_text, on_note, on_finish):  # noqa: ANN001
         self.is_recording = True
-        on_note("Слушаю")
-        return "Слушаю"
+        on_text("Джарвис открой ютуб")
+        self.is_recording = False
+        on_finish()
+        return "открой ютуб"
 
     def stop_manual_capture(self) -> None:
         self.is_recording = False
@@ -153,10 +155,10 @@ class _TestWakeService:
 
 
 class _TestUpdatesService:
-    current_version = "22.0.0"
+    current_version = "22.1.0"
 
     def summary(self) -> str:
-        return "Версия 22.0.0 • канал стабильный"
+        return "Версия 22.1.0 • канал стабильный"
 
 
 def _pump(app: QGuiApplication, ms: int = 80) -> None:
@@ -474,7 +476,7 @@ def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
     _click(app, window, _find(window, "wakeWordSwitch"))
     assert runtime.services.settings.get("wake_word_enabled", True) is (not current)
 
-    _click(app, window, _find(window, "wakeWordTestButton"))
+    _click(app, window, _find(window, "voiceUnderstandingTestButton"))
     assert _find(window, "voiceTestResult").property("text")
 
 
@@ -486,10 +488,11 @@ def test_settings_connections_can_update_registration_fields(ui_runtime) -> None
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
 
-    _find(window, "settingsGroqField").setProperty("text", "fake_groq_settings_key")
-    _find(window, "settingsTelegramBotTokenField").setProperty("text", "bot_settings_token")
-    _find(window, "settingsTelegramUserIdField").setProperty("text", "987654321")
-    _click(app, window, _find(window, "settingsConnectionsSaveButton"))
+    assert runtime.settings_bridge.saveConnections(
+        "fake_groq_settings_key",
+        "bot_settings_token",
+        "987654321",
+    ) is True
     _pump(app, 120)
 
     registration = runtime.services.registration.load()

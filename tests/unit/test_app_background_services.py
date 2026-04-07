@@ -39,6 +39,7 @@ class FakeTelegram:
     def __init__(self, transport: FakeTelegramTransport) -> None:
         self.transport = transport
         self.refreshes = 0
+        self.send_calls: list[tuple[str, str]] = []
 
     def refresh_configuration(self) -> bool:
         self.refreshes += 1
@@ -46,6 +47,11 @@ class FakeTelegram:
 
     def telegram_user_id(self) -> str:
         return "123456789"
+
+    def send_message(self, chat_id: str | int, text: str) -> bool:
+        self.send_calls.append((str(chat_id), text))
+        self.transport.send_message(int(chat_id), text)
+        return True
 
 
 class FakeRuntime:

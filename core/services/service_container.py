@@ -46,7 +46,7 @@ class ServiceContainer:
         self.voice = VoiceService(self.settings)
         self.stt = STTService(self.settings)
         self.wake = WakeService(self.settings, self.voice)
-        self.updates = UpdateService()
+        self.updates = UpdateService(self.settings)
 
     def handle_external_command(self, text: str, telegram_chat_id: str = "") -> str:
         route = self.command_router.handle(text, source="telegram", telegram_chat_id=telegram_chat_id)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jarvisai-unity"
-version = "22.0.0"
+version = "22.1.0"
 description = "JarvisAi Unity desktop assistant rebuilt from scratch with PySide6 and Qt Quick."
 readme = "README.md"
 requires-python = ">=3.11"

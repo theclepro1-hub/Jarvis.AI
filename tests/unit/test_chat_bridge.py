@@ -15,12 +15,17 @@ class _State:
 class _History:
     def __init__(self) -> None:
         self.saved: list[list[dict[str, object]]] = []
+        self.current: list[dict[str, object]] = []
 
     def load(self) -> list[dict[str, object]]:
-        return []
+        return list(self.current)
 
     def save(self, messages: list[dict[str, object]]) -> None:
+        self.current = list(messages)
         self.saved.append(list(messages))
+
+    def clear(self) -> None:
+        self.current = []
 
 
 class _Actions:
@@ -67,6 +72,7 @@ class _Services:
         self.command_router = _Router(route)
         self.ai = _Ai()
         self.voice = _Voice()
+        self.settings = SimpleNamespace(get=lambda *_args, **_kwargs: True)
 
 
 def _ensure_app() -> QGuiApplication:
@@ -167,7 +173,7 @@ def test_clear_history_keeps_only_fresh_welcome_message() -> None:
     assert len(bridge.messages) == 1
     assert bridge.messages[0]["role"] == "assistant"
     assert "JARVIS Unity" in bridge.messages[0]["text"]
-    assert services.chat_history.saved[-1] == bridge.messages
+    assert services.chat_history.current == []
 
 
 def test_voice_response_speaks_assistant_local_result(monkeypatch) -> None:

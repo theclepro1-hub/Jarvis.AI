@@ -3,12 +3,13 @@ from __future__ import annotations
 import inspect
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
 import httpx
 
-from core.telegram.telegram_models import TelegramDispatchResult, TelegramUpdate
+from core.telegram.telegram_models import TelegramDispatchResult, TelegramStatusSnapshot, TelegramUpdate
 
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 2.0
@@ -53,7 +54,10 @@ class TelegramOffsetStore:
         if data_dir:
             base_dir = Path(data_dir)
         else:
-            base_dir = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home())) / "JarvisAi_Unity"
+            base_dir = (
+                Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
+                / "JarvisAi_Unity"
+            )
         return base_dir / "telegram_state.json"
 
 
@@ -127,6 +131,11 @@ class TelegramService:
         self.handler = handler
         self._offset: int | None = self.offset_store.load_offset()
         self._configuration_signature = self._current_configuration_signature()
+        self._connected = False
+        self._last_command = ""
+        self._last_reply = ""
+        self._last_error = ""
+        self._last_poll_at_utc: datetime | None = None
 
     def telegram_user_id(self) -> str:
         registration = self._registration()
@@ -142,15 +151,44 @@ class TelegramService:
     def poll_interval_ms(self) -> int:
         return DEFAULT_POLL_INTERVAL_MS
 
+    def status_snapshot(self) -> TelegramStatusSnapshot:
+        return TelegramStatusSnapshot(
+            configured=self.is_configured(),
+            connected=self._connected,
+            last_command=self._last_command,
+            last_reply=self._last_reply,
+            last_error=self._last_error,
+            last_poll_at_utc=self._last_poll_at_utc,
+        )
+
+    def last_command(self) -> str:
+        return self._last_command
+
+    def last_reply(self) -> str:
+        return self._last_reply
+
+    def last_error(self) -> str:
+        return self._last_error
+
+    def last_poll_at_utc(self) -> datetime | None:
+        return self._last_poll_at_utc
+
+    def is_connected(self) -> bool:
+        return self._connected
+
     def refresh_configuration(self) -> bool:
         next_signature = self._current_configuration_signature()
         if next_signature == self._configuration_signature:
+            if self.transport is None and self.is_configured():
+                self._refresh_http_transport(next_signature[0])
+                return True
             return False
 
         previous_token = self._configuration_signature[0]
         next_token = next_signature[0]
         self._configuration_signature = next_signature
         if previous_token != next_token:
+            self._connected = False
             self._refresh_http_transport(next_token)
         return True
 
@@ -171,9 +209,20 @@ class TelegramService:
 
     def poll_once(self) -> list[TelegramDispatchResult]:
         if self.transport is None:
+            self._connected = False
             return []
 
-        updates = self.transport.get_updates(self._offset)
+        try:
+            updates = self.transport.get_updates(self._offset)
+        except Exception as exc:  # noqa: BLE001
+            self._connected = False
+            self._last_error = self._format_error(exc)
+            self._last_poll_at_utc = datetime.now(timezone.utc)
+            return []
+
+        self._connected = True
+        self._last_error = ""
+        self._last_poll_at_utc = datetime.now(timezone.utc)
         results: list[TelegramDispatchResult] = []
         next_offset = self._offset
         for update in updates:
@@ -219,21 +268,43 @@ class TelegramService:
                 error="no_handler",
             )
 
+        self._last_command = text
         try:
             reply = self._call_handler(text, update.chat_id)
         except Exception as exc:
+            self._connected = False
+            self._last_error = self._format_error(exc)
             return TelegramDispatchResult(
                 update_id=update.update_id,
                 chat_id=update.chat_id,
                 user_id=update.user_id,
                 authorized=True,
                 handled=False,
-                error=type(exc).__name__,
+                error=self._last_error,
             )
 
         reply_text = "" if reply is None else str(reply).strip()
         if reply_text and self.transport is not None:
-            self.transport.send_message(update.chat_id, reply_text)
+            if not self.send_message(update.chat_id, reply_text):
+                return TelegramDispatchResult(
+                    update_id=update.update_id,
+                    chat_id=update.chat_id,
+                    user_id=update.user_id,
+                    authorized=True,
+                    handled=True,
+                    reply_text=reply_text,
+                    error=self._last_error or "send_failed",
+                )
+            self._last_reply = reply_text
+            self._last_error = ""
+            return TelegramDispatchResult(
+                update_id=update.update_id,
+                chat_id=update.chat_id,
+                user_id=update.user_id,
+                authorized=True,
+                handled=True,
+                reply_text=reply_text,
+            )
 
         return TelegramDispatchResult(
             update_id=update.update_id,
@@ -243,6 +314,46 @@ class TelegramService:
             handled=True,
             reply_text=reply_text,
         )
+
+    def send_message(self, chat_id: int | str, text: str) -> bool:
+        if self.transport is None:
+            self._connected = False
+            self._last_error = "no_transport"
+            return False
+
+        try:
+            normalized_chat_id = int(str(chat_id).strip())
+        except (TypeError, ValueError):
+            self._connected = False
+            self._last_error = "invalid_chat_id"
+            return False
+
+        payload = str(text or "").strip()
+        if not payload:
+            self._connected = False
+            self._last_error = "empty_text"
+            return False
+
+        try:
+            self.transport.send_message(normalized_chat_id, payload)
+        except Exception as exc:  # noqa: BLE001
+            self._connected = False
+            self._last_error = self._format_error(exc)
+            return False
+
+        self._connected = True
+        self._last_reply = payload
+        self._last_error = ""
+        return True
+
+    def send_test_message(
+        self,
+        chat_id: int | str | None = None,
+        text: str = "Тестовое сообщение JARVIS Unity",
+    ) -> bool:
+        self.refresh_configuration()
+        target_chat_id = chat_id if chat_id is not None else self.telegram_user_id()
+        return self.send_message(target_chat_id, text)
 
     def _call_handler(self, text: str, chat_id: int) -> str | None:
         if self.handler is None:
@@ -278,3 +389,9 @@ class TelegramService:
             network = self.settings.get("network", {}) or {}
         timeout = float(network.get("timeout_seconds", 12.0)) if isinstance(network, dict) else 12.0
         return HttpTelegramTransport(token, timeout_seconds=timeout)
+
+    def _format_error(self, exc: Exception) -> str:
+        message = str(exc).strip()
+        if message:
+            return f"{type(exc).__name__}: {message}"
+        return type(exc).__name__

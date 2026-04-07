@@ -42,7 +42,7 @@ class ReminderService:
         return ReminderCreateResult(
             True,
             record=record,
-            message=self._confirmation_message(parsed.intent),
+            message=self.confirmation_message(parsed.intent),
         )
 
     def due(self, now: datetime | None = None) -> list[ReminderRecord]:
@@ -74,7 +74,7 @@ class ReminderService:
     def reminder_intent(self, text: str, now: datetime | None = None) -> ReminderParseResult:
         return self.preview(text, now=now)
 
-    def _confirmation_message(self, intent: ReminderIntent) -> str:
+    def confirmation_message(self, intent: ReminderIntent) -> str:
         minutes = intent.delay_seconds // 60
         if intent.delay_seconds % 86400 == 0:
             units = f"{intent.delay_seconds // 86400} дн."

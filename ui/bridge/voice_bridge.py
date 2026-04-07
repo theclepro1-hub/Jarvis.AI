@@ -25,6 +25,10 @@ class VoiceBridge(QObject):
     testResultChanged = Signal()
     recordingChanged = Signal()
     recordingHintChanged = Signal()
+    voiceTestChanged = Signal()
+    voiceTestTextReady = Signal(str)
+    voiceTestNoteReady = Signal(str)
+    voiceTestFinished = Signal()
     transcribedTextReady = Signal(str)
     voiceNoteReady = Signal(str)
     captureFinished = Signal()
@@ -37,7 +41,11 @@ class VoiceBridge(QObject):
         self.services = services
         self._test_result = "Проверка ещё не запускалась."
         self._recording_hint = "Ручной микрофон готов."
+        self._voice_test = self._empty_voice_test()
         self._chat_bridge = chat_bridge
+        self.voiceTestTextReady.connect(self._handle_voice_test_text)
+        self.voiceTestNoteReady.connect(self._handle_voice_test_note)
+        self.voiceTestFinished.connect(self._finish_voice_test)
         self.transcribedTextReady.connect(self._deliver_transcribed_text)
         self.voiceNoteReady.connect(self._push_voice_note)
         self.captureFinished.connect(self._finalize_capture)
@@ -202,6 +210,10 @@ class VoiceBridge(QObject):
     def testResult(self) -> str:
         return self._test_result
 
+    @Property("QVariantMap", notify=voiceTestChanged)
+    def voiceTest(self) -> dict[str, object]:
+        return self._voice_test
+
     @Property(bool, notify=recordingChanged)
     def isRecording(self) -> bool:
         return self.services.voice.is_recording
@@ -220,6 +232,27 @@ class VoiceBridge(QObject):
         self._test_result = self.services.voice.test_jarvis_voice()
         self.testResultChanged.emit()
         self.statusChanged.emit()
+
+    @Slot()
+    def runVoiceUnderstandingTest(self) -> None:
+        if self.services.voice.is_recording:
+            self._test_result = "Запись уже идёт."
+            self.testResultChanged.emit()
+            return
+
+        self.services.wake.stop()
+        self._voice_test = self._empty_voice_test(stage="listening")
+        self.voiceTestChanged.emit()
+        self._recording_hint = "Скажите короткую фразу для проверки."
+        self.recordingHintChanged.emit()
+        self.state.status = "Слушаю"
+        self._test_result = "Слушаю..."
+        self.testResultChanged.emit()
+        self.services.voice.start_manual_capture(
+            on_text=self.voiceTestTextReady.emit,
+            on_note=self.voiceTestNoteReady.emit,
+            on_finish=self.voiceTestFinished.emit,
+        )
 
     @Slot(str)
     def setMode(self, value: str) -> None:
@@ -367,3 +400,128 @@ class VoiceBridge(QObject):
         if detail:
             return detail
         return "Не удалось разобрать команду после слова активации."
+
+    def _empty_voice_test(self, stage: str = "idle") -> dict[str, object]:
+        return {
+            "stage": stage,
+            "heardText": "",
+            "recognizedText": "",
+            "intent": "",
+            "command": "",
+            "summary": "",
+            "routeKind": "",
+            "error": "",
+            "commands": [],
+            "steps": [],
+        }
+
+    def _handle_voice_test_text(self, text: str) -> None:
+        heard = text.strip()
+        normalized = self._strip_voice_test_wake_word(heard)
+        route = self.services.command_router.preview(normalized, source="voice")
+        execution = getattr(route, "execution_result", None)
+        steps = []
+        if execution is not None and getattr(execution, "steps", None):
+            steps = [
+                {
+                    "title": str(step.title),
+                    "status": str(step.status),
+                    "detail": str(step.detail),
+                    "kind": str(step.kind),
+                }
+                for step in execution.steps
+            ]
+
+        summary = route.assistant_lines[0] if route.assistant_lines else normalized
+        intent = ""
+        if execution is not None and getattr(execution, "steps", None):
+            intent = str(execution.steps[0].kind)
+        elif route.kind:
+            intent = str(route.kind)
+
+        stage = "understood_command"
+        if route.kind == "ai" or any(step.get("status") == "needs_input" for step in steps):
+            stage = "understood_text"
+
+        self._voice_test = {
+            "stage": stage,
+            "heardText": heard,
+            "recognizedText": normalized,
+            "intent": intent,
+            "command": summary,
+            "summary": summary,
+            "routeKind": route.kind,
+            "error": "",
+            "commands": list(route.commands),
+            "steps": steps,
+        }
+        self._test_result = self._voice_test_summary()
+        self.voiceTestChanged.emit()
+        self.testResultChanged.emit()
+        self.statusChanged.emit()
+
+    def _handle_voice_test_note(self, note: str) -> None:
+        clean = note.strip()
+        stage = "error_stt"
+        lowered = clean.casefold()
+        if "микрофон" in lowered and ("не удалось" in lowered or "ошибка" in lowered):
+            stage = "error_mic"
+        elif "не удалось получить текст" in lowered or "не расслыш" in lowered:
+            stage = "not_heard"
+        elif "groq" in lowered or "ключ" in lowered or "stt" in lowered or "модель" in lowered:
+            stage = "error_stt"
+
+        self._voice_test = {
+            **self._voice_test,
+            "stage": stage,
+            "error": clean,
+            "summary": clean,
+            "command": clean,
+        }
+        self._test_result = clean
+        self.voiceTestChanged.emit()
+        self.testResultChanged.emit()
+        self.statusChanged.emit()
+
+    def _finish_voice_test(self) -> None:
+        if str(self._voice_test.get("stage", "idle")) == "listening":
+            self._voice_test = {
+                **self._voice_test,
+                "stage": "not_heard",
+                "error": "Не расслышал фразу.",
+                "summary": "Не расслышал фразу.",
+            }
+            self._test_result = "Не расслышал фразу."
+            self.voiceTestChanged.emit()
+            self.testResultChanged.emit()
+        self.recordingChanged.emit()
+        self._recording_hint = "Ручной микрофон готов."
+        self.recordingHintChanged.emit()
+        self.state.status = "Готов"
+        if self.wakeWordEnabled:
+            self.startWakeRuntime()
+
+    def _voice_test_summary(self) -> str:
+        parts = []
+        heard = str(self._voice_test.get("heardText", "")).strip()
+        recognized = str(self._voice_test.get("recognizedText", "")).strip()
+        command = str(self._voice_test.get("command", "")).strip()
+        if heard:
+            parts.append(f"Услышал: {heard}")
+        if recognized and recognized != heard:
+            parts.append(f"После очистки: {recognized}")
+        intent = str(self._voice_test.get("intent", "")).strip()
+        if intent:
+            parts.append(f"Тип команды: {intent}")
+        if command:
+            parts.append(f"Что сделаю: {command}")
+        error = str(self._voice_test.get("error", "")).strip()
+        if error and not parts:
+            return error
+        return " | ".join(parts) if parts else "Проверка завершена."
+
+    def _strip_voice_test_wake_word(self, text: str) -> str:
+        normalizer = getattr(self.services.voice, "strip_wake_word", None)
+        if callable(normalizer):
+            return normalizer(text)
+        return text.strip()
