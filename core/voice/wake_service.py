@@ -12,6 +12,8 @@ import sys
 import sounddevice as sd
 from vosk import KaldiRecognizer, Model, SetLogLevel
 
+from core.routing.text_rules import STRICT_WAKE_ALIASES, normalize_text, strip_leading_wake_prefix
+
 
 MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
 
@@ -27,7 +29,8 @@ class WakeService:
         if data_dir:
             self.base_dir = Path(data_dir) / "models"
         else:
-            self.base_dir = Path.home() / "AppData" / "Roaming" / "JarvisAi_Unity" / "models"
+            base_root = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
+            self.base_dir = base_root / "JarvisAi_Unity" / "models"
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.user_model_path = self.base_dir / MODEL_DIR_NAME
         self.bundled_model_path = self._find_bundled_model_path()
@@ -143,7 +146,8 @@ class WakeService:
         return candidates[-1]
 
     def _new_recognizer(self, model: Model) -> KaldiRecognizer:
-        return KaldiRecognizer(model, self.SAMPLE_RATE, '["джарвис", "[unk]"]')
+        grammar = [*STRICT_WAKE_ALIASES, "[unk]"]
+        return KaldiRecognizer(model, self.SAMPLE_RATE, json.dumps(grammar, ensure_ascii=False))
 
     def _contains_wake(self, payload: str, partial: bool = False) -> bool:
         try:
@@ -151,8 +155,11 @@ class WakeService:
         except json.JSONDecodeError:
             return False
         key = "partial" if partial else "text"
-        text = str(data.get(key, "")).casefold()
-        return "джарвис" in text or "jarvis" in text
+        text = normalize_text(str(data.get(key, "")))
+        if not text:
+            return False
+        stripped = strip_leading_wake_prefix(text, aliases=STRICT_WAKE_ALIASES)
+        return stripped != text or text.casefold().strip(" ,.:;!?-") in STRICT_WAKE_ALIASES
 
     def _set_phase(self, phase: str, detail: str, ready: bool) -> None:
         self._phase = phase

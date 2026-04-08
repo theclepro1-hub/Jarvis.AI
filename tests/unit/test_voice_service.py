@@ -50,6 +50,29 @@ def test_voice_runtime_without_key_reports_not_connected():
     assert status["tts"] == "голосовые ответы выключены"
 
 
+def test_voice_service_defers_audio_device_scan_until_needed(monkeypatch):
+    calls = {"devices": 0, "hostapis": 0}
+
+    def fake_query_devices():
+        calls["devices"] += 1
+        return [{"name": "Microphone (Logitech PRO X Gaming Headset)", "max_input_channels": 2}]
+
+    def fake_query_hostapis():
+        calls["hostapis"] += 1
+        return [{"name": "Windows WASAPI"}]
+
+    monkeypatch.setattr("core.voice.voice_service.sd.query_devices", fake_query_devices)
+    monkeypatch.setattr("core.voice.voice_service.sd.query_hostapis", fake_query_hostapis)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    assert calls == {"devices": 0, "hostapis": 0}
+    assert voice.microphones[0] == "Системный микрофон"
+    assert calls["devices"] == 2
+    assert calls["hostapis"] == 2
+
+
 def test_voice_service_normalizes_microphones_and_filters_driver_dump(monkeypatch):
     devices = [
         {"name": "Microphone (Logitech PRO X Gaming Headset)", "max_input_channels": 2},
@@ -77,6 +100,10 @@ def test_voice_service_strips_wake_word_from_transcription():
 
     assert voice._strip_wake_word("Джарвис открой YouTube") == "открой YouTube"  # noqa: SLF001
     assert voice._strip_wake_word("jarvis запусти музыку") == "запусти музыку"  # noqa: SLF001
+    assert voice._strip_wake_word("гарви с как дела") == "как дела"  # noqa: SLF001
+    assert voice._strip_wake_word("жарвис, как дела?") == "как дела?"  # noqa: SLF001
+    assert voice._strip_wake_word("как у джарвиса дела") == "как у джарвиса дела"  # noqa: SLF001
+    assert voice._strip_wake_word("джарвис") == ""  # noqa: SLF001
 
 
 def test_voice_service_normalizes_output_devices_and_filters_inputs(monkeypatch):

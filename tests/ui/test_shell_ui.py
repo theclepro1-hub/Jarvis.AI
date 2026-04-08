@@ -155,10 +155,10 @@ class _TestWakeService:
 
 
 class _TestUpdatesService:
-    current_version = "22.1.1"
+    current_version = "22.2.0"
 
     def summary(self) -> str:
-        return "Версия 22.1.1 • канал стабильный"
+        return "Версия 22.2.0 • канал стабильный"
 
 
 def _pump(app: QGuiApplication, ms: int = 80) -> None:

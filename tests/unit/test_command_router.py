@@ -304,3 +304,65 @@ def test_command_router_creates_reminder_without_ai(tmp_path):
     assert result.execution_result.steps[0].kind == "reminder"
     assert result.execution_result.steps[0].status == "done"
     assert reminder_service.store.list_pending()[0].text == "чай"
+
+
+def test_command_router_routes_plain_conversation_to_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("как дела?")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела?"]
+    assert result.assistant_lines == []
+    assert result.execution_result is None
+
+
+def test_command_router_strips_wake_like_prefix_before_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("гарви с как дела")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела"]
+
+
+def test_command_router_preview_marks_plain_conversation_as_ai_path() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.preview("гарви с как дела")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела"]
+
+
+def test_command_router_keeps_broken_command_as_local_clarification() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("открой")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Что открыть?"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_clarifies_bare_search_command() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("найди")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Что найти?"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_clarifies_trailing_connector_command() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("включи музыку и")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Что ещё сделать?"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"

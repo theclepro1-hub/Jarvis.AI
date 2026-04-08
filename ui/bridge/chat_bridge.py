@@ -5,7 +5,7 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
 
 class ChatBridge(QObject):
@@ -22,12 +22,14 @@ class ChatBridge(QObject):
         self.state = state
         self.services = services
         self.app_bridge = app_bridge
-        self._messages: list[dict[str, Any]] = self._load_history()
+        self._messages: list[dict[str, Any]] = [self._welcome_message()]
         self._queue_items: list[str] = []
-        self._quick_actions = self.services.actions.quick_actions()
-        self._app_catalog = self.services.actions.app_catalog()
+        self._quick_actions: list[dict[str, str]] = []
+        self._app_catalog: list[dict[str, str]] = []
         self._thinking = False
+        self._initial_state_hydrated = False
         self.workerReplyReady.connect(self._append_assistant_message)
+        QTimer.singleShot(0, self._hydrate_initial_state)
 
     @Property("QVariantList", notify=messagesChanged)
     def messages(self) -> list[dict[str, Any]]:
@@ -80,6 +82,11 @@ class ChatBridge(QObject):
         if route.kind == "local":
             self._thinking = False
             self.thinkingChanged.emit()
+            if route.execution_result is None and not route.assistant_lines:
+                self._queue_items = []
+                self.queueChanged.emit()
+                self.state.status = "Готов"
+                return
             self._append_local_result(route)
             self._queue_items = []
             self.queueChanged.emit()
@@ -88,7 +95,8 @@ class ChatBridge(QObject):
 
         self._thinking = True
         self.thinkingChanged.emit()
-        thread = threading.Thread(target=self._resolve_ai_reply, args=(clean,), daemon=True)
+        ai_text = " ".join(route.commands).strip() if route.commands else clean
+        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text,), daemon=True)
         thread.start()
 
     @Slot(str)
@@ -126,6 +134,7 @@ class ChatBridge(QObject):
         if hasattr(self.services, "chat_history"):
             self.services.chat_history.clear()
         self._messages = [self._welcome_message()]
+        self._initial_state_hydrated = True
         self.messagesChanged.emit()
 
     def _resolve_ai_reply(self, text: str) -> None:
@@ -317,6 +326,15 @@ class ChatBridge(QObject):
         self._app_catalog = self.services.actions.app_catalog()
         self.quickActionsChanged.emit()
         self.appCatalogChanged.emit()
+
+    def _hydrate_initial_state(self) -> None:
+        if self._initial_state_hydrated:
+            return
+        self._initial_state_hydrated = True
+        self.refreshCatalog()
+        if len(self._messages) == 1 and self._messages[0].get("role") == "assistant":
+            self._messages = self._load_history()
+            self.messagesChanged.emit()
 
     def _should_persist_history(self) -> bool:
         settings = getattr(self.services, "settings", None)

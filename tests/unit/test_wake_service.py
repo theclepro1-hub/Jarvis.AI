@@ -49,6 +49,17 @@ def test_wake_service_detects_wake_word_in_partial_payload():
 
     payload = json.dumps({"partial": "джарвис открой steam"}, ensure_ascii=False)
     assert wake._contains_wake(payload, partial=True) is True  # noqa: SLF001
+    alias_payload = json.dumps({"partial": "жарвис открой steam"}, ensure_ascii=False)
+    assert wake._contains_wake(alias_payload, partial=True) is True  # noqa: SLF001
+
+
+def test_wake_service_keeps_cleanup_only_aliases_out_of_strict_wake_detection():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    payload = json.dumps({"partial": "гарви с открой steam"}, ensure_ascii=False)
+    assert wake._contains_wake(payload, partial=True) is False  # noqa: SLF001
 
 
 def test_wake_service_ignores_non_matching_payload():
@@ -84,6 +95,17 @@ def test_wake_service_prefers_bundled_model_path(tmp_path, monkeypatch):
     wake = WakeService(settings, voice)
 
     assert wake.model_path == bundled_model
+
+
+def test_wake_service_uses_local_appdata_for_user_model_path(monkeypatch, tmp_path):
+    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    assert wake.user_model_path == tmp_path / "JarvisAi_Unity" / "models" / "vosk-model-small-ru-0.22"
 
 
 def test_wake_service_reports_transcribing_status_truthfully():

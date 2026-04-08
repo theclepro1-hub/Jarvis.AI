@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from core.intent.intent_router import IntentRouter
 from core.models.action_models import ExecutionPlan, ExecutionResult, ExecutionStep
 from core.pc_control.service import PcControlService
+from core.routing.text_rules import (
+    clarification_question,
+    looks_like_broken_command,
+    looks_like_conversation,
+    normalize_text,
+    strip_leading_wake_prefix,
+)
 
 
 @dataclass(slots=True)
@@ -24,11 +32,13 @@ class CommandRouter:
         ai_service,
         pc_control: PcControlService | None = None,
         reminder_service=None,
+        reminder_provider: Callable[[], object | None] | None = None,
     ) -> None:
         self.actions = action_registry
         self.batch_router = batch_router
         self.ai = ai_service
         self.reminders = reminder_service
+        self.reminder_provider = reminder_provider
         self.intent_router = IntentRouter(action_registry)
         self.pc = pc_control or PcControlService(action_registry)
 
@@ -39,15 +49,23 @@ class CommandRouter:
         return self._build_route(text, source=source, telegram_chat_id=telegram_chat_id, execute=False)
 
     def _build_route(self, text: str, *, source: str = "ui", telegram_chat_id: str = "", execute: bool) -> RouteResult:
+        clean_text = strip_leading_wake_prefix(text)
+        if not clean_text:
+            return RouteResult("local" if execute else "preview", [], [], [], None)
+
+        early_question = clarification_question(clean_text) if looks_like_broken_command(clean_text) else ""
+        if early_question:
+            return self._clarification_route(clean_text, early_question, execute=execute)
+
         reminder_result = (
-            self._handle_reminder(text, source=source, telegram_chat_id=telegram_chat_id)
+            self._handle_reminder(clean_text, source=source, telegram_chat_id=telegram_chat_id)
             if execute
-            else self._preview_reminder(text, source=source, telegram_chat_id=telegram_chat_id)
+            else self._preview_reminder(clean_text, source=source, telegram_chat_id=telegram_chat_id)
         )
         if reminder_result is not None:
             return reminder_result
 
-        commands = self.batch_router.split(text)
+        commands = self.batch_router.split(clean_text)
         queue_items = list(commands)
         execution_steps: list[ExecutionStep] = []
         unsupported: list[str] = []
@@ -79,8 +97,24 @@ class CommandRouter:
         if not execution_steps and not unsupported:
             return RouteResult("ai" if execute else "preview", commands, [], queue_items)
 
+        if unsupported and not execution_steps and self._should_fallback_to_ai(commands):
+            return RouteResult("ai", [clean_text], [], [clean_text])
+
         if unsupported:
             for unsupported_command in unsupported:
+                clarification = clarification_question(unsupported_command) if looks_like_broken_command(unsupported_command) else ""
+                if clarification:
+                    execution_steps.append(
+                        ExecutionStep(
+                            id=self._step_id(unsupported_command, "clarify"),
+                            kind="clarify",
+                            title=clarification,
+                            detail=clarification,
+                            status="needs_input",
+                            supported=False,
+                        )
+                    )
+                    continue
                 execution_steps.append(
                     ExecutionStep(
                         id=self._step_id(unsupported_command, "unsupported"),
@@ -103,12 +137,40 @@ class CommandRouter:
         )
         return RouteResult("local" if execute else "preview", commands, result.assistant_lines, queue_items, result)
 
+    def _clarification_route(self, command: str, question: str, *, execute: bool) -> RouteResult:
+        step = ExecutionStep(
+            id=self._step_id(command, "clarify"),
+            kind="clarify",
+            title=question,
+            detail=question,
+            status="needs_input",
+            supported=False,
+        )
+        result = ExecutionResult(
+            kind="local" if execute else "preview",
+            commands=[command],
+            steps=[step],
+            assistant_lines=[question],
+            queue_items=[command],
+            question=question,
+        )
+        return RouteResult("local" if execute else "preview", [command], result.assistant_lines, [command], result)
+
+    def _should_fallback_to_ai(self, commands: list[str]) -> bool:
+        normalized = [normalize_text(command) for command in commands if normalize_text(command)]
+        if not normalized:
+            return False
+        if any(looks_like_broken_command(command) for command in normalized):
+            return False
+        return all(looks_like_conversation(command) for command in normalized)
+
     def _handle_reminder(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult | None:
         clean = text.strip()
         if not clean.casefold().startswith("напомни"):
             return None
 
-        if self.reminders is None:
+        reminders = self._reminder_service()
+        if reminders is None:
             step = ExecutionStep(
                 id=self._step_id(clean, "reminder_unavailable"),
                 kind="reminder",
@@ -119,7 +181,7 @@ class CommandRouter:
             result = ExecutionResult("local", [clean], [step], [step.title], [clean])
             return RouteResult("local", [clean], result.assistant_lines, [clean], result)
 
-        created = self.reminders.create_from_text(clean, source=source, telegram_chat_id=telegram_chat_id)
+        created = reminders.create_from_text(clean, source=source, telegram_chat_id=telegram_chat_id)
         if created.ok:
             title = created.message or "Напоминание создано."
             step = ExecutionStep(
@@ -154,7 +216,8 @@ class CommandRouter:
         if not clean.casefold().startswith("напомни"):
             return None
 
-        if self.reminders is None:
+        reminders = self._reminder_service()
+        if reminders is None:
             step = ExecutionStep(
                 id=self._step_id(clean, "reminder_unavailable"),
                 kind="reminder",
@@ -165,9 +228,9 @@ class CommandRouter:
             result = ExecutionResult("preview", [clean], [step], [step.title], [clean])
             return RouteResult("preview", [clean], result.assistant_lines, [clean], result)
 
-        parsed = self.reminders.preview(clean)
+        parsed = reminders.preview(clean)
         if parsed.ok and parsed.intent is not None:
-            title = self.reminders.confirmation_message(parsed.intent)
+            title = reminders.confirmation_message(parsed.intent)
             step = ExecutionStep(
                 id=self._step_id(clean, "reminder"),
                 kind="reminder",
@@ -346,3 +409,8 @@ class CommandRouter:
     def _step_id(self, text: str, suffix: str | int) -> str:
         safe = "".join(ch if ch.isalnum() else "_" for ch in text.casefold()).strip("_")
         return f"{safe[:36] or 'command'}:{suffix}"
+
+    def _reminder_service(self):
+        if self.reminders is None and self.reminder_provider is not None:
+            self.reminders = self.reminder_provider()
+        return self.reminders

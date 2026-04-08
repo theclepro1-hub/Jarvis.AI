@@ -47,8 +47,12 @@ class _Router:
 
 
 class _Ai:
+    def __init__(self) -> None:
+        self.received: list[str] = []
+
     def generate_reply(self, _text: str, _history: list[dict[str, object]]) -> str:
-        return "AI fallback"
+        self.received.append(_text)
+        return f"AI fallback: {_text}"
 
 
 class _Voice:
@@ -188,3 +192,43 @@ def test_voice_response_speaks_assistant_local_result(monkeypatch) -> None:
     bridge.sendMessage("открой ютуб")
 
     assert services.voice.spoken == ["Открываю YouTube"]
+
+
+def test_chat_bridge_routes_plain_conversation_to_ai_without_local_not_understood(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["как дела?"], assistant_lines=[], queue_items=["как дела?"], execution_result=None)
+    bridge, services = _bridge_for(route)
+
+    bridge.sendMessage("как дела?")
+
+    assert services.ai.received == ["как дела?"]
+    assert bridge.messages[-1]["role"] == "assistant"
+    assert bridge.messages[-1]["text"] == "AI fallback: как дела?"
+
+
+def test_chat_bridge_uses_cleaned_ai_text_after_wake_like_prefix(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["как дела"], assistant_lines=[], queue_items=["как дела"], execution_result=None)
+    bridge, services = _bridge_for(route)
+
+    bridge.sendMessage("гарви с как дела")
+
+    assert services.ai.received == ["как дела"]
+    assert bridge.messages[-1]["text"] == "AI fallback: как дела"
+
+
+def test_chat_bridge_ignores_empty_local_noise_route() -> None:
+    route = SimpleNamespace(kind="local", commands=[], assistant_lines=[], queue_items=[], execution_result=None)
+    bridge, _services = _bridge_for(route)
+    before = len(bridge.messages)
+
+    bridge.sendMessage("джарвис")
+
+    assert len(bridge.messages) == before + 1
+    assert bridge.messages[-1]["role"] == "user"

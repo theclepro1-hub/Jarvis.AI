@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtGui import QGuiApplication, QIcon
@@ -15,15 +16,20 @@ def _boot_log(message: str) -> None:
     if os.environ.get("JARVIS_UNITY_BOOT_LOG") != "1":
         return
     try:
+        start_ns = int(os.environ.get("JARVIS_UNITY_BOOT_T0_NS", "0") or "0")
+        elapsed_ms = 0.0
+        if start_ns > 0:
+            elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
         log_path = Path.home() / "AppData" / "Local" / "JarvisAi_Unity" / "bootstrap.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(message + "\n")
+            handle.write(f"[{elapsed_ms:9.2f} ms] {message}\n")
     except Exception:
         pass
 
 
 def bootstrap() -> int:
+    os.environ.setdefault("JARVIS_UNITY_BOOT_T0_NS", str(time.perf_counter_ns()))
     _boot_log("bootstrap:begin")
     QGuiApplication.setOrganizationName("theclepro1")
     QGuiApplication.setOrganizationDomain("jarvisai.unity")

@@ -6,6 +6,7 @@ from typing import Callable
 
 import sounddevice as sd
 
+from core.routing.text_rules import WAKE_PREFIX_ALIASES, strip_leading_wake_prefix
 from core.voice.audio_device_service import AudioDeviceService
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
 from core.voice.stt_service import STTService
@@ -19,8 +20,8 @@ class VoiceService:
     BLOCK_FRAMES = 1600
     MANUAL_MAX_SECONDS = 8.0
     SILENCE_SECONDS = 0.9
-    WAKE_MAX_SECONDS = 3.0
-    WAKE_SILENCE_SECONDS = 0.45
+    WAKE_MAX_SECONDS = 3.6
+    WAKE_SILENCE_SECONDS = 0.28
     ENERGY_THRESHOLD = 160.0
     DEFAULT_INPUT_LABEL = "Системный микрофон"
     DEFAULT_OUTPUT_LABEL = "Системный вывод"
@@ -34,12 +35,8 @@ class VoiceService:
         self._wake_phase = "idle"
         self._wake_detail = "Слово активации не запущено"
         self._wake_ready = False
+        self._audio_devices: AudioDeviceService | None = None
 
-        self.audio_devices = AudioDeviceService(
-            query_devices=lambda: sd.query_devices(),
-            query_hostapis=lambda: sd.query_hostapis(),
-            default_device_getter=lambda: sd.default.device,
-        )
         self.capture_service = SpeechCaptureService(
             resolve_input_device=self._resolve_input_device,
             stop_event=self._manual_stop_event,
@@ -55,14 +52,35 @@ class VoiceService:
         self.stt_service = STTService(self.settings)
         self.tts_service = TTSService(self.settings)
 
-        self.microphone_device_models = self.audio_devices.microphone_models
-        self.output_device_models = self.audio_devices.output_models
-        self.microphones = self.audio_devices.microphones
-        self.output_devices = self.audio_devices.output_devices
-
     @property
     def is_recording(self) -> bool:
         return self._recording
+
+    @property
+    def audio_devices(self) -> AudioDeviceService:
+        if self._audio_devices is None:
+            self._audio_devices = AudioDeviceService(
+                query_devices=lambda: sd.query_devices(),
+                query_hostapis=lambda: sd.query_hostapis(),
+                default_device_getter=lambda: sd.default.device,
+            )
+        return self._audio_devices
+
+    @property
+    def microphone_device_models(self):
+        return self.audio_devices.microphone_models
+
+    @property
+    def output_device_models(self):
+        return self.audio_devices.output_models
+
+    @property
+    def microphones(self):
+        return self.audio_devices.microphones
+
+    @property
+    def output_devices(self):
+        return self.audio_devices.output_devices
 
     def set_wake_runtime_status(self, phase: str, ready: bool = False, detail: str | None = None) -> None:
         normalized = {
@@ -212,6 +230,7 @@ class VoiceService:
         return self.capture_after_wake_result(pre_roll).text
 
     def capture_after_wake_result(self, pre_roll: bytes) -> TranscriptionResult:
+        max_seconds, silence_seconds, energy_threshold = self._wake_capture_tuning()
         wake_capture = SpeechCaptureService(
             resolve_input_device=self._resolve_input_device,
             stop_event=self._manual_stop_event,
@@ -219,9 +238,9 @@ class VoiceService:
                 sample_rate=self.SAMPLE_RATE,
                 channels=self.CHANNELS,
                 block_frames=self.BLOCK_FRAMES,
-                max_seconds=self.WAKE_MAX_SECONDS,
-                silence_seconds=self.WAKE_SILENCE_SECONDS,
-                energy_threshold=self.ENERGY_THRESHOLD,
+                max_seconds=max_seconds,
+                silence_seconds=silence_seconds,
+                energy_threshold=energy_threshold,
             ),
         )
         capture = wake_capture.capture_until_silence(pre_roll=pre_roll)
@@ -233,9 +252,14 @@ class VoiceService:
         transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
         if transcription.ok:
             self.set_wake_runtime_status("routing", ready=False, detail="Распознаю команду")
+            stripped_text, matched_prefix, has_tail = self._split_wake_prefix(transcription.text)
+            if matched_prefix and not has_tail:
+                detail = "Не расслышал команду после слова активации"
+                self.set_wake_runtime_status("not_heard", ready=False, detail=detail)
+                return TranscriptionResult(status="no_speech", detail=detail, engine=transcription.engine)
             transcription = TranscriptionResult(
                 status="ok",
-                text=self._strip_wake_word(transcription.text),
+                text=stripped_text,
                 detail=transcription.detail,
                 engine=transcription.engine,
             )
@@ -317,6 +341,14 @@ class VoiceService:
     def normalize_output_selection(self, value: str) -> str:
         return self.audio_devices.normalize_output_selection(value)
 
+    def _wake_capture_tuning(self) -> tuple[float, float, float]:
+        mode = str(self.settings.get("voice_mode", "balance")).strip().casefold()
+        if mode == "quality":
+            return 4.0, 0.35, 145.0
+        if mode == "private":
+            return 3.2, 0.3, 150.0
+        return self.WAKE_MAX_SECONDS, self.WAKE_SILENCE_SECONDS, self.ENERGY_THRESHOLD
+
     def _capture_until_silence(
         self,
         pre_roll: bytes = b"",
@@ -343,14 +375,21 @@ class VoiceService:
         result = self.stt_service.transcribe_pcm_bytes(raw_bytes)
         return result.text if result.ok else ""
 
-    def _strip_wake_word(self, text: str) -> str:
+    def _split_wake_prefix(self, text: str) -> tuple[str, bool, bool]:
         clean = text.strip()
-        lowered = clean.casefold()
-        for wake in ("джарвис", "jarvis"):
-            if lowered.startswith(wake):
-                clean = clean[len(wake) :].lstrip(" ,.:;!-")
-                break
-        return clean
+        stripped = strip_leading_wake_prefix(clean)
+        if not stripped:
+            normalized = clean.casefold().strip(" ,.:;!?-")
+            if normalized in WAKE_PREFIX_ALIASES:
+                return "", True, False
+            return "", False, False
+        if stripped != clean:
+            return stripped, True, True
+        return clean, False, bool(clean)
+
+    def _strip_wake_word(self, text: str) -> str:
+        clean, _matched_prefix, has_tail = self._split_wake_prefix(text)
+        return clean if has_tail else ""
 
     def strip_wake_word(self, text: str) -> str:
         return self._strip_wake_word(text)

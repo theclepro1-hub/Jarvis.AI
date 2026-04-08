@@ -242,7 +242,8 @@ class STTService:
         if frozen_root:
             candidates.append(Path(frozen_root) / "assets" / "models" / MODEL_DIR_NAME)
         candidates.append(Path(__file__).resolve().parents[2] / "assets" / "models" / MODEL_DIR_NAME)
-        candidates.append(Path.home() / "AppData" / "Roaming" / "JarvisAi_Unity" / "models" / MODEL_DIR_NAME)
+        local_root = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
+        candidates.append(local_root / "JarvisAi_Unity" / "models" / MODEL_DIR_NAME)
 
         for candidate in candidates:
             if candidate.exists():

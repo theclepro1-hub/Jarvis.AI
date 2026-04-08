@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
+from core.services.service_container import ServiceContainer
 from core.telegram.telegram_models import TelegramUpdate
 from core.telegram.telegram_service import DEFAULT_POLL_INTERVAL_MS, HttpTelegramTransport, TelegramService
 
@@ -255,3 +257,47 @@ def test_telegram_service_send_test_message_uses_configured_user_id() -> None:
 
     assert service.send_test_message() is True
     assert transport.sent_messages == [(987654321, "Тестовое сообщение JARVIS Unity")]
+
+
+def test_telegram_service_routes_plain_conversation_through_service_container_ai() -> None:
+    route = SimpleNamespace(
+        kind="ai",
+        commands=["как дела?"],
+        assistant_lines=[],
+        queue_items=["как дела?"],
+        execution_result=None,
+    )
+    updates = [TelegramUpdate(update_id=31, chat_id=777, user_id=123456789, text="как дела?")]
+    transport = FakeTransport(updates)
+
+    class Router:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str]] = []
+
+        def handle(self, text: str, *, source: str = "ui", telegram_chat_id: str = ""):  # noqa: ANN201
+            self.calls.append((text, source, telegram_chat_id))
+            return route
+
+    class Ai:
+        def __init__(self) -> None:
+            self.received: list[str] = []
+
+        def generate_reply(self, text: str, _history: list[dict[str, object]]) -> str:
+            self.received.append(text)
+            return f"AI:{text}"
+
+    runtime = SimpleNamespace(command_router=Router(), ai=Ai())
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=31),
+        handler=lambda text, chat_id: ServiceContainer.handle_external_command(runtime, text, chat_id),
+    )
+
+    results = service.poll_once()
+
+    assert results[0].handled is True
+    assert results[0].reply_text == "AI:как дела?"
+    assert runtime.command_router.calls == [("как дела?", "telegram", "777")]
+    assert runtime.ai.received == ["как дела?"]
+    assert transport.sent_messages == [(777, "AI:как дела?")]
