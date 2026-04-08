@@ -76,6 +76,25 @@ def test_split_mixed_command_by_commas_and_verbs():
     ]
 
 
+def test_split_keeps_open_verb_for_following_object_until_new_action():
+    router = make_router()
+    assert router.split("открой стим, яндекс музыку и прибавь громкость") == [
+        "открой стим",
+        "открой яндекс музыку",
+        "прибавь громкость",
+    ]
+
+
+def test_split_keeps_open_verb_for_multiple_comma_objects():
+    router = make_router()
+    assert router.split("открой стим, музыку, дискорд и прибавь") == [
+        "открой стим",
+        "открой музыку",
+        "открой дискорд",
+        "прибавь",
+    ]
+
+
 def test_split_mixed_command_without_punctuation_between_verbs():
     router = make_router()
     assert router.split("открой музыку прибавь и найди чизбургер") == [

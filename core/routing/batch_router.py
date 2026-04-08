@@ -5,6 +5,7 @@ import re
 
 OPEN_VERBS = ("открой", "открыть", "запусти", "запустить", "включи", "включить")
 SEARCH_VERBS = ("найди", "поищи", "ищи", "поиск")
+NON_TARGET_START_TOKENS = ("как", "что", "почему", "зачем", "когда", "кто", "где", "объясни", "помоги")
 MEDIA_ACTION_PREFIXES = (
     "прибавь",
     "убавь",
@@ -58,7 +59,8 @@ class BatchRouter:
                 continue
             for action_segment in self._split_by_action_starts(segment):
                 expanded.extend(self._expand_segment(action_segment))
-        return expanded or [normalized]
+        inherited = self._apply_open_verb_inheritance(expanded)
+        return inherited or [normalized]
 
     def _starts_with_search(self, segment: str) -> bool:
         lower = segment.casefold().strip()
@@ -126,3 +128,54 @@ class BatchRouter:
         clean = re.sub(r"^(и|а ещё|а еще|потом)\s+", "", clean, flags=re.IGNORECASE)
         clean = re.sub(r"\s+(и|а ещё|а еще|потом)$", "", clean, flags=re.IGNORECASE)
         return clean.strip(" ,")
+
+    def _apply_open_verb_inheritance(self, commands: list[str]) -> list[str]:
+        """
+        Keep one open verb for following object fragments until a new action starts.
+        Example: "открой steam, яндекс музыку и прибавь громкость"
+        -> ["открой steam", "открой яндекс музыку", "прибавь громкость"].
+        """
+        inherited: list[str] = []
+        carry_open_verb = ""
+        for command in commands:
+            clean = self._strip_connectors(command)
+            if not clean:
+                continue
+
+            open_verb = self._leading_open_verb(clean)
+            if open_verb:
+                carry_open_verb = open_verb
+                inherited.append(clean)
+                continue
+
+            lower = clean.casefold()
+            starts_action = self._starts_with_action(lower)
+
+            if carry_open_verb and not starts_action and self._looks_like_open_target(clean):
+                inherited.append(f"{carry_open_verb} {clean}")
+                continue
+
+            inherited.append(clean)
+            if starts_action:
+                carry_open_verb = ""
+
+        return inherited
+
+    def _starts_with_action(self, text: str) -> bool:
+        return bool(ACTION_START_PATTERN.match(text.strip()))
+
+    def _leading_open_verb(self, text: str) -> str:
+        stripped = text.strip()
+        lower = stripped.casefold()
+        for verb in OPEN_VERBS:
+            prefix = f"{verb} "
+            if lower.startswith(prefix):
+                return stripped.split(" ", 1)[0]
+        return ""
+
+    def _looks_like_open_target(self, text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return False
+        first_token = stripped.casefold().split(" ", 1)[0]
+        return first_token not in NON_TARGET_START_TOKENS

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import sys
 import time
@@ -10,6 +11,8 @@ from PySide6.QtWidgets import QApplication
 
 from app.app import JarvisUnityApplication
 from core.services.single_instance import SingleInstanceService
+
+WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"
 
 
 def _boot_log(message: str) -> None:
@@ -28,12 +31,23 @@ def _boot_log(message: str) -> None:
         pass
 
 
+def _set_windows_app_user_model_id() -> None:
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(WINDOWS_APP_USER_MODEL_ID)
+        _boot_log(f"bootstrap:appusermodelid:{WINDOWS_APP_USER_MODEL_ID}")
+    except Exception as exc:  # noqa: BLE001
+        _boot_log(f"bootstrap:appusermodelid-failed:{exc!r}")
+
+
 def bootstrap() -> int:
     os.environ.setdefault("JARVIS_UNITY_BOOT_T0_NS", str(time.perf_counter_ns()))
     _boot_log("bootstrap:begin")
     QGuiApplication.setOrganizationName("theclepro1")
     QGuiApplication.setOrganizationDomain("jarvisai.unity")
     QGuiApplication.setApplicationName("JarvisAi Unity")
+    _set_windows_app_user_model_id()
     _boot_log("bootstrap:before-app")
     application = QApplication(sys.argv)
     application.setQuitOnLastWindowClosed(False)

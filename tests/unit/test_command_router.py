@@ -14,6 +14,10 @@ class FakeActions:
     def resolve_open_command(self, text: str):
         items = []
         lower = text.casefold()
+        if "steam" in lower or "стим" in lower:
+            items.append({"id": "steam", "title": "Steam", "kind": "uri", "target": "steam://open/main"})
+        if "discord" in lower or "дискорд" in lower:
+            items.append({"id": "discord", "title": "Discord", "kind": "uri", "target": "discord://"})
         if "ютуб" in lower or "youtube" in lower:
             items.append({"id": "youtube", "title": "YouTube", "kind": "url", "target": "https://www.youtube.com"})
         if "spotify" in lower or "спотифай" in lower or "спотик" in lower:
@@ -156,6 +160,19 @@ def test_command_router_runs_mixed_search_volume_open_as_one_plan_without_ai():
     assert actions.opened == ["youtube"]
     assert result.execution_result is not None
     assert [step.kind for step in result.execution_result.steps] == ["search_web", "volume_up", "open_items"]
+
+
+def test_command_router_inherits_open_verb_for_next_object_before_new_action():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой стим, яндекс музыку и прибавь громкость")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой стим", "открой яндекс музыку", "прибавь громкость"]
+    assert actions.opened == ["steam", "yandex_music"]
+    assert pc_control.media == ["up"]
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items", "volume_up"]
 
 
 def test_command_router_runs_mixed_open_volume_search_without_punctuation():
@@ -333,6 +350,26 @@ def test_command_router_preview_marks_plain_conversation_as_ai_path() -> None:
 
     assert result.kind == "ai"
     assert result.commands == ["как дела"]
+
+
+def test_command_router_keeps_wake_only_phrase_out_of_ai_path() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("джарвис")
+
+    assert result.kind == "local"
+    assert result.commands == []
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_wake_noise_alias_out_of_ai_path() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("гарви с")
+
+    assert result.kind == "local"
+    assert result.commands == []
+    assert result.execution_result is None
 
 
 def test_command_router_keeps_broken_command_as_local_clarification() -> None:

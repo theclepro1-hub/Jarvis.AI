@@ -515,6 +515,15 @@ def test_open_steam_launcher_does_not_match_every_steam_game() -> None:
     assert [item["title"] for item in items] == ["Steam"]
 
 
+def test_generic_music_does_not_fall_back_to_windows_music() -> None:
+    registry, _service = make_registry()
+
+    items, question = registry.resolve_open_command("открой музыку")
+
+    assert items == []
+    assert question == "Музыкальное приложение не найдено. Добавьте его во вкладке «Приложения»."
+
+
 def test_scan_summary_mentions_review_candidates_when_auto_import_skips_them() -> None:
     registry, _service = make_registry()
 

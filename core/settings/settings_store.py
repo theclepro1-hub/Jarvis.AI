@@ -5,7 +5,10 @@ import ctypes
 import json
 import os
 import shutil
+import tempfile
+import time
 from pathlib import Path
+from contextlib import contextmanager
 from typing import Any
 
 from ctypes import wintypes
@@ -61,6 +64,9 @@ SECRET_REGISTRATION_FIELDS = (
     "telegram_bot_token",
 )
 PROTECTED_SECRET_PREFIX = "dpapi:"
+_WAIT_OBJECT_0 = 0
+_WAIT_ABANDONED = 0x80
+_WAIT_TIMEOUT = 0x102
 
 
 class _DataBlob(ctypes.Structure):
@@ -100,10 +106,18 @@ class SettingsStore:
 
     def save(self, payload: dict[str, Any]) -> None:
         payload_to_write = self._prepare_for_save(payload)
-        temp_path = self.settings_path.with_suffix(".tmp")
-        with temp_path.open("w", encoding="utf-8") as handle:
-            json.dump(payload_to_write, handle, ensure_ascii=False, indent=2)
-        temp_path.replace(self.settings_path)
+        with self._write_mutex():
+            temp_path = self._make_temp_path()
+            try:
+                self._write_json_file(temp_path, payload_to_write)
+                replaced = self._replace_with_retry(temp_path, self.settings_path)
+                if not replaced:
+                    # Windows can reject atomic replace when another process keeps
+                    # settings.json open without delete sharing. Fall back to an
+                    # in-place rewrite under the same mutex so settings still persist.
+                    self._write_direct_with_retry(self.settings_path, payload_to_write)
+            finally:
+                temp_path.unlink(missing_ok=True)
 
     def delete_all_data(self) -> dict[str, Any]:
         resolved_base_dir = self.base_dir.resolve()
@@ -266,3 +280,80 @@ class SettingsStore:
             return resolved_path.is_relative_to(self.base_dir.resolve())
         except ValueError:
             return False
+
+    def _make_temp_path(self) -> Path:
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f"{self.settings_path.stem}_",
+            suffix=".tmp",
+            dir=str(self.base_dir),
+        )
+        os.close(fd)
+        return Path(temp_name)
+
+    def _write_json_file(self, target: Path, payload: dict[str, Any]) -> None:
+        with target.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _replace_with_retry(self, source: Path, target: Path, attempts: int = 8, delay_seconds: float = 0.05) -> bool:
+        for attempt in range(max(1, attempts)):
+            try:
+                source.replace(target)
+                return True
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) != 32 or attempt + 1 >= attempts:
+                    if getattr(exc, "winerror", None) == 32 and attempt + 1 >= attempts:
+                        return False
+                    raise
+                time.sleep(delay_seconds * (attempt + 1))
+        return False
+
+    def _write_direct_with_retry(
+        self,
+        target: Path,
+        payload: dict[str, Any],
+        attempts: int = 8,
+        delay_seconds: float = 0.05,
+    ) -> None:
+        last_error: Exception | None = None
+        for attempt in range(max(1, attempts)):
+            try:
+                self._write_json_file(target, payload)
+                return
+            except PermissionError as exc:
+                last_error = exc
+                if getattr(exc, "winerror", None) != 32 or attempt + 1 >= attempts:
+                    raise
+                time.sleep(delay_seconds * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+
+    @contextmanager
+    def _write_mutex(self):
+        if os.name != "nt":
+            yield
+            return
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        mutex_name = f"Local\\JarvisAi_Unity_settings_{self._mutex_suffix()}"
+        handle = kernel32.CreateMutexW(None, False, mutex_name)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "CreateMutexW failed")
+
+        acquired = False
+        try:
+            wait_result = kernel32.WaitForSingleObject(handle, 10_000)
+            if wait_result not in {_WAIT_OBJECT_0, _WAIT_ABANDONED}:
+                if wait_result == _WAIT_TIMEOUT:
+                    raise TimeoutError("Timed out waiting for settings write mutex")
+                raise OSError(ctypes.get_last_error(), "WaitForSingleObject failed")
+            acquired = True
+            yield
+        finally:
+            if acquired:
+                kernel32.ReleaseMutex(handle)
+            kernel32.CloseHandle(handle)
+
+    def _mutex_suffix(self) -> str:
+        return "".join(ch if ch.isalnum() else "_" for ch in str(self.settings_path).casefold())

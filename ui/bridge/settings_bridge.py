@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 from PySide6.QtCore import QObject, Property, Signal, Slot
+
+
+_SETTINGS_WRITE_LOCK = threading.RLock()
 
 
 class SettingsBridge(QObject):
@@ -19,6 +25,10 @@ class SettingsBridge(QObject):
     telegramStatusChanged = Signal()
     pinnedCommandsChanged = Signal()
     dataSafetyChanged = Signal()
+    telegramTestBusyChanged = Signal()
+    updateCheckBusyChanged = Signal()
+    _telegramTestFinished = Signal(bool, str)
+    _updateCheckFinished = Signal(bool)
 
     def __init__(self, state, services, app_bridge, chat_bridge=None) -> None:
         super().__init__()
@@ -27,6 +37,12 @@ class SettingsBridge(QObject):
         self.app_bridge = app_bridge
         self.chat_bridge = chat_bridge
         self._connection_feedback = ""
+        self._telegram_test_busy = False
+        self._update_check_busy = False
+        self._operation_lock = threading.Lock()
+        self._worker_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="settings-bridge")
+        self._telegramTestFinished.connect(self._on_telegram_test_finished)
+        self._updateCheckFinished.connect(self._on_update_check_finished)
 
     @Property(str, notify=themeModeChanged)
     def themeMode(self) -> str:
@@ -34,7 +50,8 @@ class SettingsBridge(QObject):
 
     @themeMode.setter
     def themeMode(self, value: str) -> None:
-        self.services.settings.set("theme_mode", value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("theme_mode", value)
         self.themeModeChanged.emit()
 
     @Property(bool, notify=startupEnabledChanged)
@@ -43,8 +60,9 @@ class SettingsBridge(QObject):
 
     @startupEnabled.setter
     def startupEnabled(self, value: bool) -> None:
-        self.services.startup.set_enabled(value, minimized=self.startMinimizedEnabled)
-        self.services.settings.set("startup_enabled", self.services.startup.is_enabled())
+        with _SETTINGS_WRITE_LOCK:
+            self.services.startup.set_enabled(value, minimized=self.startMinimizedEnabled)
+            self.services.settings.set("startup_enabled", self.services.startup.is_enabled())
         self.startupEnabledChanged.emit()
 
     @Property(bool, notify=minimizeToTrayEnabledChanged)
@@ -53,7 +71,8 @@ class SettingsBridge(QObject):
 
     @minimizeToTrayEnabled.setter
     def minimizeToTrayEnabled(self, value: bool) -> None:
-        self.services.settings.set("minimize_to_tray_enabled", value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("minimize_to_tray_enabled", value)
         self.minimizeToTrayEnabledChanged.emit()
 
     @Property(bool, notify=startMinimizedEnabledChanged)
@@ -62,9 +81,10 @@ class SettingsBridge(QObject):
 
     @startMinimizedEnabled.setter
     def startMinimizedEnabled(self, value: bool) -> None:
-        self.services.settings.set("start_minimized_enabled", value)
-        if self.startupEnabled:
-            self.services.startup.set_enabled(True, minimized=value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("start_minimized_enabled", value)
+            if self.startupEnabled:
+                self.services.startup.set_enabled(True, minimized=value)
         self.startMinimizedEnabledChanged.emit()
 
     @Property(bool, notify=saveHistoryEnabledChanged)
@@ -73,7 +93,8 @@ class SettingsBridge(QObject):
 
     @saveHistoryEnabled.setter
     def saveHistoryEnabled(self, value: bool) -> None:
-        self.services.settings.set_save_history_enabled(bool(value))
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set_save_history_enabled(bool(value))
         self.saveHistoryEnabledChanged.emit()
         self.connectionsChanged.emit()
         self.dataSafetyChanged.emit()
@@ -86,7 +107,8 @@ class SettingsBridge(QObject):
     def aiMode(self, value: str) -> None:
         if value not in {"auto", "fast", "quality", "local"}:
             value = "auto"
-        self.services.settings.set("ai_mode", value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("ai_mode", value)
         self.aiModeChanged.emit()
         self.aiProfileChanged.emit()
 
@@ -98,7 +120,8 @@ class SettingsBridge(QObject):
     def aiProvider(self, value: str) -> None:
         if value not in {"auto", "groq", "cerebras", "gemini", "openrouter"}:
             value = "auto"
-        self.services.settings.set("ai_provider", value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("ai_provider", value)
         self.aiProviderChanged.emit()
         self.aiProfileChanged.emit()
 
@@ -129,8 +152,9 @@ class SettingsBridge(QObject):
             "local": ("local", "auto"),
         }
         mode, provider = profile_map.get(value, profile_map["auto"])
-        self.services.settings.set("ai_mode", mode)
-        self.services.settings.set("ai_provider", provider)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("ai_mode", mode)
+            self.services.settings.set("ai_provider", provider)
         self.aiModeChanged.emit()
         self.aiProviderChanged.emit()
         self.aiProfileChanged.emit()
@@ -141,7 +165,8 @@ class SettingsBridge(QObject):
 
     @aiModel.setter
     def aiModel(self, value: str) -> None:
-        self.services.settings.set("ai_model", value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("ai_model", value)
         self.aiModelChanged.emit()
 
     @Property(str, notify=connectionsChanged)
@@ -234,6 +259,14 @@ class SettingsBridge(QObject):
     def connectionFeedback(self) -> str:
         return self._connection_feedback
 
+    @Property(bool, notify=telegramTestBusyChanged)
+    def telegramTestBusy(self) -> bool:
+        return self._telegram_test_busy
+
+    @Property(bool, notify=updateCheckBusyChanged)
+    def updateCheckBusy(self) -> bool:
+        return self._update_check_busy
+
     @Property(str, notify=updateSummaryChanged)
     def updateSummary(self) -> str:
         return self.services.updates.summary()
@@ -251,22 +284,29 @@ class SettingsBridge(QObject):
             "last_error": "update service unavailable",
             "last_checked_at_utc": "",
             "assets": [],
+            "apply_supported": False,
+            "can_apply": False,
+            "apply_hint": "",
+            "preferred_installer_asset": "",
+            "last_downloaded_installer": "",
+            "last_apply_message": "",
         }
 
     @Slot(str, str, str, result=bool)
     def saveConnections(self, groq_api_key: str, telegram_bot_token: str, telegram_user_id: str) -> bool:
         registration = self._registration()
-        self.services.settings.save_registration(
-            {
-                "groq_api_key": self._resolve_secret_input(groq_api_key, str(registration.get("groq_api_key", ""))),
-                "telegram_bot_token": self._resolve_secret_input(
-                    telegram_bot_token,
-                    str(registration.get("telegram_bot_token", "")),
-                ),
-                "telegram_user_id": str(telegram_user_id or "").strip(),
-            },
-            skipped=False,
-        )
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.save_registration(
+                {
+                    "groq_api_key": self._resolve_secret_input(groq_api_key, str(registration.get("groq_api_key", ""))),
+                    "telegram_bot_token": self._resolve_secret_input(
+                        telegram_bot_token,
+                        str(registration.get("telegram_bot_token", "")),
+                    ),
+                    "telegram_user_id": str(telegram_user_id or "").strip(),
+                },
+                skipped=False,
+            )
         self._refresh_telegram_transport()
         self._connection_feedback = "Подключения сохранены."
         self.connectionsChanged.emit()
@@ -282,7 +322,8 @@ class SettingsBridge(QObject):
             "telegram_user_id": "",
             "telegram_bot_token": "",
         }
-        self.services.settings.save_registration(payload, skipped=False)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.save_registration(payload, skipped=False)
         self._refresh_telegram_transport()
         self._connection_feedback = "Telegram отключён."
         self.connectionsChanged.emit()
@@ -297,17 +338,43 @@ class SettingsBridge(QObject):
             self.connectionFeedbackChanged.emit()
             self.telegramStatusChanged.emit()
             return False
-        ok = bool(telegram.send_test_message(text="JARVIS Unity на связи. Тест Telegram прошёл."))
-        if ok:
-            self._connection_feedback = "Тестовое сообщение отправлено в Telegram."
-        else:
-            error = ""
-            if hasattr(telegram, "last_error"):
-                error = str(telegram.last_error()).strip()
-            self._connection_feedback = f"Telegram не ответил: {error or 'проверьте токен и ID'}"
-        self.connectionFeedbackChanged.emit()
-        self.telegramStatusChanged.emit()
-        return ok
+        with self._operation_lock:
+            if self._telegram_test_busy:
+                self._connection_feedback = "Тест Telegram уже выполняется."
+                self.connectionFeedbackChanged.emit()
+                return False
+            self._telegram_test_busy = True
+        self.telegramTestBusyChanged.emit()
+
+        def worker() -> None:
+            ok = False
+            feedback = ""
+            try:
+                ok = bool(telegram.send_test_message(text="JARVIS Unity на связи. Тест Telegram прошёл."))
+            except Exception as exc:  # noqa: BLE001
+                ok = False
+                feedback = f"Telegram не ответил: {type(exc).__name__}"
+            if not feedback:
+                if ok:
+                    feedback = "Тестовое сообщение отправлено в Telegram."
+                else:
+                    error = ""
+                    if hasattr(telegram, "last_error"):
+                        error = str(telegram.last_error()).strip()
+                    feedback = f"Telegram не ответил: {error or 'проверьте токен и ID'}"
+            self._telegramTestFinished.emit(ok, feedback)
+
+        try:
+            self._worker_pool.submit(worker)
+        except RuntimeError:
+            with self._operation_lock:
+                self._telegram_test_busy = False
+            self.telegramTestBusyChanged.emit()
+            self._connection_feedback = "Не удалось запустить тест Telegram."
+            self.connectionFeedbackChanged.emit()
+            self.telegramStatusChanged.emit()
+            return False
+        return True
 
     @Slot(result=bool)
     def checkForUpdates(self) -> bool:
@@ -315,9 +382,61 @@ class SettingsBridge(QObject):
         if updates is None or not hasattr(updates, "check_now"):
             self.updateSummaryChanged.emit()
             return False
-        result = updates.check_now()
-        self.updateSummaryChanged.emit()
-        return bool(getattr(result, "ok", False))
+        with self._operation_lock:
+            if self._update_check_busy:
+                return False
+            self._update_check_busy = True
+        self.updateCheckBusyChanged.emit()
+
+        def worker() -> None:
+            ok = False
+            try:
+                result = updates.check_now()
+                ok = bool(getattr(result, "ok", False))
+            except Exception:  # noqa: BLE001
+                ok = False
+            self._updateCheckFinished.emit(ok)
+
+        try:
+            self._worker_pool.submit(worker)
+        except RuntimeError:
+            with self._operation_lock:
+                self._update_check_busy = False
+            self.updateCheckBusyChanged.emit()
+            self.updateSummaryChanged.emit()
+            return False
+        return True
+
+    @Slot(result=bool)
+    def applyUpdate(self) -> bool:
+        updates = getattr(self.services, "updates", None)
+        if updates is None or not hasattr(updates, "apply_update"):
+            self.updateSummaryChanged.emit()
+            return False
+        with self._operation_lock:
+            if self._update_check_busy:
+                return False
+            self._update_check_busy = True
+        self.updateCheckBusyChanged.emit()
+
+        def worker() -> None:
+            ok = False
+            try:
+                result = updates.apply_update()
+                ok = bool(getattr(result, "ok", False))
+            except Exception:  # noqa: BLE001
+                ok = False
+            self._updateCheckFinished.emit(ok)
+
+        try:
+            self._worker_pool.submit(worker)
+        except RuntimeError:
+            with self._operation_lock:
+                self._update_check_busy = False
+            self.updateCheckBusyChanged.emit()
+            self.updateSummaryChanged.emit()
+            return False
+        return True
 
     @Slot(bool)
     def setSaveHistoryEnabled(self, value: bool) -> None:
@@ -335,8 +454,9 @@ class SettingsBridge(QObject):
 
     @Slot()
     def deleteAllData(self) -> dict[str, object]:
-        result = self.services.settings.clear_runtime_data()
-        self.services.settings.reload()
+        with _SETTINGS_WRITE_LOCK:
+            result = self.services.settings.clear_runtime_data()
+            self.services.settings.reload()
         if hasattr(self.services, "actions"):
             self.services.actions.catalog = self.services.actions._merged_catalog()
         if hasattr(self.services, "chat_history"):
@@ -368,7 +488,8 @@ class SettingsBridge(QObject):
         actions = getattr(self.services, "actions", None)
         if actions is None or not hasattr(actions, "pin_command"):
             return
-        actions.pin_command(command_id)
+        with _SETTINGS_WRITE_LOCK:
+            actions.pin_command(command_id)
         if self.chat_bridge is not None and hasattr(self.chat_bridge, "refreshCatalog"):
             self.chat_bridge.refreshCatalog()
         self.pinnedCommandsChanged.emit()
@@ -379,7 +500,8 @@ class SettingsBridge(QObject):
         actions = getattr(self.services, "actions", None)
         if actions is None or not hasattr(actions, "unpin_command"):
             return
-        actions.unpin_command(command_id)
+        with _SETTINGS_WRITE_LOCK:
+            actions.unpin_command(command_id)
         if self.chat_bridge is not None and hasattr(self.chat_bridge, "refreshCatalog"):
             self.chat_bridge.refreshCatalog()
         self.pinnedCommandsChanged.emit()
@@ -416,3 +538,19 @@ class SettingsBridge(QObject):
 
     def _mask_secret(self, value: str) -> str:
         return "••••••••" if str(value or "").strip() else ""
+
+    @Slot(bool, str)
+    def _on_telegram_test_finished(self, _ok: bool, feedback: str) -> None:
+        with self._operation_lock:
+            self._telegram_test_busy = False
+        self._connection_feedback = str(feedback or "").strip()
+        self.telegramTestBusyChanged.emit()
+        self.connectionFeedbackChanged.emit()
+        self.telegramStatusChanged.emit()
+
+    @Slot(bool)
+    def _on_update_check_finished(self, _ok: bool) -> None:
+        with self._operation_lock:
+            self._update_check_busy = False
+        self.updateCheckBusyChanged.emit()
+        self.updateSummaryChanged.emit()

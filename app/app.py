@@ -273,13 +273,18 @@ class JarvisUnityApplication:
             return
         if getattr(telegram, "transport", None) is None:
             return
+        if hasattr(telegram, "can_poll_now") and not telegram.can_poll_now():
+            return
         if self._telegram_polling:
             return
         self._telegram_polling = True
 
         def worker() -> None:
             try:
-                telegram.poll_once()
+                try:
+                    telegram.poll_once(async_dispatch=True)
+                except TypeError:
+                    telegram.poll_once()
             except Exception as exc:  # noqa: BLE001
                 _boot_log(f"app:telegram:poll-failed:{exc!r}")
             finally:

@@ -21,6 +21,9 @@ MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
 class WakeService:
     SAMPLE_RATE = 16_000
     BLOCK_FRAMES = 1600
+    PRE_ROLL_FRAMES = 18
+    POST_WAKE_BRIDGE_FRAMES = 4
+    POST_WAKE_BRIDGE_TIMEOUT = 0.12
 
     def __init__(self, settings_service, voice_service) -> None:
         self.settings = settings_service
@@ -42,7 +45,7 @@ class WakeService:
         self._running = False
         self._phase = "idle"
         self._detail = "Слово активации не запущено"
-        self._buffer = deque(maxlen=18)
+        self._buffer = deque(maxlen=self.PRE_ROLL_FRAMES)
         self._last_detected_at = 0.0
         SetLogLevel(-1)
 
@@ -120,9 +123,10 @@ class WakeService:
 
                     if detected and time.time() - self._last_detected_at > 2.5:
                         self._last_detected_at = time.time()
-                        pre_roll = b"".join(self._buffer)
+                        post_roll = self._collect_post_wake_bridge(audio_queue)
+                        pre_roll = b"".join(self._buffer) + post_roll
                         self._buffer.clear()
-                        self._set_phase("capturing_command", "Слушаю команду", ready=False)
+                        self._set_phase("capturing_command", "Записываю команду", ready=False)
                         self._running = False
                         if self._callback is not None:
                             self._callback(pre_roll)
@@ -160,6 +164,15 @@ class WakeService:
             return False
         stripped = strip_leading_wake_prefix(text, aliases=STRICT_WAKE_ALIASES)
         return stripped != text or text.casefold().strip(" ,.:;!?-") in STRICT_WAKE_ALIASES
+
+    def _collect_post_wake_bridge(self, audio_queue: "queue.Queue[bytes]") -> bytes:
+        bridge: list[bytes] = []
+        for _ in range(self.POST_WAKE_BRIDGE_FRAMES):
+            try:
+                bridge.append(audio_queue.get(timeout=self.POST_WAKE_BRIDGE_TIMEOUT))
+            except queue.Empty:
+                break
+        return b"".join(bridge)
 
     def _set_phase(self, phase: str, detail: str, ready: bool) -> None:
         self._phase = phase

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import sys
 
 from core.settings.settings_service import SettingsService
@@ -118,3 +119,17 @@ def test_wake_service_reports_transcribing_status_truthfully():
     assert wake.phase == "transcribing"
     assert wake.status() == "Распознаю команду"
     assert voice.runtime_status()["wakeWord"] == "Распознаю команду"
+
+
+def test_wake_service_collects_short_post_wake_bridge():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    audio_queue: queue.Queue[bytes] = queue.Queue()
+    audio_queue.put(b"a")
+    audio_queue.put(b"b")
+
+    bridge = wake._collect_post_wake_bridge(audio_queue)  # noqa: SLF001
+
+    assert bridge == b"ab"

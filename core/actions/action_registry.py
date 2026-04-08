@@ -458,7 +458,7 @@ class ActionRegistry:
         )
 
     def _exact_music_item(self, target_text: str) -> dict[str, str] | None:
-        candidates = [*self._music_candidates(include_builtin=False), *self._music_fallback_candidates()]
+        candidates = self._music_candidates(include_builtin=False)
         for item in candidates:
             if item.get("builtin_default") and any(exact in target_text for group in EXACT_MUSIC_ALIASES for exact in group):
                 continue
@@ -532,7 +532,7 @@ class ActionRegistry:
         default_id = str(self.settings.get("default_music_app", "")).strip()
         if default_id:
             item = self._find_by_id(default_id)
-            if item:
+            if item and not self._is_music_fallback_item(item):
                 return item
 
         custom_music = self._music_candidates(include_builtin=False)
@@ -540,8 +540,7 @@ class ActionRegistry:
             return custom_music[0]
         if len(custom_music) > 1:
             return None
-        fallbacks = self._music_fallback_candidates()
-        return fallbacks[0] if fallbacks else None
+        return None
 
     def _music_candidates(self, include_builtin: bool) -> list[dict[str, str]]:
         candidates = [item for item in self.catalog if item.get("category") == "music"]

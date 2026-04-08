@@ -183,6 +183,15 @@ AppUpdatesURL=https://github.com/theclepro1-hub/Jarvis.AI/releases
 DefaultDirName={autopf}\JARVIS Unity
 DefaultGroupName=JARVIS Unity
 DisableProgramGroupPage=yes
+UninstallDisplayIcon={app}\JarvisAi_Unity.exe
+AppMutex=JarvisAi_Unity_22_instance_mutex
+CloseApplications=yes
+RestartApplications=yes
+VersionInfoCompany=theclepro1-hub
+VersionInfoDescription=JARVIS Unity desktop assistant
+VersionInfoProductName=JARVIS Unity
+VersionInfoProductVersion=$version
+VersionInfoVersion=$version.0
 OutputDir=$releaseDir
 OutputBaseFilename=JarvisAi_Unity_$version`_windows_installer
 SetupIconFile=$iconPath
@@ -203,9 +212,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "$portableDistPath\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"
+Name: "{group}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; AppUserModelID: "theclepro1.JarvisAiUnity"
 Name: "{group}\Uninstall JARVIS Unity"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; Tasks: desktopicon
+Name: "{autodesktop}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; Tasks: desktopicon; AppUserModelID: "theclepro1.JarvisAiUnity"
 
 [Run]
 Filename: "{app}\JarvisAi_Unity.exe"; Description: "{cm:LaunchProgram,JARVIS Unity}"; Flags: nowait postinstall skipifsilent

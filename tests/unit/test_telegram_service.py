@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 from core.services.service_container import ServiceContainer
@@ -301,3 +302,76 @@ def test_telegram_service_routes_plain_conversation_through_service_container_ai
     assert runtime.command_router.calls == [("как дела?", "telegram", "777")]
     assert runtime.ai.received == ["как дела?"]
     assert transport.sent_messages == [(777, "AI:как дела?")]
+
+
+def test_empty_handler_reply_uses_fallback_text_instead_of_silent_drop() -> None:
+    updates = [TelegramUpdate(update_id=60, chat_id=777, user_id=123456789, text="hello")]
+    transport = FakeTransport(updates)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=60),
+        handler=lambda _text: "",
+    )
+
+    results = service.poll_once()
+
+    assert results[0].authorized is True
+    assert results[0].handled is True
+    assert results[0].reply_text
+    assert transport.sent_messages == [(777, results[0].reply_text)]
+
+
+def test_send_failure_is_not_reported_as_success() -> None:
+    updates = [TelegramUpdate(update_id=61, chat_id=777, user_id=123456789, text="open music")]
+    transport = FakeTransport(updates, fail_send_message=RuntimeError("send down"))
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=61),
+        handler=lambda _text: "done",
+    )
+
+    results = service.poll_once()
+
+    assert results[0].authorized is True
+    assert results[0].handled is False
+    assert "RuntimeError" in (results[0].error or "")
+    assert transport.sent_messages == []
+
+
+def test_async_dispatch_does_not_silently_drop_later_updates() -> None:
+    updates = [
+        TelegramUpdate(update_id=100 + idx, chat_id=777, user_id=123456789, text=f"cmd {idx}")
+        for idx in range(20)
+    ]
+    transport = FakeTransport(updates)
+
+    def slow_handler(text: str) -> str:
+        time.sleep(0.08)
+        return f"ok:{text}"
+
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=100),
+        handler=slow_handler,
+    )
+
+    started_at = time.perf_counter()
+    queued = service.poll_once(async_dispatch=True)
+    elapsed = time.perf_counter() - started_at
+
+    assert len(queued) == 20
+    assert all(item.error == "queued" for item in queued)
+    assert elapsed < 0.5
+    assert service.pending_dispatches() > 0
+    assert service.can_poll_now() is False
+
+    deadline = time.perf_counter() + 6.0
+    while time.perf_counter() < deadline and service.pending_dispatches() > 0:
+        time.sleep(0.03)
+
+    assert service.pending_dispatches() == 0
+    assert service.can_poll_now() is True
+    assert len(transport.sent_messages) == 20

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from core.settings.settings_store import DEFAULT_SETTINGS, SettingsStore
 from core.services.chat_history_store import ChatHistoryStore
@@ -66,6 +67,50 @@ def test_settings_store_defaults_cover_history_and_pinned_commands() -> None:
 
     assert payload["save_history_enabled"] is True
     assert payload["pinned_commands"] == []
+
+
+def test_settings_store_falls_back_to_direct_write_when_replace_is_locked(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store = SettingsStore()
+
+    initial = json.loads(json.dumps(DEFAULT_SETTINGS))
+    initial["theme_mode"] = "midnight"
+    store.save(initial)
+
+    updated = json.loads(json.dumps(DEFAULT_SETTINGS))
+    updated["theme_mode"] = "aurora"
+
+    def locked_replace(self: Path, target: Path) -> Path:
+        error = PermissionError("settings file is busy")
+        error.winerror = 32
+        raise error
+
+    monkeypatch.setattr(Path, "replace", locked_replace)
+
+    store.save(updated)
+
+    persisted = json.loads(store.settings_path.read_text(encoding="utf-8"))
+    assert persisted["theme_mode"] == "aurora"
+
+
+def test_settings_store_raises_for_non_lock_replace_errors(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store = SettingsStore()
+    payload = json.loads(json.dumps(DEFAULT_SETTINGS))
+
+    def denied_replace(self: Path, target: Path) -> Path:
+        error = PermissionError("access denied")
+        error.winerror = 5
+        raise error
+
+    monkeypatch.setattr(Path, "replace", denied_replace)
+
+    try:
+        store.save(payload)
+    except PermissionError as exc:
+        assert getattr(exc, "winerror", None) == 5
+    else:
+        raise AssertionError("expected save() to re-raise non-lock PermissionError")
 
 
 def test_delete_all_data_clears_only_safe_runtime_dir(monkeypatch, tmp_path) -> None:

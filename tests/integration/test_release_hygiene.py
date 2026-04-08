@@ -53,3 +53,6 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert '--windowed `' in build_script
     assert '--onefile `' in build_script
     assert '--icon $iconPath' in build_script
+    assert 'AppUserModelID: "theclepro1.JarvisAiUnity"' in build_script
+    assert "UninstallDisplayIcon={app}\\JarvisAi_Unity.exe" in build_script
+    assert "CloseApplications=yes" in build_script

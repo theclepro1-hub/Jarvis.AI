@@ -3,6 +3,8 @@ from __future__ import annotations
 import inspect
 import json
 import os
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
@@ -13,6 +15,8 @@ from core.telegram.telegram_models import TelegramDispatchResult, TelegramStatus
 
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 2.0
+DEFAULT_DISPATCH_WORKERS = 3
+DEFAULT_MAX_INFLIGHT_DISPATCHES = 12
 
 
 class TelegramTransport(Protocol):
@@ -136,6 +140,13 @@ class TelegramService:
         self._last_reply = ""
         self._last_error = ""
         self._last_poll_at_utc: datetime | None = None
+        self._state_lock = threading.Lock()
+        self._dispatch_lock = threading.Lock()
+        self._inflight_dispatches = 0
+        self._dispatch_pool = ThreadPoolExecutor(
+            max_workers=DEFAULT_DISPATCH_WORKERS,
+            thread_name_prefix="telegram-dispatch",
+        )
 
     def telegram_user_id(self) -> str:
         registration = self._registration()
@@ -152,29 +163,47 @@ class TelegramService:
         return DEFAULT_POLL_INTERVAL_MS
 
     def status_snapshot(self) -> TelegramStatusSnapshot:
+        with self._state_lock:
+            connected = self._connected
+            last_command = self._last_command
+            last_reply = self._last_reply
+            last_error = self._last_error
+            last_poll_at_utc = self._last_poll_at_utc
         return TelegramStatusSnapshot(
             configured=self.is_configured(),
-            connected=self._connected,
-            last_command=self._last_command,
-            last_reply=self._last_reply,
-            last_error=self._last_error,
-            last_poll_at_utc=self._last_poll_at_utc,
+            connected=connected,
+            last_command=last_command,
+            last_reply=last_reply,
+            last_error=last_error,
+            last_poll_at_utc=last_poll_at_utc,
         )
 
     def last_command(self) -> str:
-        return self._last_command
+        with self._state_lock:
+            return self._last_command
 
     def last_reply(self) -> str:
-        return self._last_reply
+        with self._state_lock:
+            return self._last_reply
 
     def last_error(self) -> str:
-        return self._last_error
+        with self._state_lock:
+            return self._last_error
 
     def last_poll_at_utc(self) -> datetime | None:
-        return self._last_poll_at_utc
+        with self._state_lock:
+            return self._last_poll_at_utc
 
     def is_connected(self) -> bool:
-        return self._connected
+        with self._state_lock:
+            return self._connected
+
+    def pending_dispatches(self) -> int:
+        with self._dispatch_lock:
+            return self._inflight_dispatches
+
+    def can_poll_now(self) -> bool:
+        return self.pending_dispatches() < DEFAULT_MAX_INFLIGHT_DISPATCHES
 
     def refresh_configuration(self) -> bool:
         next_signature = self._current_configuration_signature()
@@ -207,33 +236,54 @@ class TelegramService:
         if self.offset_store is not None:
             self.offset_store.save_offset(self._offset)
 
-    def poll_once(self) -> list[TelegramDispatchResult]:
+    def poll_once(self, *, async_dispatch: bool = False) -> list[TelegramDispatchResult]:
         if self.transport is None:
-            self._connected = False
+            with self._state_lock:
+                self._connected = False
             return []
 
         try:
             updates = self.transport.get_updates(self._offset)
         except Exception as exc:  # noqa: BLE001
-            self._connected = False
-            self._last_error = self._format_error(exc)
-            self._last_poll_at_utc = datetime.now(timezone.utc)
+            with self._state_lock:
+                self._connected = False
+                self._last_error = self._format_error(exc)
+                self._last_poll_at_utc = datetime.now(timezone.utc)
             return []
 
-        self._connected = True
-        self._last_error = ""
-        self._last_poll_at_utc = datetime.now(timezone.utc)
-        results: list[TelegramDispatchResult] = []
+        with self._state_lock:
+            self._connected = True
+            self._last_error = ""
+            self._last_poll_at_utc = datetime.now(timezone.utc)
+        filtered_updates: list[TelegramUpdate] = []
         next_offset = self._offset
         for update in updates:
             if self._offset is not None and update.update_id < self._offset:
                 continue
-            result = self.process_update(update)
-            results.append(result)
+            filtered_updates.append(update)
             current_next = update.update_id + 1
             next_offset = current_next if next_offset is None else max(next_offset, current_next)
         if next_offset is not None and next_offset != self._offset:
             self.save_offset(next_offset)
+
+        if async_dispatch:
+            for update in filtered_updates:
+                self._submit_dispatch(update)
+            return [
+                TelegramDispatchResult(
+                    update_id=update.update_id,
+                    chat_id=update.chat_id,
+                    user_id=update.user_id,
+                    authorized=self.is_authorized(update.user_id),
+                    handled=False,
+                    error="queued",
+                )
+                for update in filtered_updates
+            ]
+
+        results: list[TelegramDispatchResult] = []
+        for update in filtered_updates:
+            results.append(self._process_update_safe(update))
         return results
 
     def process_update(self, update: TelegramUpdate) -> TelegramDispatchResult:
@@ -268,35 +318,41 @@ class TelegramService:
                 error="no_handler",
             )
 
-        self._last_command = text
+        with self._state_lock:
+            self._last_command = text
         try:
             reply = self._call_handler(text, update.chat_id)
         except Exception as exc:
-            self._connected = False
-            self._last_error = self._format_error(exc)
+            with self._state_lock:
+                self._connected = False
+                self._last_error = self._format_error(exc)
             return TelegramDispatchResult(
                 update_id=update.update_id,
                 chat_id=update.chat_id,
                 user_id=update.user_id,
                 authorized=True,
                 handled=False,
-                error=self._last_error,
+                error=self.last_error(),
             )
 
         reply_text = "" if reply is None else str(reply).strip()
-        if reply_text and self.transport is not None:
+        if not reply_text:
+            reply_text = "Не понял запрос. Уточните, что сделать."
+
+        if self.transport is not None:
             if not self.send_message(update.chat_id, reply_text):
                 return TelegramDispatchResult(
                     update_id=update.update_id,
                     chat_id=update.chat_id,
                     user_id=update.user_id,
                     authorized=True,
-                    handled=True,
+                    handled=False,
                     reply_text=reply_text,
-                    error=self._last_error or "send_failed",
+                    error=self.last_error() or "send_failed",
                 )
-            self._last_reply = reply_text
-            self._last_error = ""
+            with self._state_lock:
+                self._last_reply = reply_text
+                self._last_error = ""
             return TelegramDispatchResult(
                 update_id=update.update_id,
                 chat_id=update.chat_id,
@@ -317,33 +373,38 @@ class TelegramService:
 
     def send_message(self, chat_id: int | str, text: str) -> bool:
         if self.transport is None:
-            self._connected = False
-            self._last_error = "no_transport"
+            with self._state_lock:
+                self._connected = False
+                self._last_error = "no_transport"
             return False
 
         try:
             normalized_chat_id = int(str(chat_id).strip())
         except (TypeError, ValueError):
-            self._connected = False
-            self._last_error = "invalid_chat_id"
+            with self._state_lock:
+                self._connected = False
+                self._last_error = "invalid_chat_id"
             return False
 
         payload = str(text or "").strip()
         if not payload:
-            self._connected = False
-            self._last_error = "empty_text"
+            with self._state_lock:
+                self._connected = False
+                self._last_error = "empty_text"
             return False
 
         try:
             self.transport.send_message(normalized_chat_id, payload)
         except Exception as exc:  # noqa: BLE001
-            self._connected = False
-            self._last_error = self._format_error(exc)
+            with self._state_lock:
+                self._connected = False
+                self._last_error = self._format_error(exc)
             return False
 
-        self._connected = True
-        self._last_reply = payload
-        self._last_error = ""
+        with self._state_lock:
+            self._connected = True
+            self._last_reply = payload
+            self._last_error = ""
         return True
 
     def send_test_message(
@@ -395,3 +456,37 @@ class TelegramService:
         if message:
             return f"{type(exc).__name__}: {message}"
         return type(exc).__name__
+
+    def _submit_dispatch(self, update: TelegramUpdate) -> None:
+        with self._dispatch_lock:
+            self._inflight_dispatches += 1
+        future = self._dispatch_pool.submit(self._process_update_safe, update)
+        future.add_done_callback(self._dispatch_done)
+
+    def _dispatch_done(self, future: Future[TelegramDispatchResult]) -> None:
+        try:
+            future.result()
+        except Exception as exc:  # noqa: BLE001
+            with self._state_lock:
+                self._connected = False
+                self._last_error = self._format_error(exc)
+        finally:
+            with self._dispatch_lock:
+                self._inflight_dispatches = max(0, self._inflight_dispatches - 1)
+
+    def _process_update_safe(self, update: TelegramUpdate) -> TelegramDispatchResult:
+        try:
+            return self.process_update(update)
+        except Exception as exc:  # noqa: BLE001
+            with self._state_lock:
+                self._connected = False
+                self._last_error = self._format_error(exc)
+                error = self._last_error
+            return TelegramDispatchResult(
+                update_id=update.update_id,
+                chat_id=update.chat_id,
+                user_id=update.user_id,
+                authorized=self.is_authorized(update.user_id),
+                handled=False,
+                error=error,
+            )

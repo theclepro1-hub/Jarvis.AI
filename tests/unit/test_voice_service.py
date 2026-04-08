@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core.settings.settings_service import SettingsService
 from core.voice.tts_service import TTSService
+from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult
 from core.voice.voice_service import VoiceService
 
 
@@ -252,3 +253,61 @@ def test_wake_not_heard_status_is_status_only():
     voice.set_wake_runtime_status("not_heard", ready=False, detail="Не расслышал команду после слова активации")
 
     assert voice.runtime_status()["wakeWord"] == "Не расслышал команду после слова активации"
+
+
+def test_wake_capture_status_uses_recording_wording():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    voice.set_wake_runtime_status("capturing_command", ready=False, detail="Записываю команду")
+
+    assert voice.wake_status_text() == "Записываю команду"
+
+
+def test_capture_after_wake_treats_filler_as_not_heard(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "transcribe_pcm_bytes",
+        lambda _raw: TranscriptionResult(status="ok", text="джарвис эээ", detail="ok", engine="stub"),
+    )
+
+    result = voice.capture_after_wake_result(b"")
+
+    assert result.status == "no_speech"
+    assert result.detail == "Не расслышал команду"
+    assert voice.runtime_status()["wakeWord"] == "Не расслышал команду"
+
+
+def test_capture_after_wake_keeps_short_real_command(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "transcribe_pcm_bytes",
+        lambda _raw: TranscriptionResult(status="ok", text="джарвис ютуб", detail="ok", engine="stub"),
+    )
+
+    result = voice.capture_after_wake_result(b"")
+
+    assert result.ok is True
+    assert result.text == "ютуб"

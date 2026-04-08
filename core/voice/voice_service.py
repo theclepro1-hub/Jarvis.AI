@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import importlib.util
+import re
 import threading
 from typing import Callable
 
@@ -20,9 +21,26 @@ class VoiceService:
     BLOCK_FRAMES = 1600
     MANUAL_MAX_SECONDS = 8.0
     SILENCE_SECONDS = 0.9
-    WAKE_MAX_SECONDS = 3.6
-    WAKE_SILENCE_SECONDS = 0.28
+    WAKE_MAX_SECONDS = 4.4
+    WAKE_SILENCE_SECONDS = 0.4
     ENERGY_THRESHOLD = 160.0
+    WAKE_FILLER_TOKENS = {
+        "а",
+        "э",
+        "ээ",
+        "эээ",
+        "эм",
+        "эмм",
+        "эммм",
+        "мм",
+        "ммм",
+        "ну",
+        "ага",
+        "угу",
+        "да",
+        "нет",
+        "ой",
+    }
     DEFAULT_INPUT_LABEL = "Системный микрофон"
     DEFAULT_OUTPUT_LABEL = "Системный вывод"
     DEFAULT_TTS_TEXT = "Я на связи."
@@ -96,7 +114,7 @@ class VoiceService:
         labels = {
             "preparing": "Готовлю слово активации",
             "waiting_wake": "Жду «Джарвис»",
-            "capturing_command": "Слушаю команду",
+            "capturing_command": "Записываю команду",
             "transcribing": self._wake_detail or "Распознаю команду",
             "routing": self._wake_detail or "Распознаю команду",
             "executing": self._wake_detail or "Выполняю",
@@ -254,7 +272,11 @@ class VoiceService:
             self.set_wake_runtime_status("routing", ready=False, detail="Распознаю команду")
             stripped_text, matched_prefix, has_tail = self._split_wake_prefix(transcription.text)
             if matched_prefix and not has_tail:
-                detail = "Не расслышал команду после слова активации"
+                detail = "Не расслышал команду"
+                self.set_wake_runtime_status("not_heard", ready=False, detail=detail)
+                return TranscriptionResult(status="no_speech", detail=detail, engine=transcription.engine)
+            if self._looks_like_wake_garbage(stripped_text):
+                detail = "Не расслышал команду"
                 self.set_wake_runtime_status("not_heard", ready=False, detail=detail)
                 return TranscriptionResult(status="no_speech", detail=detail, engine=transcription.engine)
             transcription = TranscriptionResult(
@@ -269,7 +291,7 @@ class VoiceService:
             self.set_wake_runtime_status(
                 "not_heard",
                 ready=False,
-                detail="Не расслышал команду после слова активации",
+                detail="Не расслышал команду",
             )
         else:
             self.set_wake_runtime_status("error", ready=False, detail=transcription.detail)
@@ -344,9 +366,9 @@ class VoiceService:
     def _wake_capture_tuning(self) -> tuple[float, float, float]:
         mode = str(self.settings.get("voice_mode", "balance")).strip().casefold()
         if mode == "quality":
-            return 4.0, 0.35, 145.0
+            return 5.0, 0.55, 145.0
         if mode == "private":
-            return 3.2, 0.3, 150.0
+            return 4.0, 0.45, 150.0
         return self.WAKE_MAX_SECONDS, self.WAKE_SILENCE_SECONDS, self.ENERGY_THRESHOLD
 
     def _capture_until_silence(
@@ -393,6 +415,25 @@ class VoiceService:
 
     def strip_wake_word(self, text: str) -> str:
         return self._strip_wake_word(text)
+
+    def _looks_like_wake_garbage(self, text: str) -> bool:
+        clean = text.strip().casefold()
+        if not clean:
+            return True
+
+        tokens = [token for token in re.split(r"[\s,.:;!?-]+", clean) if token]
+        if not tokens:
+            return True
+
+        compact = "".join(tokens)
+        wake_alias_compact = {alias.casefold().replace(" ", "") for alias in WAKE_PREFIX_ALIASES}
+        if compact in wake_alias_compact:
+            return True
+        if all(token in self.WAKE_FILLER_TOKENS for token in tokens):
+            return True
+        if len(tokens) <= 2 and all(len(token) <= 2 for token in tokens):
+            return True
+        return False
 
     def _module_available(self, module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None

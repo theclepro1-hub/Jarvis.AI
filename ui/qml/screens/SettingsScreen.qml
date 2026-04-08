@@ -59,6 +59,9 @@ Rectangle {
 
     function updatePillText() {
         var status = settingsBridge.updateStatus
+        if (settingsBridge.updateCheckBusy) {
+            return "Идёт операция"
+        }
         if (status.last_error && status.last_error.length > 0) {
             return "Ошибка проверки"
         }
@@ -261,13 +264,15 @@ Rectangle {
                             spacing: 10
 
                             SecondaryButton {
-                                text: "Отправить тест"
-                                enabled: settingsBridge.telegramConfigured
+                                text: settingsBridge.telegramTestBusy ? "Отправляю..." : "Отправить тест"
+                                enabled: settingsBridge.telegramConfigured && !settingsBridge.telegramTestBusy
                                 onClicked: settingsBridge.sendTelegramTest()
                             }
 
                             Text {
-                                text: settingsBridge.connectionFeedback.length > 0
+                                text: settingsBridge.telegramTestBusy
+                                      ? "Отправляю тестовое сообщение в Telegram..."
+                                      : settingsBridge.connectionFeedback.length > 0
                                       ? settingsBridge.connectionFeedback
                                       : "Тест отправит короткое сообщение в ваш Telegram."
                                 color: Theme.Colors.textSoft
@@ -588,8 +593,16 @@ Rectangle {
                             spacing: 10
 
                             SecondaryButton {
-                                text: "Проверить обновления"
+                                text: settingsBridge.updateCheckBusy ? "Проверяю..." : "Проверить обновления"
+                                enabled: !settingsBridge.updateCheckBusy
                                 onClicked: settingsBridge.checkForUpdates()
+                            }
+
+                            SecondaryButton {
+                                text: "Установить обновление"
+                                visible: settingsBridge.updateStatus.update_available && settingsBridge.updateStatus.can_apply
+                                enabled: !settingsBridge.updateCheckBusy
+                                onClicked: settingsBridge.applyUpdate()
                             }
 
                             SecondaryButton {
@@ -599,9 +612,15 @@ Rectangle {
                             }
 
                             Text {
-                                text: settingsBridge.updateStatus.last_error && settingsBridge.updateStatus.last_error.length > 0
+                                text: settingsBridge.updateCheckBusy
+                                      ? "Идёт проверка обновлений или запуск установщика..."
+                                      : settingsBridge.updateStatus.last_error && settingsBridge.updateStatus.last_error.length > 0
                                       ? settingsBridge.updateStatus.last_error
-                                      : "Проверка не устанавливает обновление сама."
+                                      : settingsBridge.updateStatus.last_apply_message && settingsBridge.updateStatus.last_apply_message.length > 0
+                                      ? settingsBridge.updateStatus.last_apply_message
+                                      : settingsBridge.updateStatus.apply_hint && settingsBridge.updateStatus.apply_hint.length > 0
+                                      ? settingsBridge.updateStatus.apply_hint
+                                      : "Проверка обновлений доступна вручную."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
                                 font.pixelSize: Theme.Typography.micro
