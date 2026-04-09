@@ -95,6 +95,15 @@ def test_split_keeps_open_verb_for_multiple_comma_objects():
     ]
 
 
+def test_split_recovers_multi_open_targets_without_explicit_conjunction():
+    router = make_router()
+    assert router.split("открой ютуб музыку и прибавь") == [
+        "открой ютуб",
+        "открой музыку",
+        "прибавь",
+    ]
+
+
 def test_split_mixed_command_without_punctuation_between_verbs():
     router = make_router()
     assert router.split("открой музыку прибавь и найди чизбургер") == [

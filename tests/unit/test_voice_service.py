@@ -259,9 +259,9 @@ def test_wake_capture_status_uses_recording_wording():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
 
-    voice.set_wake_runtime_status("capturing_command", ready=False, detail="Записываю команду")
+    voice.set_wake_runtime_status("capturing_command", ready=False, detail="Подхватываю начало команды")
 
-    assert voice.wake_status_text() == "Записываю команду"
+    assert voice.wake_status_text() == "Подхватываю начало команды"
 
 
 def test_capture_after_wake_treats_filler_as_not_heard(monkeypatch):

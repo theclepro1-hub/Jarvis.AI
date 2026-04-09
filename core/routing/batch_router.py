@@ -91,25 +91,38 @@ class BatchRouter:
         return parts or [self._strip_connectors(segment)]
 
     def _expand_segment(self, segment: str) -> list[str]:
-        segment = self._strip_connectors(segment)
-        lower = segment.casefold()
+        clean = self._strip_connectors(segment)
+        lower = clean.casefold()
         for verb in OPEN_VERBS:
             prefix = f"{verb} "
             if lower.startswith(prefix):
-                tail = segment[len(prefix) :].strip()
+                actual_verb = clean.split(" ", 1)[0]
+                tail = clean[len(actual_verb) :].strip()
+                split_with_registry = getattr(self.action_registry, "split_open_target_sequence", None)
+                if callable(split_with_registry):
+                    phrases, remainder = split_with_registry(tail)
+                    expanded = [f"{actual_verb} {phrase}" for phrase in phrases if phrase]
+                    if expanded and remainder:
+                        expanded.extend(self._expand_segment(remainder))
+                    if len(expanded) > 1 or (expanded and remainder):
+                        return expanded
                 parts = [part.strip() for part in re.split(r"\s+и\s+", tail) if part.strip()]
                 if len(parts) > 1 and all(not self._looks_like_short_action(part.casefold()) for part in parts):
-                    return [f"{verb} {part}" for part in parts]
+                    return [f"{actual_verb} {part}" for part in parts]
+                by_catalog = self._expand_open_targets_with_catalog(actual_verb, tail)
+                if by_catalog:
+                    return by_catalog
+                return [clean]
 
         if " и " not in lower:
-            return [segment]
+            return [clean]
 
-        parts = [part.strip() for part in re.split(r"\s+и\s+", segment) if part.strip()]
+        parts = [part.strip() for part in re.split(r"\s+и\s+", clean, flags=re.IGNORECASE) if part.strip()]
         if len(parts) <= 1:
-            return [segment]
+            return [clean]
 
         if self._looks_like_short_action(parts[0].casefold()):
-            first, rest = segment.split(" и ", 1)
+            first, rest = re.split(r"\s+и\s+", clean, maxsplit=1, flags=re.IGNORECASE)
             return [first.strip(), *self._expand_segment(rest.strip())]
 
         expanded = [parts[0]]
@@ -177,5 +190,79 @@ class BatchRouter:
         stripped = text.strip()
         if not stripped:
             return False
+        can_resolve = getattr(self.action_registry, "can_resolve_open_target", None)
+        if callable(can_resolve):
+            return bool(can_resolve(stripped))
         first_token = stripped.casefold().split(" ", 1)[0]
         return first_token not in NON_TARGET_START_TOKENS
+
+    def _expand_open_targets_with_catalog(self, verb: str, tail: str) -> list[str]:
+        if not tail or " и " in tail or "," in tail:
+            return []
+        items = self._catalog_match_items(tail)
+        if len(items) < 2:
+            finder = getattr(self.action_registry, "find_items", None)
+            if callable(finder):
+                items = finder(tail)
+            elif callable(getattr(self.action_registry, "resolve_open_command", None)):
+                resolved, question = self.action_registry.resolve_open_command(f"{verb} {tail}")
+                if question:
+                    return []
+                items = resolved
+        if len(items) < 2:
+            return []
+        mentions = self._extract_item_mentions(tail, items)
+        if len(mentions) < 2:
+            return []
+        return [f"{verb} {mention}" for mention in mentions]
+
+    def _catalog_match_items(self, text: str) -> list[dict[str, str]]:
+        catalog = getattr(self.action_registry, "catalog", None)
+        if not isinstance(catalog, list):
+            return []
+        lower = text.casefold()
+        matched: list[dict[str, str]] = []
+        for item in catalog:
+            if not isinstance(item, dict):
+                continue
+            aliases = [str(alias).casefold() for alias in item.get("aliases", [])]
+            title = str(item.get("title", "")).casefold()
+            candidates = [title, *aliases]
+            if any(candidate and candidate in lower for candidate in candidates):
+                matched.append(item)
+        return matched
+
+    def _extract_item_mentions(self, tail: str, items: list[dict[str, str]]) -> list[str]:
+        source = tail
+        lower_tail = tail.casefold()
+        spans: list[tuple[int, int, str]] = []
+        used_ranges: list[tuple[int, int]] = []
+        for item in items:
+            candidates = self._item_candidates(item)
+            found = self._find_candidate_span(lower_tail, candidates)
+            if found is None:
+                continue
+            start, end = found
+            if any(not (end <= used_start or start >= used_end) for used_start, used_end in used_ranges):
+                continue
+            used_ranges.append((start, end))
+            spans.append((start, end, source[start:end]))
+        spans.sort(key=lambda span: span[0])
+        if len(spans) >= 2:
+            return [self._strip_connectors(text) for _start, _end, text in spans if self._strip_connectors(text)]
+        words = [word for word in source.split(" ") if word]
+        if len(words) >= 2:
+            return [words[0], " ".join(words[1:])]
+        return []
+
+    def _item_candidates(self, item: dict[str, str]) -> list[str]:
+        raw = [str(item.get("title", "")), *[str(alias) for alias in item.get("aliases", [])]]
+        cleaned = [value.strip().casefold() for value in raw if value and value.strip()]
+        return sorted(set(cleaned), key=len, reverse=True)
+
+    def _find_candidate_span(self, text: str, candidates: list[str]) -> tuple[int, int] | None:
+        for candidate in candidates:
+            index = text.find(candidate)
+            if index >= 0:
+                return index, index + len(candidate)
+        return None

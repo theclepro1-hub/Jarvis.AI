@@ -23,6 +23,7 @@ class VoiceService:
     SILENCE_SECONDS = 0.9
     WAKE_MAX_SECONDS = 4.4
     WAKE_SILENCE_SECONDS = 0.4
+    WAKE_PRE_ROLL_GRACE_SECONDS = 0.35
     ENERGY_THRESHOLD = 160.0
     WAKE_FILLER_TOKENS = {
         "а",
@@ -114,7 +115,7 @@ class VoiceService:
         labels = {
             "preparing": "Готовлю слово активации",
             "waiting_wake": "Жду «Джарвис»",
-            "capturing_command": "Записываю команду",
+            "capturing_command": self._wake_detail or "Подхватываю начало команды",
             "transcribing": self._wake_detail or "Распознаю команду",
             "routing": self._wake_detail or "Распознаю команду",
             "executing": self._wake_detail or "Выполняю",
@@ -248,7 +249,7 @@ class VoiceService:
         return self.capture_after_wake_result(pre_roll).text
 
     def capture_after_wake_result(self, pre_roll: bytes) -> TranscriptionResult:
-        max_seconds, silence_seconds, energy_threshold = self._wake_capture_tuning()
+        max_seconds, silence_seconds, energy_threshold, pre_roll_grace = self._wake_capture_tuning()
         wake_capture = SpeechCaptureService(
             resolve_input_device=self._resolve_input_device,
             stop_event=self._manual_stop_event,
@@ -259,6 +260,7 @@ class VoiceService:
                 max_seconds=max_seconds,
                 silence_seconds=silence_seconds,
                 energy_threshold=energy_threshold,
+                pre_roll_grace_seconds=pre_roll_grace,
             ),
         )
         capture = wake_capture.capture_until_silence(pre_roll=pre_roll)
@@ -363,13 +365,25 @@ class VoiceService:
     def normalize_output_selection(self, value: str) -> str:
         return self.audio_devices.normalize_output_selection(value)
 
-    def _wake_capture_tuning(self) -> tuple[float, float, float]:
+    def _wake_capture_tuning(self) -> tuple[float, float, float, float]:
         mode = str(self.settings.get("voice_mode", "balance")).strip().casefold()
+        command_style = str(self.settings.get("command_style", "one_shot")).strip().casefold()
         if mode == "quality":
-            return 5.0, 0.55, 145.0
-        if mode == "private":
-            return 4.0, 0.45, 150.0
-        return self.WAKE_MAX_SECONDS, self.WAKE_SILENCE_SECONDS, self.ENERGY_THRESHOLD
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 5.0, 0.55, 145.0, 0.4
+        elif mode == "private":
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.0, 0.45, 150.0, 0.3
+        else:
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = (
+                self.WAKE_MAX_SECONDS,
+                self.WAKE_SILENCE_SECONDS,
+                self.ENERGY_THRESHOLD,
+                self.WAKE_PRE_ROLL_GRACE_SECONDS,
+            )
+
+        if command_style == "one_shot":
+            max_seconds += 0.8
+            silence_seconds += 0.12
+        return max_seconds, silence_seconds, energy_threshold, pre_roll_grace
 
     def _capture_until_silence(
         self,

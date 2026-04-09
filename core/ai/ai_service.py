@@ -20,6 +20,11 @@ SYSTEM_PROMPT = """
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 AI_MODES = {"auto", "fast", "quality", "local"}
 DEFAULT_NO_PROXY = "localhost,127.0.0.1,::1"
+AI_MODE_BUDGET_SECONDS: dict[str, float] = {
+    "auto": 5.0,
+    "fast": 2.5,
+    "quality": 9.0,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,8 +109,8 @@ PROVIDERS: dict[str, ProviderSpec] = {
 
 PROVIDER_PLANS: dict[str, tuple[str, ...]] = {
     "auto": ("groq", "cerebras", "gemini", "openrouter"),
-    "fast": ("groq", "cerebras", "gemini", "openrouter"),
-    "quality": ("gemini", "cerebras", "groq", "openrouter"),
+    "fast": ("groq", "cerebras"),
+    "quality": ("gemini", "groq", "cerebras", "openrouter"),
     "local": (),
 }
 
@@ -132,14 +137,28 @@ class AIService:
         if not attempts:
             return self._fallback_reply(user_text)
 
+        started_at = time.perf_counter()
+        budget_seconds = self._mode_budget_seconds(ai_mode)
         last_error: str | None = None
         for attempt in attempts:
+            elapsed = time.perf_counter() - started_at
+            remaining_budget = budget_seconds - elapsed
+            if remaining_budget <= 0:
+                last_error = f"latency budget exceeded ({ai_mode})"
+                break
             spec = PROVIDERS[attempt.provider]
             api_key = self._provider_api_key(spec)
             if not api_key:
                 continue
 
-            reply, error = self._try_provider(spec, attempt.model, api_key, messages)
+            reply, error = self._try_provider(
+                spec,
+                attempt.model,
+                api_key,
+                messages,
+                ai_mode=ai_mode,
+                budget_seconds=remaining_budget,
+            )
             if reply:
                 return reply
             last_error = error or last_error
@@ -195,14 +214,23 @@ class AIService:
         model: str,
         api_key: str,
         messages: list[dict[str, str]],
+        *,
+        ai_mode: str,
+        budget_seconds: float,
     ) -> tuple[str | None, str | None]:
         max_attempts = int(self.settings.get("ai_max_attempts", 1) or 1)
-        max_attempts = min(max(max_attempts, 1), 1)
+        max_attempts = min(max(max_attempts, 1), 3)
         last_error: str | None = None
+        started_at = time.perf_counter()
+        request_options = self._mode_request_options(ai_mode)
 
         for attempt_index in range(max_attempts):
             http_client: httpx.Client | None = None
             try:
+                elapsed = time.perf_counter() - started_at
+                remaining_budget = budget_seconds - elapsed
+                if remaining_budget <= 0:
+                    break
                 http_client = self._make_http_client()
                 client = self._client_factory(
                     api_key=api_key,
@@ -210,11 +238,12 @@ class AIService:
                     http_client=http_client,
                     default_headers=self._default_headers(spec),
                 )
+                request_timeout = max(0.8, min(self.network_settings().timeout_seconds, remaining_budget))
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
-                    temperature=0.4,
-                    timeout=self.network_settings().timeout_seconds,
+                    timeout=request_timeout,
+                    **request_options,
                 )
                 text = self._extract_text(response)
                 if text:
@@ -261,6 +290,27 @@ class AIService:
 
     def _ai_mode(self) -> str:
         return self._normalize_mode(str(self.settings.get("ai_mode", "auto")).strip().lower())
+
+    def _mode_budget_seconds(self, mode: str) -> float:
+        if mode in AI_MODE_BUDGET_SECONDS:
+            return AI_MODE_BUDGET_SECONDS[mode]
+        return AI_MODE_BUDGET_SECONDS["auto"]
+
+    def _mode_request_options(self, mode: str) -> dict[str, float | int]:
+        if mode == "fast":
+            return {
+                "temperature": 0.2,
+                "max_tokens": 180,
+            }
+        if mode == "quality":
+            return {
+                "temperature": 0.55,
+                "max_tokens": 520,
+            }
+        return {
+            "temperature": 0.35,
+            "max_tokens": 300,
+        }
 
     def _normalize_mode(self, value: str) -> str:
         if value in AI_MODES:

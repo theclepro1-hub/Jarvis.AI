@@ -133,3 +133,15 @@ def test_wake_service_collects_short_post_wake_bridge():
     bridge = wake._collect_post_wake_bridge(audio_queue)  # noqa: SLF001
 
     assert bridge == b"ab"
+
+
+def test_wake_service_marks_capture_phase_as_handoff():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    wake._phase = "capturing_command"  # noqa: SLF001
+    assert wake._phase_in_handoff() is True  # noqa: SLF001
+
+    wake._phase = "idle"  # noqa: SLF001
+    assert wake._phase_in_handoff() is False  # noqa: SLF001

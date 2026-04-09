@@ -5,13 +5,15 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
+import threading
 
 import httpx
 
 
 DEFAULT_GITHUB_REPOSITORY = "theclepro1-hub/Jarvis.AI"
-DEFAULT_VERSION = "22.2.0"
+DEFAULT_VERSION = "22.3.0"
 DEFAULT_HTTP_TIMEOUT_SECONDS = 20.0
+USER_AGENT = "JarvisAi_Unity/1.0"
 
 
 @dataclass(slots=True)
@@ -63,12 +65,17 @@ class UpdateService:
         self.last_downloaded_installer = ""
         self.apply_supported_value = os.name == "nt"
         self.last_apply_message_value = ""
+        self._check_lock = threading.Lock()
+        self._apply_lock = threading.Lock()
+        self._installer_process: subprocess.Popen | None = None
 
     @property
     def current_version(self) -> str:
         return self.current_version_value
 
     def summary(self) -> str:
+        if self._is_apply_in_progress():
+            return "Обновление запускается…"
         if self.last_error_value:
             return "Проверка обновлений: ошибка"
         if self.update_available_value and self.latest_version_value:
@@ -77,51 +84,54 @@ class UpdateService:
         return f"Версия {self.current_version_value} · канал {channel}"
 
     def check_now(self) -> UpdateCheckResult:
-        try:
-            response = httpx.get(
-                f"https://api.github.com/repos/{self.repository}/releases/latest",
-                timeout=10.0,
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "User-Agent": "JarvisAi_Unity/1.0",
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-            latest_version = self._normalize_version(str(payload.get("tag_name") or payload.get("name") or "").strip())
-            self.latest_version_value = latest_version or self.current_version_value
-            self.release_url_value = str(payload.get("html_url") or "").strip()
-            self.assets = [
-                UpdateAsset(
-                    name=str(asset.get("name") or ""),
-                    browser_download_url=str(asset.get("browser_download_url") or ""),
+        with self._check_lock:
+            try:
+                response = httpx.get(
+                    f"https://api.github.com/repos/{self.repository}/releases/latest",
+                    timeout=DEFAULT_HTTP_TIMEOUT_SECONDS,
+                    headers={
+                        "Accept": "application/vnd.github+json",
+                        "User-Agent": USER_AGENT,
+                    },
                 )
-                for asset in payload.get("assets", [])
-                if isinstance(asset, dict)
-            ]
-            self.update_available_value = self._is_newer_version(self.latest_version_value, self.current_version_value)
-            self.last_error_value = ""
-            self.last_checked_at_utc = datetime.now(timezone.utc)
-        except Exception as exc:  # noqa: BLE001
-            self.last_error_value = self._format_error(exc)
-            self.update_available_value = False
-            self.latest_version_value = ""
-            self.release_url_value = ""
-            self.assets = []
-            self.last_checked_at_utc = datetime.now(timezone.utc)
-        return UpdateCheckResult(
-            ok=not bool(self.last_error_value),
-            update_available=self.update_available_value,
-            current_version=self.current_version_value,
-            latest_version=self.latest_version_value,
-            release_url=self.release_url_value,
-            assets=list(self.assets),
-            last_error=self.last_error_value,
-            checked_at_utc=self.last_checked_at_utc,
-        )
+                response.raise_for_status()
+                payload = response.json()
+                latest_version = self._normalize_version(str(payload.get("tag_name") or payload.get("name") or "").strip())
+                self.latest_version_value = latest_version or self.current_version_value
+                self.release_url_value = str(payload.get("html_url") or "").strip()
+                self.assets = [
+                    UpdateAsset(
+                        name=str(asset.get("name") or ""),
+                        browser_download_url=str(asset.get("browser_download_url") or ""),
+                    )
+                    for asset in payload.get("assets", [])
+                    if isinstance(asset, dict)
+                ]
+                self.update_available_value = self._is_newer_version(self.latest_version_value, self.current_version_value)
+                self.last_error_value = ""
+                self.last_checked_at_utc = datetime.now(timezone.utc)
+            except Exception as exc:  # noqa: BLE001
+                self.last_error_value = self._format_error(exc)
+                self.update_available_value = False
+                self.latest_version_value = ""
+                self.release_url_value = ""
+                self.assets = []
+                self.last_checked_at_utc = datetime.now(timezone.utc)
+            return UpdateCheckResult(
+                ok=not bool(self.last_error_value),
+                update_available=self.update_available_value,
+                current_version=self.current_version_value,
+                latest_version=self.latest_version_value,
+                release_url=self.release_url_value,
+                assets=list(self.assets),
+                last_error=self.last_error_value,
+                checked_at_utc=self.last_checked_at_utc,
+            )
 
     def can_apply_update(self) -> bool:
         if not self.apply_supported_value:
+            return False
+        if self._is_apply_in_progress():
             return False
         return self._pick_preferred_installer_asset() is not None
 
@@ -135,62 +145,111 @@ class UpdateService:
                 last_error="unsupported_platform",
             )
 
-        if not self.assets:
-            self.check_now()
-
-        asset = self._pick_preferred_installer_asset()
-        if asset is None:
-            self.last_apply_message_value = "В релизе нет установщика. Обновление доступно только вручную."
+        if self._is_installer_running():
+            message = "Установщик обновления уже запущен."
+            self.last_apply_message_value = message
             return UpdateApplyResult(
                 ok=False,
                 started=False,
-                message=self.last_apply_message_value,
-                last_error="installer_asset_missing",
+                message=message,
+                installer_path=self.last_downloaded_installer,
+                last_error="installer_already_running",
+            )
+
+        if not self._apply_lock.acquire(blocking=False):
+            message = "Обновление уже подготавливается."
+            self.last_apply_message_value = message
+            return UpdateApplyResult(
+                ok=False,
+                started=False,
+                message=message,
+                installer_path=self.last_downloaded_installer,
+                last_error="apply_in_progress",
             )
 
         try:
-            installer_path = self._download_asset(asset)
-            self.last_downloaded_installer = str(installer_path)
-        except Exception as exc:  # noqa: BLE001
-            self.last_error_value = self._format_error(exc)
-            self.last_apply_message_value = "Не удалось скачать установщик обновления."
-            return UpdateApplyResult(
-                ok=False,
-                started=False,
-                message=self.last_apply_message_value,
-                asset_name=asset.name,
-                last_error=self.last_error_value,
-            )
+            if not self.assets:
+                check_result = self.check_now()
+                if not check_result.ok:
+                    self.last_apply_message_value = "Не удалось проверить релиз перед установкой."
+                    return UpdateApplyResult(
+                        ok=False,
+                        started=False,
+                        message=self.last_apply_message_value,
+                        last_error=self.last_error_value or "check_failed",
+                    )
 
-        command = [
-            str(installer_path),
-            "/SP-",
-            "/CLOSEAPPLICATIONS",
-            "/RESTARTAPPLICATIONS",
-        ]
-        try:
-            subprocess.Popen(command, close_fds=True)  # noqa: S603
-        except Exception as exc:  # noqa: BLE001
-            self.last_error_value = self._format_error(exc)
-            self.last_apply_message_value = "Установщик скачан, но запуск не удался. Запустите его вручную."
+            if not self.update_available_value:
+                self.last_apply_message_value = "Новых обновлений нет."
+                return UpdateApplyResult(
+                    ok=False,
+                    started=False,
+                    message=self.last_apply_message_value,
+                    last_error="no_update_available",
+                )
+
+            asset = self._pick_preferred_installer_asset()
+            if asset is None:
+                self.last_apply_message_value = "В релизе нет установщика. Доступна только ручная установка."
+                return UpdateApplyResult(
+                    ok=False,
+                    started=False,
+                    message=self.last_apply_message_value,
+                    last_error="installer_asset_missing",
+                )
+
+            try:
+                installer_path = self._download_asset(asset)
+                self.last_downloaded_installer = str(installer_path)
+            except Exception as exc:  # noqa: BLE001
+                self.last_error_value = self._format_error(exc)
+                self.last_apply_message_value = "Не удалось скачать установщик обновления."
+                return UpdateApplyResult(
+                    ok=False,
+                    started=False,
+                    message=self.last_apply_message_value,
+                    asset_name=asset.name,
+                    last_error=self.last_error_value,
+                )
+
+            command = [
+                str(installer_path),
+                "/SP-",
+                "/CLOSEAPPLICATIONS",
+                "/RESTARTAPPLICATIONS",
+            ]
+            creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | int(
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+            )
+            try:
+                self._installer_process = subprocess.Popen(  # noqa: S603
+                    command,
+                    close_fds=True,
+                    creationflags=creationflags,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.last_error_value = self._format_error(exc)
+                self.last_apply_message_value = "Установщик скачан, но запуск не удался. Запустите его вручную."
+                return UpdateApplyResult(
+                    ok=False,
+                    started=False,
+                    message=self.last_apply_message_value,
+                    asset_name=asset.name,
+                    installer_path=str(installer_path),
+                    last_error=self.last_error_value,
+                )
+
+            self.last_error_value = ""
+            self.last_apply_message_value = "Установщик обновления запущен."
             return UpdateApplyResult(
-                ok=False,
-                started=False,
+                ok=True,
+                started=True,
                 message=self.last_apply_message_value,
                 asset_name=asset.name,
                 installer_path=str(installer_path),
-                last_error=self.last_error_value,
             )
-
-        self.last_error_value = ""
-        self.last_apply_message_value = "Установщик обновления запущен."
-        return UpdateApplyResult(
-            ok=True,
-            started=True,
-            message=self.last_apply_message_value,
-            asset_name=asset.name,
-            installer_path=str(installer_path),
-        )
+        finally:
+            self._apply_lock.release()
 
     def update_available(self) -> bool:
         return self.update_available_value
@@ -225,6 +284,8 @@ class UpdateService:
             "preferred_installer_asset": preferred_asset.name if preferred_asset else "",
             "last_downloaded_installer": self.last_downloaded_installer,
             "last_apply_message": self.last_apply_message_value,
+            "apply_in_progress": self._is_apply_in_progress(),
+            "active_installer_pid": self._active_installer_pid(),
         }
 
     def _normalize_version(self, value: str) -> str:
@@ -277,8 +338,10 @@ class UpdateService:
         if not asset.browser_download_url:
             raise RuntimeError("asset_url_missing")
         destination = self._update_download_dir() / asset.name
+        if destination.exists() and destination.stat().st_size > 0:
+            return destination.resolve()
         tmp_path = destination.with_suffix(destination.suffix + ".download")
-        headers = {"User-Agent": "JarvisAi_Unity/1.0"}
+        headers = {"User-Agent": USER_AGENT}
         with httpx.stream(
             "GET",
             asset.browser_download_url,
@@ -288,8 +351,25 @@ class UpdateService:
         ) as response:
             response.raise_for_status()
             with tmp_path.open("wb") as handle:
-                for chunk in response.iter_bytes():
+                for chunk in response.iter_bytes(64 * 1024):
                     if chunk:
                         handle.write(chunk)
         tmp_path.replace(destination)
         return destination.resolve()
+
+    def _is_apply_in_progress(self) -> bool:
+        return self._apply_lock.locked()
+
+    def _is_installer_running(self) -> bool:
+        process = self._installer_process
+        if process is None:
+            return False
+        return process.poll() is None
+
+    def _active_installer_pid(self) -> int:
+        process = self._installer_process
+        if process is None:
+            return 0
+        if process.poll() is not None:
+            return 0
+        return int(getattr(process, "pid", 0) or 0)

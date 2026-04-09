@@ -43,6 +43,7 @@ class FakePcControl:
         self.searches: list[str] = []
         self.opened_urls: list[str] = []
         self.media: list[str] = []
+        self.power: list[str] = []
 
     def open_items(self, items):
         return self.actions.open_items(items)
@@ -78,6 +79,10 @@ class FakePcControl:
     def volume_mute(self) -> ActionOutcome:
         self.media.append("mute")
         return ActionOutcome(True, "Переключаю звук", "")
+
+    def power_action(self, action: str, title: str) -> ActionOutcome:
+        self.power.append(action)
+        return ActionOutcome(True, title, "Системная команда отправлена.", status="sent_unverified")
 
 
 class FakeAi:
@@ -187,6 +192,44 @@ def test_command_router_runs_mixed_open_volume_search_without_punctuation():
     assert pc_control.searches == ["чизбургер"]
     assert result.execution_result is not None
     assert [step.kind for step in result.execution_result.steps] == ["open_items", "volume_up", "search_web"]
+
+
+def test_command_router_voice_normalizes_multi_action_without_commas():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой ютуб музыку и прибавь", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой ютуб", "открой музыку", "прибавь"]
+    assert actions.opened == ["youtube", "yandex_music"]
+    assert pc_control.media == ["up"]
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items", "volume_up"]
+
+
+def test_command_router_text_path_also_handles_normalized_multi_action():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой ютуб музыку и прибавь")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой ютуб", "открой музыку", "прибавь"]
+    assert actions.opened == ["youtube", "yandex_music"]
+    assert pc_control.media == ["up"]
+
+
+def test_command_router_guards_against_partial_success_when_command_is_ambiguous():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой стим, блабла и прибавь громкость", source="voice")
+
+    assert result.kind == "local"
+    assert result.assistant_lines[0].startswith("Уточните команду целиком.")
+    assert actions.opened == []
+    assert pc_control.media == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+    assert result.execution_result.steps[0].payload["confidence"] < 1.0
 
 
 def test_command_router_opens_spotify_directly_independent_from_music_default():
@@ -403,3 +446,15 @@ def test_command_router_clarifies_trailing_connector_command() -> None:
     assert result.assistant_lines == ["Что ещё сделать?"]
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_runs_power_action_without_open_verb() -> None:
+    router, _actions, pc_control = make_router()
+
+    result = router.handle("заблокируй экран")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Блокирую экран"]
+    assert pc_control.power == ["lock"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "power_action"

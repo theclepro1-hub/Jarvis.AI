@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import ctypes
 import webbrowser
 from dataclasses import dataclass, field
+import os
+import subprocess
 
 from core.models.action_models import ActionOutcome
 from core.pc_control.browser_control import BrowserControl
@@ -74,6 +77,15 @@ class PcControlService:
     def volume_mute(self) -> ActionOutcome:
         return self._media_outcome(self.media.mute(), "Переключаю звук", "Системный звук переключён")
 
+    def power_action(self, action: str, title: str) -> ActionOutcome:
+        if hasattr(self.action_registry, "run_power_action"):
+            return self.action_registry.run_power_action(action, title)
+        try:
+            self._run_power_action(action)
+        except OSError as exc:
+            return ActionOutcome(False, f"Не удалось: {title}", str(exc))
+        return ActionOutcome(True, title, "Системная команда отправлена.", status="sent_unverified")
+
     def _media_outcome(self, success: bool, title: str, detail: str, *, unverified: bool = False) -> ActionOutcome:
         if success:
             return ActionOutcome(True, title, detail, status="sent_unverified" if unverified else "")
@@ -87,6 +99,40 @@ class PcControlService:
         if kind == "url":
             webbrowser.open(target)
             return
-        import os
-
+        if kind == "power":
+            self._run_power_action(target)
+            return
+        if kind == "shell":
+            os.startfile(target)  # type: ignore[attr-defined]
+            return
         os.startfile(target)  # type: ignore[attr-defined]
+
+    def _run_power_action(self, action: str) -> None:
+        if os.name != "nt":
+            raise OSError("power_actions_are_supported_only_on_windows")
+        normalized = action.strip().casefold()
+        shutdown_commands = {
+            "shutdown": ["shutdown", "/s", "/t", "0"],
+            "restart": ["shutdown", "/r", "/t", "0"],
+            "logoff": ["shutdown", "/l"],
+        }
+        command = shutdown_commands.get(normalized)
+        if command:
+            creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | int(
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+            )
+            subprocess.Popen(command, close_fds=True, creationflags=creationflags)  # noqa: S603
+            return
+        if normalized == "sleep":
+            if not bool(ctypes.windll.powrprof.SetSuspendState(False, True, False)):
+                raise OSError("sleep_failed")
+            return
+        if normalized == "hibernate":
+            if not bool(ctypes.windll.powrprof.SetSuspendState(True, True, False)):
+                raise OSError("hibernate_failed")
+            return
+        if normalized == "lock":
+            if not bool(ctypes.windll.user32.LockWorkStation()):
+                raise OSError("lock_workstation_failed")
+            return
+        raise OSError(f"unknown_power_action:{action}")

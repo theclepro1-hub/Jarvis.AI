@@ -8,6 +8,7 @@ $buildDir = Join-Path $root "build\\pyinstaller"
 $oneFileBuildDir = Join-Path $root "build\\pyinstaller_onefile"
 $releaseDir = Join-Path $root "build\\release"
 $installerDir = Join-Path $root "build\\installer"
+$versionInfoFile = Join-Path $root "build\\pyinstaller\\version_info.txt"
 $iconPath = Join-Path $root "assets\\icons\\jarvis_unity.ico"
 $modelName = "vosk-model-small-ru-0.22"
 $modelCacheDir = Join-Path $root "build\\model_cache"
@@ -68,6 +69,41 @@ if (!(Test-Path $venvPython)) {
 
 $version = (& $venvPython -c "from core.updates.update_service import UpdateService; print(UpdateService().current_version)").Trim()
 
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionInfoFile) | Out-Null
+$versionInfoContent = @"
+# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=($($version.Replace('.', ', ')), 0),
+    prodvers=($($version.Replace('.', ', ')), 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        u'040904B0',
+        [
+          StringStruct(u'CompanyName', u'theclepro1-hub'),
+          StringStruct(u'FileDescription', u'JARVIS Unity desktop assistant'),
+          StringStruct(u'FileVersion', u'$version'),
+          StringStruct(u'InternalName', u'JarvisAi_Unity'),
+          StringStruct(u'OriginalFilename', u'JarvisAi_Unity.exe'),
+          StringStruct(u'ProductName', u'JARVIS Unity'),
+          StringStruct(u'ProductVersion', u'$version')
+        ]
+      )
+    ]),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)
+"@
+Set-Content -LiteralPath $versionInfoFile -Value $versionInfoContent -Encoding UTF8
+
 & $venvPython "$root\\tools\\generate_icon.py"
 
 if (!(Test-ModelSourceReady -Path $modelPath)) {
@@ -88,6 +124,9 @@ $buildDir = Remove-Or-Fallback -Path $buildDir -FallbackPath (Join-Path $root "b
 $oneFileDistDir = Remove-Or-Fallback -Path $oneFileDistDir -FallbackPath (Join-Path $root "dist_onefile_fresh_$buildStamp")
 $oneFileBuildDir = Remove-Or-Fallback -Path $oneFileBuildDir -FallbackPath (Join-Path $root "build\\pyinstaller_onefile_fresh_$buildStamp")
 $releaseDir = Remove-Or-Fallback -Path $releaseDir -FallbackPath (Join-Path $root "build\\release_fresh_$buildStamp")
+$versionInfoFile = Join-Path $buildDir "version_info.txt"
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionInfoFile) | Out-Null
+Set-Content -LiteralPath $versionInfoFile -Value $versionInfoContent -Encoding UTF8
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 
 $nativeErrorActionPreference = $ErrorActionPreference
@@ -98,6 +137,7 @@ $ErrorActionPreference = "SilentlyContinue"
     --windowed `
     --name "JarvisAi_Unity" `
     --icon $iconPath `
+    --version-file $versionInfoFile `
     --distpath $distDir `
     --workpath $buildDir `
     --specpath $buildDir `
@@ -134,6 +174,7 @@ $ErrorActionPreference = "SilentlyContinue"
     --onefile `
     --name "JarvisAi_Unity" `
     --icon $iconPath `
+    --version-file $versionInfoFile `
     --distpath $oneFileDistDir `
     --workpath $oneFileBuildDir `
     --specpath $oneFileBuildDir `
@@ -176,6 +217,7 @@ if (Test-Path $innoCompiler) {
 AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}
 AppName=JARVIS Unity
 AppVersion=$version
+AppVerName=JARVIS Unity $version
 AppPublisher=theclepro1-hub
 AppPublisherURL=https://github.com/theclepro1-hub/Jarvis.AI
 AppSupportURL=https://github.com/theclepro1-hub/Jarvis.AI/issues
@@ -184,6 +226,7 @@ DefaultDirName={autopf}\JARVIS Unity
 DefaultGroupName=JARVIS Unity
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\JarvisAi_Unity.exe
+UninstallDisplayName=JARVIS Unity
 AppMutex=JarvisAi_Unity_22_instance_mutex
 CloseApplications=yes
 RestartApplications=yes
@@ -200,6 +243,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
+UsePreviousAppDir=yes
+UsePreviousLanguage=yes
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"

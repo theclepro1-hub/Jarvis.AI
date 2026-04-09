@@ -15,6 +15,7 @@ Rectangle {
         contentWidth: width
         contentHeight: contentColumn.implicitHeight + 24
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: AppScrollBar {}
 
         ColumnLayout {
             id: contentColumn

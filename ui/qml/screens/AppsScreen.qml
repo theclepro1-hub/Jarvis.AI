@@ -11,6 +11,14 @@ Rectangle {
 
     property string selectedCategory: "music"
     property bool manualFormOpen: true
+    property bool scanCoolingDown: false
+
+    Timer {
+        id: scanCooldownTimer
+        interval: 1400
+        repeat: false
+        onTriggered: root.scanCoolingDown = false
+    }
 
     function normalizeDiscoveryTitle(title) {
         return (title || "")
@@ -201,7 +209,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: AppScrollBar {}
 
         ColumnLayout {
             width: appsScroll.availableWidth
@@ -250,7 +258,12 @@ Rectangle {
                         SecondaryButton {
                             objectName: "appsAutoScanButton"
                             text: "Найти автоматически"
-                            onClicked: appsBridge.scanApplications()
+                            enabled: !root.scanCoolingDown
+                            onClicked: {
+                                root.scanCoolingDown = true
+                                scanCooldownTimer.restart()
+                                appsBridge.scanApplications()
+                            }
                         }
 
                     SecondaryButton {
@@ -299,6 +312,7 @@ Rectangle {
                         PrimaryButton {
                             objectName: "customAppAddButton"
                             text: "Добавить"
+                            enabled: titleField.text.trim().length > 0 && targetField.text.trim().length > 0
                             onClicked: {
                                 appsBridge.addCustomApp(titleField.text, targetField.text, aliasesField.text)
                                 titleField.clear()
@@ -315,6 +329,16 @@ Rectangle {
                         color: Theme.Colors.accent
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        visible: root.scanCoolingDown && appsBridge.feedback.length === 0
+                        text: "JARVIS СѓР¶Рµ РѕР±РЅРѕРІР»СЏРµС‚ СЃРїРёСЃРѕРє РїСЂРёР»РѕР¶РµРЅРёР№. РџРѕРґРѕР¶РґРёС‚Рµ РјРѕРјРµРЅС‚, РїРѕРєР° РїРѕРёСЃРє РЅРµ Р·Р°РєРѕРЅС‡РёС‚СЃСЏ."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }

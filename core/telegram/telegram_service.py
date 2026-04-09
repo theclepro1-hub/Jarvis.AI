@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 import inspect
 import json
 import os
@@ -15,8 +16,9 @@ from core.telegram.telegram_models import TelegramDispatchResult, TelegramStatus
 
 DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 2.0
-DEFAULT_DISPATCH_WORKERS = 3
-DEFAULT_MAX_INFLIGHT_DISPATCHES = 12
+DEFAULT_DISPATCH_WORKERS = 4
+DEFAULT_MAX_INFLIGHT_DISPATCHES = 24
+DEFAULT_SEEN_UPDATE_IDS_LIMIT = 2048
 
 
 class TelegramTransport(Protocol):
@@ -142,6 +144,9 @@ class TelegramService:
         self._last_poll_at_utc: datetime | None = None
         self._state_lock = threading.Lock()
         self._dispatch_lock = threading.Lock()
+        self._seen_lock = threading.Lock()
+        self._seen_update_ids: deque[int] = deque()
+        self._seen_update_ids_set: set[int] = set()
         self._inflight_dispatches = 0
         self._dispatch_pool = ThreadPoolExecutor(
             max_workers=DEFAULT_DISPATCH_WORKERS,
@@ -260,6 +265,9 @@ class TelegramService:
         for update in updates:
             if self._offset is not None and update.update_id < self._offset:
                 continue
+            if self._is_seen_update(update.update_id):
+                continue
+            self._remember_seen_update(update.update_id)
             filtered_updates.append(update)
             current_next = update.update_id + 1
             next_offset = current_next if next_offset is None else max(next_offset, current_next)
@@ -456,6 +464,20 @@ class TelegramService:
         if message:
             return f"{type(exc).__name__}: {message}"
         return type(exc).__name__
+
+    def _is_seen_update(self, update_id: int) -> bool:
+        with self._seen_lock:
+            return update_id in self._seen_update_ids_set
+
+    def _remember_seen_update(self, update_id: int) -> None:
+        with self._seen_lock:
+            if update_id in self._seen_update_ids_set:
+                return
+            if len(self._seen_update_ids) >= DEFAULT_SEEN_UPDATE_IDS_LIMIT:
+                old_update_id = self._seen_update_ids.popleft()
+                self._seen_update_ids_set.discard(old_update_id)
+            self._seen_update_ids.append(update_id)
+            self._seen_update_ids_set.add(update_id)
 
     def _submit_dispatch(self, update: TelegramUpdate) -> None:
         with self._dispatch_lock:

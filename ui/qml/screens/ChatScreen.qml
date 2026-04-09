@@ -14,7 +14,7 @@ Rectangle {
 
         Rectangle {
             objectName: "chatQueueCard"
-            visible: chatBridge.queueItems.length > 0
+            visible: chatBridge.queueItems.length > 0 || chatBridge.thinking
             Layout.fillWidth: true
             implicitHeight: visible ? queueColumn.implicitHeight + 24 : 0
             color: "#0d1522"
@@ -36,7 +36,29 @@ Rectangle {
                     font.bold: true
                 }
 
+                RowLayout {
+                    visible: chatBridge.thinking
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    StatusPill {
+                        text: "РґСѓРјР°СЋ"
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: chatBridge.thinkingLabel.length > 0
+                              ? chatBridge.thinkingLabel
+                              : "JARVIS РµС‰С‘ РЅРµ РѕС‚РІРµС‚РёР», РЅРѕ Р·Р°РїСЂРѕСЃ СѓР¶Рµ РІ СЂР°Р±РѕС‚Рµ."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
                 Flow {
+                    visible: chatBridge.queueItems.length > 0
                     Layout.fillWidth: true
                     spacing: 8
 
@@ -58,6 +80,8 @@ Rectangle {
             QuickActionStrip {
                 Layout.fillWidth: true
                 model: chatBridge.quickActions
+                enabled: !chatBridge.thinking
+                opacity: enabled ? 1.0 : 0.56
                 onTrigger: (actionId) => chatBridge.triggerQuickAction(actionId)
             }
 
@@ -66,6 +90,7 @@ Rectangle {
                 text: "Очистить чат"
                 compact: true
                 Layout.preferredWidth: 150
+                enabled: !chatBridge.thinking
                 onClicked: chatBridge.clearHistory()
             }
         }
@@ -82,6 +107,10 @@ Rectangle {
             ListView {
                 id: listView
                 objectName: "chatListView"
+                property bool followBottom: true
+                function nearBottom() {
+                    return (contentHeight - (contentY + height)) <= 48
+                }
                 anchors.fill: parent
                 anchors.margins: 18
                 spacing: 16
@@ -90,13 +119,36 @@ Rectangle {
                 orientation: ListView.Vertical
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
-                onCountChanged: Qt.callLater(positionViewAtEnd)
-                onWidthChanged: Qt.callLater(positionViewAtEnd)
+                onCountChanged: {
+                    if (followBottom) {
+                        Qt.callLater(positionViewAtEnd)
+                    }
+                }
+                onContentHeightChanged: {
+                    if (followBottom) {
+                        Qt.callLater(positionViewAtEnd)
+                    }
+                }
+                onHeightChanged: {
+                    if (followBottom) {
+                        Qt.callLater(positionViewAtEnd)
+                    }
+                }
+                onMovementStarted: followBottom = nearBottom()
+                onFlickStarted: followBottom = nearBottom()
+                onMovementEnded: followBottom = nearBottom()
+                onFlickEnded: followBottom = nearBottom()
+                onContentYChanged: {
+                    if (!moving && !flicking) {
+                        followBottom = nearBottom()
+                    }
+                }
                 onContentXChanged: {
                     if (contentX !== 0) {
                         contentX = 0
                     }
                 }
+                Component.onCompleted: Qt.callLater(positionViewAtEnd)
 
                 delegate: Item {
                     required property var modelData
@@ -206,6 +258,8 @@ Rectangle {
             objectName: "chatComposer"
             Layout.fillWidth: true
             Layout.preferredHeight: 96
+            busy: chatBridge.thinking
+            busyHint: chatBridge.thinkingLabel
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint
             onSubmit: (text) => chatBridge.sendMessage(text)

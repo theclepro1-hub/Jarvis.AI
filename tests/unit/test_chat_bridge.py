@@ -41,7 +41,8 @@ class _Router:
         self.route = route
         self.received: list[str] = []
 
-    def handle(self, text: str):  # noqa: ANN201
+    def handle(self, text: str, *, source: str = "ui"):  # noqa: ANN201
+        _ = source
         self.received.append(text)
         return self.route
 
@@ -232,3 +233,51 @@ def test_chat_bridge_ignores_empty_local_noise_route() -> None:
 
     assert len(bridge.messages) == before + 1
     assert bridge.messages[-1]["role"] == "user"
+
+
+def test_chat_bridge_dedupes_inflight_same_message(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: None),
+    )
+    route = SimpleNamespace(kind="ai", commands=["hello"], assistant_lines=[], queue_items=["hello"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+    before = len(bridge.messages)
+
+    bridge.sendMessage("hello")
+    bridge.sendMessage("hello")
+
+    assert len(bridge.messages) == before + 1
+    assert bridge.thinking is True
+    assert "Уже отправлено" in bridge.state.status
+
+
+def test_chat_bridge_clears_thinking_label_after_ai_reply(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["how are you"], assistant_lines=[], queue_items=["how are you"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+
+    bridge.sendMessage("how are you")
+
+    assert bridge.thinking is False
+    assert bridge.thinkingLabel == ""
+    assert bridge.messages[-1]["role"] == "assistant"
+
+
+def test_chat_bridge_blocks_parallel_inflight_message_until_reply(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: None),
+    )
+    route = SimpleNamespace(kind="ai", commands=["first"], assistant_lines=[], queue_items=["first"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+    before = len(bridge.messages)
+
+    bridge.sendMessage("first")
+    bridge.sendMessage("second")
+
+    assert len(bridge.messages) == before + 1
+    assert bridge.messages[-1]["text"] == "first"

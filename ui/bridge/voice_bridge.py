@@ -353,10 +353,14 @@ class VoiceBridge(QObject):
     def _handle_wake_detected(self, pre_roll: bytes) -> None:
         if self.services.voice.is_recording:
             return
-        self._recording_hint = "Слово активации найдено. Записываю команду..."
+        self._recording_hint = "Слово активации найдено. Подхватываю начало команды..."
         self.recordingHintChanged.emit()
-        self.state.status = "Записываю"
-        self.services.voice.set_wake_runtime_status("capturing_command", ready=False, detail="Записываю команду")
+        self.state.status = "Подхватываю команду"
+        self.services.voice.set_wake_runtime_status(
+            "capturing_command",
+            ready=False,
+            detail="Подхватываю начало команды",
+        )
         thread = threading.Thread(target=self._finish_after_wake, args=(pre_roll,), daemon=True)
         thread.start()
 

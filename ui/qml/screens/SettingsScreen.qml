@@ -13,6 +13,25 @@ Rectangle {
 
     property bool confirmDeleteAllData: false
 
+    function connectionFeedbackText() {
+        return settingsBridge.connectionFeedback || ""
+    }
+
+    function telegramFeedbackText() {
+        var feedback = settingsBridge.connectionFeedback || ""
+        if (feedback.indexOf("РўРµСЃС‚") === 0 || feedback.indexOf("Telegram") === 0) {
+            return feedback
+        }
+        return ""
+    }
+
+    function deleteAllDataHintText() {
+        if (settingsRoot.confirmDeleteAllData) {
+            return "Deleting all local data requires one more click. This clears keys, history, Telegram state and the local profile from %LOCALAPPDATA%."
+        }
+        return "This action is irreversible and wipes the full local JARVIS profile from %LOCALAPPDATA%."
+    }
+
     function aiModeLabel() {
         switch (settingsBridge.aiProfile) {
         case "groq_fast":
@@ -77,7 +96,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: AppScrollBar {}
 
         ColumnLayout {
             width: settingsScroll.availableWidth
@@ -218,8 +237,8 @@ Rectangle {
 
                 Text {
                     objectName: "settingsConnectionsFeedback"
-                    visible: settingsBridge.connectionFeedback.length > 0
-                    text: settingsBridge.connectionFeedback
+                    visible: settingsRoot.connectionFeedbackText().length > 0
+                    text: settingsRoot.connectionFeedbackText()
                     color: Theme.Colors.accent
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
@@ -272,8 +291,8 @@ Rectangle {
                             Text {
                                 text: settingsBridge.telegramTestBusy
                                       ? "Отправляю тестовое сообщение в Telegram..."
-                                      : settingsBridge.connectionFeedback.length > 0
-                                      ? settingsBridge.connectionFeedback
+                                      : settingsRoot.telegramFeedbackText().length > 0
+                                      ? settingsRoot.telegramFeedbackText()
                                       : "Тест отправит короткое сообщение в ваш Telegram."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
@@ -552,7 +571,23 @@ Rectangle {
                             }
                         }
 
+                        SecondaryButton {
+                            visible: settingsRoot.confirmDeleteAllData
+                            text: "РћС‚РјРµРЅР°"
+                            onClicked: settingsRoot.confirmDeleteAllData = false
+                        }
+
                         Text {
+                            text: settingsRoot.deleteAllDataHintText()
+                            color: settingsRoot.confirmDeleteAllData ? "#ffb4b4" : Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.micro
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            visible: false
                             text: settingsBridge.connectionFeedback.length > 0
                                   ? settingsBridge.connectionFeedback
                                   : "Действие необратимое. Используйте, если хотите полностью сбросить локальный профиль."

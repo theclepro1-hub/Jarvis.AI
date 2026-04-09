@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import os
 import re
+import subprocess
 import webbrowser
 from typing import Iterable
 
@@ -19,6 +20,14 @@ EXACT_MUSIC_ALIASES = (
 )
 QUICK_ACTION_IDS = ("youtube", "browser", "music", "steam", "discord")
 QUICK_ACTION_LIMIT = 7
+KNOWN_SHELL_FOLDERS = {
+    "desktop": "shell:Desktop",
+    "documents": "shell:Personal",
+    "downloads": "shell:Downloads",
+    "pictures": "shell:My Pictures",
+    "videos": "shell:My Video",
+    "music_folder": "shell:My Music",
+}
 NATURAL_ALIAS_TEMPLATES = (
     (
         ("counter-strike 2", "counter strike 2", "cs2"),
@@ -45,6 +54,7 @@ NATURAL_ALIAS_TEMPLATES = (
         ("саундклауд", "саунд клоуд", "soundcloud"),
     ),
 )
+OPEN_SEQUENCE_CONNECTOR_PATTERN = re.compile(r"^(?:[\s,.:;!?-]+|и\s+|а\s+ещ[её]\s+|потом\s+)+", re.IGNORECASE)
 
 
 class ActionRegistry:
@@ -82,7 +92,7 @@ class ActionRegistry:
             {
                 "id": "steam",
                 "title": "Steam",
-                "aliases": ["steam", "стим"],
+                "aliases": ["steam", "стим", "с тим"],
                 "kind": "uri",
                 "target": "steam://open/main",
                 "category": "launcher",
@@ -95,6 +105,78 @@ class ActionRegistry:
                 "target": "mswindowsmusic:",
                 "category": "music",
                 "builtin_default": True,
+            },
+            {
+                "id": "system_settings",
+                "title": "Параметры Windows",
+                "aliases": ["параметры", "настройки windows", "windows settings", "settings"],
+                "kind": "uri",
+                "target": "ms-settings:",
+                "category": "system",
+            },
+            {
+                "id": "system_explorer",
+                "title": "Проводник",
+                "aliases": ["проводник", "explorer", "файлы", "файловый менеджер"],
+                "kind": "uri",
+                "target": "explorer.exe",
+                "category": "system",
+            },
+            {
+                "id": "system_task_manager",
+                "title": "Диспетчер задач",
+                "aliases": ["диспетчер задач", "task manager", "taskmgr"],
+                "kind": "uri",
+                "target": "taskmgr.exe",
+                "category": "system",
+            },
+            {
+                "id": "system_control_panel",
+                "title": "Панель управления",
+                "aliases": ["панель управления", "control panel", "control"],
+                "kind": "uri",
+                "target": "control.exe",
+                "category": "system",
+            },
+            {
+                "id": "folder_desktop",
+                "title": "Рабочий стол",
+                "aliases": ["рабочий стол", "desktop"],
+                "kind": "shell",
+                "target": "desktop",
+                "category": "system",
+            },
+            {
+                "id": "folder_documents",
+                "title": "Документы",
+                "aliases": ["документы", "documents"],
+                "kind": "shell",
+                "target": "documents",
+                "category": "system",
+            },
+            {
+                "id": "folder_downloads",
+                "title": "Загрузки",
+                "aliases": ["загрузки", "downloads"],
+                "kind": "shell",
+                "target": "downloads",
+                "category": "system",
+            },
+            {
+                "id": "folder_pictures",
+                "title": "Изображения",
+                "aliases": ["картинки", "изображения", "pictures", "фото"],
+                "kind": "shell",
+                "target": "pictures",
+                "category": "system",
+            },
+            {
+                "id": "folder_videos",
+                "title": "Видео",
+                "aliases": ["видео", "videos"],
+                "kind": "shell",
+                "target": "videos",
+                "category": "system",
             },
         ]
         self.catalog = self._merged_catalog()
@@ -175,6 +257,29 @@ class ActionRegistry:
 
         return self.find_items(target_text), ""
 
+    def can_resolve_open_target(self, text: str) -> bool:
+        clean = self._consume_open_sequence_connectors(text)
+        if not clean:
+            return False
+        return self._best_open_target_prefix(clean) is not None
+
+    def split_open_target_sequence(self, text: str) -> tuple[list[str], str]:
+        remaining = re.sub(r"\s+", " ", str(text or "").strip(" ,"))
+        phrases: list[str] = []
+        while remaining:
+            remaining = self._consume_open_sequence_connectors(remaining)
+            if not remaining:
+                break
+            matched = self._best_open_target_prefix(remaining)
+            if matched is None:
+                break
+            matched_phrase = matched.strip(" ,")
+            if not matched_phrase:
+                break
+            phrases.append(matched_phrase)
+            remaining = remaining[len(matched):].lstrip(" ,")
+        return phrases, self._consume_open_sequence_connectors(remaining)
+
     def open_items(self, items: Iterable[dict[str, str]]) -> list[ActionOutcome]:
         outcomes: list[ActionOutcome] = []
         for item in items:
@@ -199,7 +304,45 @@ class ActionRegistry:
         if kind == "url":
             webbrowser.open(target)
             return
+        if kind == "power":
+            self._run_power_action(target)
+            return
+        if kind == "shell":
+            shell_target = KNOWN_SHELL_FOLDERS.get(target, target)
+            os.startfile(shell_target)  # type: ignore[attr-defined]
+            return
         os.startfile(target)  # type: ignore[attr-defined]
+
+    def _run_power_action(self, action: str) -> None:
+        if os.name != "nt":
+            raise OSError("power_actions_are_supported_only_on_windows")
+
+        normalized = action.strip().casefold()
+        if normalized == "lock":
+            if not bool(ctypes.windll.user32.LockWorkStation()):
+                raise OSError("lock_workstation_failed")
+            return
+        if normalized == "sleep":
+            if not bool(ctypes.windll.powrprof.SetSuspendState(False, True, False)):
+                raise OSError("sleep_failed")
+            return
+        if normalized == "hibernate":
+            if not bool(ctypes.windll.powrprof.SetSuspendState(True, True, False)):
+                raise OSError("hibernate_failed")
+            return
+
+        shutdown_commands = {
+            "shutdown": ["shutdown", "/s", "/t", "0"],
+            "restart": ["shutdown", "/r", "/t", "0"],
+            "logoff": ["shutdown", "/l"],
+        }
+        command = shutdown_commands.get(normalized)
+        if command is None:
+            raise OSError(f"unknown_power_action:{action}")
+        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | int(
+            getattr(subprocess, "DETACHED_PROCESS", 0)
+        )
+        subprocess.Popen(command, close_fds=True, creationflags=creationflags)  # noqa: S603
 
     def volume_up(self) -> ActionOutcome:
         self._press_volume_key(self.VK_VOLUME_UP)
@@ -212,6 +355,15 @@ class ActionRegistry:
     def volume_mute(self) -> ActionOutcome:
         self._press_volume_key(self.VK_VOLUME_MUTE)
         return ActionOutcome(True, "Переключаю звук", "Системный звук переключён")
+
+    def run_power_action(self, action: str, title: str) -> ActionOutcome:
+        self._run_power_action(action)
+        return ActionOutcome(
+            True,
+            title,
+            "Системная команда отправлена.",
+            status="sent_unverified",
+        )
 
     def _press_volume_key(self, virtual_key: int) -> None:
         ctypes.windll.user32.keybd_event(virtual_key, 0, 0, 0)
@@ -509,6 +661,79 @@ class ActionRegistry:
             return bool(re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", text, flags=re.IGNORECASE))
         return alias in text
 
+    def _alias_prefix_length(self, alias: str, text: str) -> int:
+        candidate = text.strip()
+        if not alias or not candidate:
+            return 0
+        if " " not in alias and "-" not in alias and len(alias) <= 4:
+            match = re.match(rf"{re.escape(alias)}(?=$|[^\w])", candidate, flags=re.IGNORECASE)
+            return len(match.group(0)) if match else 0
+        if candidate.startswith(alias):
+            if len(candidate) == len(alias):
+                return len(alias)
+            next_char = candidate[len(alias)]
+            if next_char.isspace() or next_char in ",.:;!?-":
+                return len(alias)
+        return 0
+
+    def _best_open_target_prefix(self, text: str) -> str | None:
+        candidate = re.sub(r"\s+", " ", str(text or "").strip(" ,")).casefold()
+        if not candidate:
+            return None
+
+        best_match = ""
+        best_score = -1
+
+        known_music_patterns = (
+            r"^(яндекс\s+\w*музык\w*)(?=$|[\s,.:;!?-])",
+            r"^((?:spotify|спотифай|спотик))(?=$|[\s,.:;!?-])",
+            r"^((?:apple music|эпл музыка|эпл мьюзик|эйпл мьюзик))(?=$|[\s,.:;!?-])",
+            r"^((?:soundcloud|саундклауд|саунд клоуд))(?=$|[\s,.:;!?-])",
+        )
+        for pattern in known_music_patterns:
+            match = re.match(pattern, candidate, flags=re.IGNORECASE)
+            if match:
+                token = match.group(1)
+                score = len(token) + 100
+                if score > best_score:
+                    best_match = token
+                    best_score = score
+
+        for word in sorted(MUSIC_WORDS, key=len, reverse=True):
+            length = self._alias_prefix_length(word.casefold(), candidate)
+            if length:
+                score = length + 10
+                if score > best_score:
+                    best_match = candidate[:length]
+                    best_score = score
+
+        for item in self.catalog:
+            aliases = [*item.get("aliases", []), item.get("title", "")]
+            for alias in aliases:
+                alias_value = str(alias).strip().casefold()
+                if not alias_value:
+                    continue
+                length = self._alias_prefix_length(alias_value, candidate)
+                if not length:
+                    continue
+                score = length
+                if str(item.get("category", "")).casefold() == "system":
+                    score += 5
+                if score > best_score:
+                    best_match = candidate[:length]
+                    best_score = score
+
+        return best_match or None
+
+    def _consume_open_sequence_connectors(self, text: str) -> str:
+        clean = re.sub(r"\s+", " ", str(text or "").strip(" ,"))
+        while clean:
+            updated = OPEN_SEQUENCE_CONNECTOR_PATTERN.sub("", clean, count=1)
+            if updated == clean:
+                break
+            clean = updated.strip(" ,")
+        return clean
+
     def _normalized_aliases(self, title: str, raw_aliases: object) -> list[str]:
         if isinstance(raw_aliases, str):
             aliases = [part.strip().casefold() for part in raw_aliases.split(",") if part.strip()]
@@ -592,7 +817,7 @@ class ActionRegistry:
         title = str(item.get("title", ""))
         if len(title) > 28:
             return False
-        return str(item.get("category", "")) in {"game", "music", "launcher", "web", "app"}
+        return str(item.get("category", "")) in {"game", "music", "launcher", "web", "app", "system"}
 
     def _user_visible_catalog(self) -> list[dict[str, str]]:
         visible: list[dict[str, str]] = []

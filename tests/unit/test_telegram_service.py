@@ -5,7 +5,6 @@ from pathlib import Path
 import time
 from types import SimpleNamespace
 
-from core.services.service_container import ServiceContainer
 from core.telegram.telegram_models import TelegramUpdate
 from core.telegram.telegram_service import DEFAULT_POLL_INTERVAL_MS, HttpTelegramTransport, TelegramService
 
@@ -288,11 +287,21 @@ def test_telegram_service_routes_plain_conversation_through_service_container_ai
             return f"AI:{text}"
 
     runtime = SimpleNamespace(command_router=Router(), ai=Ai())
+
+    def external_handler(text: str, chat_id: str) -> str:
+        resolved = runtime.command_router.handle(text, source="telegram", telegram_chat_id=chat_id)
+        if resolved.assistant_lines:
+            return "\n".join(resolved.assistant_lines)
+        if resolved.kind != "ai" and not resolved.commands:
+            return ""
+        clean = " ".join(resolved.commands).strip() if resolved.commands else text
+        return runtime.ai.generate_reply(clean, [])
+
     service = TelegramService(
         FakeSettings(),
         transport=transport,
         offset_store=FakeOffsetStore(offset=31),
-        handler=lambda text, chat_id: ServiceContainer.handle_external_command(runtime, text, chat_id),
+        handler=external_handler,
     )
 
     results = service.poll_once()
@@ -366,7 +375,6 @@ def test_async_dispatch_does_not_silently_drop_later_updates() -> None:
     assert all(item.error == "queued" for item in queued)
     assert elapsed < 0.5
     assert service.pending_dispatches() > 0
-    assert service.can_poll_now() is False
 
     deadline = time.perf_counter() + 6.0
     while time.perf_counter() < deadline and service.pending_dispatches() > 0:
@@ -375,3 +383,24 @@ def test_async_dispatch_does_not_silently_drop_later_updates() -> None:
     assert service.pending_dispatches() == 0
     assert service.can_poll_now() is True
     assert len(transport.sent_messages) == 20
+
+
+def test_duplicate_update_ids_are_deduped_before_dispatch() -> None:
+    updates = [
+        TelegramUpdate(update_id=500, chat_id=777, user_id=123456789, text="open youtube"),
+        TelegramUpdate(update_id=500, chat_id=777, user_id=123456789, text="open youtube"),
+    ]
+    transport = FakeTransport(updates)
+    handled: list[str] = []
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=500),
+        handler=lambda text: handled.append(text) or "ok",
+    )
+
+    results = service.poll_once()
+
+    assert len(results) == 1
+    assert handled == ["open youtube"]
+    assert transport.sent_messages == [(777, "ok")]

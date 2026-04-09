@@ -13,6 +13,7 @@ from app.app import JarvisUnityApplication
 from core.services.single_instance import SingleInstanceService
 
 WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"
+WINDOWS_APP_DISPLAY_NAME = "JARVIS Unity"
 
 
 def _boot_log(message: str) -> None:
@@ -46,7 +47,8 @@ def bootstrap() -> int:
     _boot_log("bootstrap:begin")
     QGuiApplication.setOrganizationName("theclepro1")
     QGuiApplication.setOrganizationDomain("jarvisai.unity")
-    QGuiApplication.setApplicationName("JarvisAi Unity")
+    QGuiApplication.setApplicationName(WINDOWS_APP_DISPLAY_NAME)
+    QGuiApplication.setApplicationDisplayName(WINDOWS_APP_DISPLAY_NAME)
     _set_windows_app_user_model_id()
     _boot_log("bootstrap:before-app")
     application = QApplication(sys.argv)

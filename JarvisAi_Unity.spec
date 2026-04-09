@@ -44,5 +44,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version='C:\\JarvisAi_Unity\\build\\pyinstaller\\version_info.txt',
     icon=['C:\\JarvisAi_Unity\\assets\\icons\\jarvis_unity.ico'],
 )

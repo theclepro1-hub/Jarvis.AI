@@ -112,8 +112,27 @@ def test_quality_mode_prioritizes_quality_plan() -> None:
 
     plan = service.provider_plan()
 
-    assert [attempt.provider for attempt in plan][:3] == ["gemini", "cerebras", "groq"]
+    assert [attempt.provider for attempt in plan][:3] == ["gemini", "groq", "cerebras"]
     assert plan[0].model == "gemini-3-flash-preview"
+
+
+def test_fast_mode_prefers_low_latency_provider_order() -> None:
+    service = AIService(FakeSettings({"ai_mode": "fast"}))
+
+    plan = service.provider_plan()
+
+    assert [attempt.provider for attempt in plan] == ["groq", "cerebras"]
+
+
+def test_ai_mode_request_options_are_distinct() -> None:
+    service = AIService(FakeSettings())
+
+    fast = service._mode_request_options("fast")
+    auto = service._mode_request_options("auto")
+    quality = service._mode_request_options("quality")
+
+    assert fast["max_tokens"] < auto["max_tokens"] < quality["max_tokens"]
+    assert fast["temperature"] != quality["temperature"]
 
 
 def test_manual_provider_selection_is_not_silent_auto_fallback() -> None:
@@ -122,6 +141,25 @@ def test_manual_provider_selection_is_not_silent_auto_fallback() -> None:
     plan = service.provider_plan()
 
     assert [attempt.provider for attempt in plan] == ["gemini"]
+
+
+def test_retryable_error_can_retry_same_provider_when_attempts_enabled() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.groq.com/openai/v1": ProviderError(429),
+        "https://api.cerebras.ai/v1": "fallback",
+    }
+    service = AIService(
+        FakeSettings({"ai_mode": "auto", "ai_max_attempts": 2, "ai_provider": "groq"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    # Manual provider "groq" means retries should stay on the same provider.
+    reply = service.generate_reply("test")
+
+    assert reply
+    assert [call["base_url"] for call in calls].count("https://api.groq.com/openai/v1") == 2
 
 
 def test_local_mode_does_not_call_cloud_provider() -> None:

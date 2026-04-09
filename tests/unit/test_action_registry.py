@@ -524,6 +524,27 @@ def test_generic_music_does_not_fall_back_to_windows_music() -> None:
     assert question == "Музыкальное приложение не найдено. Добавьте его во вкладке «Приложения»."
 
 
+def test_system_targets_resolve_from_builtin_catalog() -> None:
+    registry, _service = make_registry()
+
+    settings_items, settings_question = registry.resolve_open_command("открой параметры")
+    explorer_items, explorer_question = registry.resolve_open_command("открой проводник")
+
+    assert settings_question == ""
+    assert [item["id"] for item in settings_items] == ["system_settings"]
+    assert explorer_question == ""
+    assert [item["id"] for item in explorer_items] == ["system_explorer"]
+
+
+def test_open_target_sequence_split_recovers_multiple_voice_targets() -> None:
+    registry, _service = make_registry()
+
+    targets, remainder = registry.split_open_target_sequence("браузер ютуб и музыку")
+
+    assert targets == ["браузер", "ютуб", "музыку"]
+    assert remainder == ""
+
+
 def test_scan_summary_mentions_review_candidates_when_auto_import_skips_them() -> None:
     registry, _service = make_registry()
 
@@ -547,3 +568,46 @@ def test_scan_summary_mentions_review_candidates_when_auto_import_skips_them() -
     assert result["imported"] == []
     assert result["review"][0]["title"] == "Very Long Utility Launcher Name That Needs Review"
     assert "Найдено для проверки:" in result["summary"]
+
+
+def test_registry_resolves_windows_builtin_entries() -> None:
+    registry, _service = make_registry()
+
+    items, question = registry.resolve_open_command("открой параметры")
+    assert question == ""
+    assert [item["id"] for item in items] == ["system_settings"]
+
+    items, question = registry.resolve_open_command("открой загрузки")
+    assert question == ""
+    assert [item["id"] for item in items] == ["folder_downloads"]
+
+
+def test_registry_runs_power_targets_via_shutdown_command(monkeypatch) -> None:
+    registry, _service = make_registry()
+    launched: dict[str, object] = {}
+
+    class DummyProc:
+        pass
+
+    def fake_popen(command, close_fds, creationflags):  # noqa: ANN001, ANN202
+        launched["command"] = command
+        launched["close_fds"] = close_fds
+        launched["creationflags"] = creationflags
+        return DummyProc()
+
+    monkeypatch.setattr("core.actions.action_registry.subprocess.Popen", fake_popen)
+
+    outcomes = registry.open_items(
+        [
+            {
+                "id": "power_restart",
+                "title": "Перезагружаю компьютер",
+                "kind": "power",
+                "target": "restart",
+            }
+        ]
+    )
+
+    assert outcomes[0].success is True
+    assert launched["close_fds"] is True
+    assert launched["command"] == ["shutdown", "/r", "/t", "0"]

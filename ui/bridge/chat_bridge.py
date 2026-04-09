@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -14,8 +15,10 @@ class ChatBridge(QObject):
     appCatalogChanged = Signal()
     queueChanged = Signal()
     thinkingChanged = Signal()
+    thinkingLabelChanged = Signal()
     saveHistoryEnabledChanged = Signal()
-    workerReplyReady = Signal(str)
+    workerReplyReady = Signal(str, str)
+    workerStatusReady = Signal(str)
 
     def __init__(self, state, services, app_bridge) -> None:
         super().__init__()
@@ -27,8 +30,15 @@ class ChatBridge(QObject):
         self._quick_actions: list[dict[str, str]] = []
         self._app_catalog: list[dict[str, str]] = []
         self._thinking = False
+        self._thinking_label = ""
         self._initial_state_hydrated = False
+        self._inflight_signatures: set[str] = set()
+        self._recent_submissions: dict[str, float] = {}
+        self._submit_lock = threading.Lock()
+        self._dedupe_window_seconds = 1.0
+        self._single_flight = True
         self.workerReplyReady.connect(self._append_assistant_message)
+        self.workerStatusReady.connect(self._set_status_stage)
         QTimer.singleShot(0, self._hydrate_initial_state)
 
     @Property("QVariantList", notify=messagesChanged)
@@ -51,6 +61,10 @@ class ChatBridge(QObject):
     def thinking(self) -> bool:
         return self._thinking
 
+    @Property(str, notify=thinkingLabelChanged)
+    def thinkingLabel(self) -> str:
+        return self._thinking_label
+
     @Property(bool, notify=saveHistoryEnabledChanged)
     def saveHistoryEnabled(self) -> bool:
         settings = getattr(self.services, "settings", None)
@@ -68,35 +82,53 @@ class ChatBridge(QObject):
 
     @Slot(str)
     def sendMessage(self, text: str) -> None:
+        self._submit_message(text, source="ui")
+
+    def _submit_message(self, text: str, *, source: str) -> None:
         clean = text.strip()
         if not clean:
             return
+        signature = self._message_signature(clean)
+        if not self._reserve_submission(signature):
+            self.state.status = "Уже отправлено, жду ответ"
+            return
 
         self._append_message("user", clean)
-        self.state.status = "Думаю"
+        self.state.status = "Разбираю запрос"
 
-        route = self.services.command_router.handle(clean)
+        try:
+            route = self.services.command_router.handle(clean, source=source)
+        except Exception as exc:  # noqa: BLE001
+            self._append_message("assistant", f"Ошибка обработки команды: {type(exc).__name__}")
+            self._release_submission(signature)
+            self.state.status = "Готов"
+            return
         self._queue_items = route.queue_items
         self.queueChanged.emit()
 
         if route.kind == "local":
+            self.state.status = "Выполняю локально"
             self._thinking = False
             self.thinkingChanged.emit()
+            self._set_status_stage("")
             if route.execution_result is None and not route.assistant_lines:
                 self._queue_items = []
                 self.queueChanged.emit()
                 self.state.status = "Готов"
+                self._release_submission(signature)
                 return
             self._append_local_result(route)
             self._queue_items = []
             self.queueChanged.emit()
             self.state.status = "Готов"
+            self._release_submission(signature)
             return
 
         self._thinking = True
         self.thinkingChanged.emit()
+        self._set_status_stage("Отправляю запрос в ИИ...")
         ai_text = " ".join(route.commands).strip() if route.commands else clean
-        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text,), daemon=True)
+        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text, signature), daemon=True)
         thread.start()
 
     @Slot(str)
@@ -109,7 +141,7 @@ class ChatBridge(QObject):
 
     @Slot(str)
     def submitTranscribedText(self, text: str) -> None:
-        self.sendMessage(text)
+        self._submit_message(text, source="voice")
 
     @Slot(str)
     def appendAssistantNote(self, text: str) -> None:
@@ -134,21 +166,32 @@ class ChatBridge(QObject):
         if hasattr(self.services, "chat_history"):
             self.services.chat_history.clear()
         self._messages = [self._welcome_message()]
+        with self._submit_lock:
+            self._inflight_signatures.clear()
+            self._recent_submissions.clear()
+        self._set_status_stage("")
         self._initial_state_hydrated = True
         self.messagesChanged.emit()
 
-    def _resolve_ai_reply(self, text: str) -> None:
+    def _resolve_ai_reply(self, text: str, signature: str) -> None:
+        self.workerStatusReady.emit("Жду ответ ИИ...")
         history = self._messages[:-1]
-        reply = self.services.ai.generate_reply(text, history)
-        self.workerReplyReady.emit(reply)
+        try:
+            reply = self.services.ai.generate_reply(text, history)
+        except Exception as exc:  # noqa: BLE001
+            reply = f"ИИ временно недоступен: {type(exc).__name__}"
+        self.workerReplyReady.emit(reply, signature)
 
-    def _append_assistant_message(self, text: str) -> None:
+    def _append_assistant_message(self, text: str, signature: str = "") -> None:
         self._append_message("assistant", text)
         self._speak_assistant_text(text)
         self._queue_items = []
         self.queueChanged.emit()
+        if signature:
+            self._release_submission(signature)
         self._thinking = False
         self.thinkingChanged.emit()
+        self._set_status_stage("")
         self.state.status = "Готов"
 
     def _append_local_result(self, route) -> None:
@@ -320,6 +363,43 @@ class ChatBridge(QObject):
         except Exception:
             # Voice output must never block or break chat delivery.
             return
+
+    def _set_status_stage(self, text: str) -> None:
+        self._thinking_label = str(text or "").strip()
+        self.thinkingLabelChanged.emit()
+        if self._thinking_label:
+            self.state.status = self._thinking_label
+
+    def _message_signature(self, text: str) -> str:
+        return " ".join(str(text or "").strip().casefold().split())
+
+    def _reserve_submission(self, signature: str) -> bool:
+        if not signature:
+            return False
+        now = time.monotonic()
+        with self._submit_lock:
+            stale_signatures = [
+                key for key, ts in self._recent_submissions.items() if now - ts > self._dedupe_window_seconds
+            ]
+            for key in stale_signatures:
+                self._recent_submissions.pop(key, None)
+            if self._single_flight and self._inflight_signatures:
+                return False
+            if signature in self._inflight_signatures:
+                return False
+            last_seen = self._recent_submissions.get(signature)
+            if last_seen is not None and now - last_seen <= self._dedupe_window_seconds:
+                return False
+            self._inflight_signatures.add(signature)
+            self._recent_submissions[signature] = now
+            return True
+
+    def _release_submission(self, signature: str) -> None:
+        if not signature:
+            return
+        with self._submit_lock:
+            self._inflight_signatures.discard(signature)
+            self._recent_submissions[signature] = time.monotonic()
 
     def refreshCatalog(self) -> None:
         self._quick_actions = self.services.actions.quick_actions()

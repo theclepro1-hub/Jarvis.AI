@@ -18,6 +18,7 @@ class CaptureConfig:
     max_seconds: float = 4.5
     silence_seconds: float = 0.9
     energy_threshold: float = 160.0
+    pre_roll_grace_seconds: float = 0.0
 
 
 class SpeechCaptureService:
@@ -39,6 +40,8 @@ class SpeechCaptureService:
         chunks: list[bytes] = [pre_roll] if pre_roll else []
         speech_started = bool(pre_roll and self._chunk_energy(pre_roll) > self._config.energy_threshold)
         silence_for = 0.0
+        frame_seconds = self._config.block_frames / self._config.sample_rate
+        grace_for = self._config.pre_roll_grace_seconds if pre_roll else 0.0
         max_iterations = int(self._config.max_seconds * self._config.sample_rate / self._config.block_frames)
 
         try:
@@ -66,8 +69,12 @@ class SpeechCaptureService:
                     if energy > self._config.energy_threshold:
                         speech_started = True
                         silence_for = 0.0
+                        grace_for = 0.0
                     elif speech_started:
-                        silence_for += self._config.block_frames / self._config.sample_rate
+                        if grace_for > 0.0:
+                            grace_for = max(0.0, grace_for - frame_seconds)
+                            continue
+                        silence_for += frame_seconds
                         if silence_for >= self._config.silence_seconds:
                             break
         except Exception as exc:

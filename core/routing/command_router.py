@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from core.intent.intent_router import IntentRouter
+from core.intent.voice_postprocessor import VoiceCommandPostProcessor
 from core.models.action_models import ExecutionPlan, ExecutionResult, ExecutionStep
 from core.pc_control.service import PcControlService
 from core.routing.text_rules import (
@@ -40,6 +41,7 @@ class CommandRouter:
         self.reminders = reminder_service
         self.reminder_provider = reminder_provider
         self.intent_router = IntentRouter(action_registry)
+        self.voice_post_processor = VoiceCommandPostProcessor(action_registry)
         self.pc = pc_control or PcControlService(action_registry)
 
     def handle(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult:
@@ -52,6 +54,7 @@ class CommandRouter:
         clean_text = strip_leading_wake_prefix(text)
         if not clean_text:
             return RouteResult("local" if execute else "preview", [], [], [], None)
+        clean_text = self._normalize_incoming_text(clean_text, source=source)
 
         early_question = clarification_question(clean_text) if looks_like_broken_command(clean_text) else ""
         if early_question:
@@ -67,7 +70,8 @@ class CommandRouter:
 
         commands = self.batch_router.split(clean_text)
         queue_items = list(commands)
-        execution_steps: list[ExecutionStep] = []
+        actionable_plans: list[ExecutionPlan] = []
+        clarification_steps: list[ExecutionStep] = []
         unsupported: list[str] = []
 
         for command in commands:
@@ -77,7 +81,7 @@ class CommandRouter:
                 continue
 
             if plan.question:
-                execution_steps.append(
+                clarification_steps.append(
                     ExecutionStep(
                         id=self._step_id(command, "clarify"),
                         kind="clarify",
@@ -89,16 +93,42 @@ class CommandRouter:
                 )
                 continue
 
+            actionable_plans.append(plan)
+
+        if not actionable_plans and not clarification_steps and not unsupported:
+            return RouteResult("ai" if execute else "preview", commands, [], queue_items)
+
+        if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands):
+            return RouteResult("ai", [clean_text], [], [clean_text])
+
+        if self._should_abort_for_clarification(
+            commands=commands,
+            actionable_plans=actionable_plans,
+            clarification_steps=clarification_steps,
+            unsupported=unsupported,
+            source=source,
+        ):
+            confidence = self._planner_confidence(commands, clarification_steps, unsupported)
+            question = self._planner_clarification_message(clarification_steps, unsupported)
+            return self._clarification_route(
+                clean_text,
+                question,
+                execute=execute,
+                detail="Команда распознана частично. Чтобы не ошибиться, выполнение остановлено до уточнения.",
+                payload={
+                    "confidence": confidence,
+                    "unsupported": unsupported[:3],
+                },
+                queue_items=queue_items,
+            )
+
+        execution_steps: list[ExecutionStep] = []
+        for plan in actionable_plans:
             if execute:
                 execution_steps.extend(self._execute_plan(plan))
             else:
                 execution_steps.extend(self._preview_plan(plan))
-
-        if not execution_steps and not unsupported:
-            return RouteResult("ai" if execute else "preview", commands, [], queue_items)
-
-        if unsupported and not execution_steps and self._should_fallback_to_ai(commands):
-            return RouteResult("ai", [clean_text], [], [clean_text])
+        execution_steps.extend(clarification_steps)
 
         if unsupported:
             for unsupported_command in unsupported:
@@ -137,24 +167,35 @@ class CommandRouter:
         )
         return RouteResult("local" if execute else "preview", commands, result.assistant_lines, queue_items, result)
 
-    def _clarification_route(self, command: str, question: str, *, execute: bool) -> RouteResult:
+    def _clarification_route(
+        self,
+        command: str,
+        question: str,
+        *,
+        execute: bool,
+        detail: str | None = None,
+        payload: dict[str, object] | None = None,
+        queue_items: list[str] | None = None,
+    ) -> RouteResult:
+        queue = queue_items if queue_items is not None else [command]
         step = ExecutionStep(
             id=self._step_id(command, "clarify"),
             kind="clarify",
             title=question,
-            detail=question,
+            detail=detail or question,
             status="needs_input",
             supported=False,
+            payload=payload or {},
         )
         result = ExecutionResult(
             kind="local" if execute else "preview",
-            commands=[command],
+            commands=queue,
             steps=[step],
             assistant_lines=[question],
-            queue_items=[command],
+            queue_items=queue,
             question=question,
         )
-        return RouteResult("local" if execute else "preview", [command], result.assistant_lines, [command], result)
+        return RouteResult("local" if execute else "preview", queue, result.assistant_lines, queue, result)
 
     def _should_fallback_to_ai(self, commands: list[str]) -> bool:
         normalized = [normalize_text(command) for command in commands if normalize_text(command)]
@@ -163,6 +204,62 @@ class CommandRouter:
         if any(looks_like_broken_command(command) for command in normalized):
             return False
         return all(looks_like_conversation(command) for command in normalized)
+
+    def _normalize_incoming_text(self, text: str, *, source: str) -> str:
+        # Voice transcripts often miss commas/joins; post-process before planner.
+        result = self.voice_post_processor.normalize(text)
+        if source.casefold() in {"voice", "wake", "speech"}:
+            return result.normalized
+        # For typed text keep it conservative: only use post-processed text if command-like.
+        if result.changed and not looks_like_conversation(result.normalized):
+            return result.normalized
+        return text
+
+    def _should_abort_for_clarification(
+        self,
+        *,
+        commands: list[str],
+        actionable_plans: list[ExecutionPlan],
+        clarification_steps: list[ExecutionStep],
+        unsupported: list[str],
+        source: str,
+    ) -> bool:
+        if not actionable_plans:
+            return False
+        ambiguity_count = len(clarification_steps) + len(unsupported)
+        if ambiguity_count == 0:
+            return False
+        if source.casefold() in {"voice", "wake", "speech"}:
+            return True
+        return len(commands) > 1
+
+    def _planner_confidence(
+        self,
+        commands: list[str],
+        clarification_steps: list[ExecutionStep],
+        unsupported: list[str],
+    ) -> float:
+        total = max(1, len(commands))
+        ambiguous = len(clarification_steps) + len(unsupported)
+        base = (total - ambiguous) / total
+        if ambiguous and total > 1:
+            base -= 0.15
+        return max(0.0, min(1.0, round(base, 2)))
+
+    def _planner_clarification_message(
+        self,
+        clarification_steps: list[ExecutionStep],
+        unsupported: list[str],
+    ) -> str:
+        details: list[str] = []
+        for step in clarification_steps[:2]:
+            details.append(str(step.title))
+        for text in unsupported[:2]:
+            details.append(f"Не понял: {text}")
+        tail = " | ".join(details)
+        if tail:
+            return f"Уточните команду целиком. {tail}"
+        return "Уточните команду целиком."
 
     def _handle_reminder(self, text: str, *, source: str = "ui", telegram_chat_id: str = "") -> RouteResult | None:
         clean = text.strip()
@@ -280,6 +377,13 @@ class CommandRouter:
             return [self.pc.volume_up().to_step(step.id, step.kind, step.payload)]
         if step.kind == "volume_down":
             return [self.pc.volume_down().to_step(step.id, step.kind, step.payload)]
+        if step.kind == "power_action":
+            return [
+                self.pc.power_action(
+                    str(step.payload.get("action", "")),
+                    str(step.payload.get("title", step.title)),
+                ).to_step(step.id, step.kind, step.payload)
+            ]
         return [step]
 
     def _preview_plan(self, plan: ExecutionPlan) -> list[ExecutionStep]:
@@ -326,6 +430,18 @@ class CommandRouter:
                 )
             ]
         if step.kind in {"media_play_pause", "media_next", "media_previous", "media_mute", "volume_up", "volume_down"}:
+            return [
+                ExecutionStep(
+                    id=step.id,
+                    kind=step.kind,
+                    title=step.title,
+                    detail=step.detail,
+                    status="pending",
+                    supported=True,
+                    payload=step.payload,
+                )
+            ]
+        if step.kind == "power_action":
             return [
                 ExecutionStep(
                     id=step.id,

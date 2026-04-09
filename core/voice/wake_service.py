@@ -21,9 +21,10 @@ MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
 class WakeService:
     SAMPLE_RATE = 16_000
     BLOCK_FRAMES = 1600
-    PRE_ROLL_FRAMES = 18
-    POST_WAKE_BRIDGE_FRAMES = 4
-    POST_WAKE_BRIDGE_TIMEOUT = 0.12
+    PRE_ROLL_FRAMES = 22
+    POST_WAKE_BRIDGE_FRAMES = 10
+    POST_WAKE_BRIDGE_TIMEOUT = 0.15
+    HANDOFF_PHASES = {"capturing_command", "transcribing", "routing", "executing"}
 
     def __init__(self, settings_service, voice_service) -> None:
         self.settings = settings_service
@@ -126,7 +127,7 @@ class WakeService:
                         post_roll = self._collect_post_wake_bridge(audio_queue)
                         pre_roll = b"".join(self._buffer) + post_roll
                         self._buffer.clear()
-                        self._set_phase("capturing_command", "Записываю команду", ready=False)
+                        self._set_phase("capturing_command", "Подхватываю начало команды", ready=False)
                         self._running = False
                         if self._callback is not None:
                             self._callback(pre_roll)
@@ -135,7 +136,7 @@ class WakeService:
             self._set_phase("error", f"Ошибка слова активации: {exc}", ready=False)
         finally:
             self._running = False
-            if self._phase not in {"error", "transcribing", "routing", "executing"} and not self._stop_event.is_set():
+            if not self._phase_in_handoff() and self._phase != "error" and not self._stop_event.is_set():
                 self._set_phase("idle", "Слово активации не запущено", ready=False)
 
     def _find_bundled_model_path(self) -> Path:
@@ -183,3 +184,6 @@ class WakeService:
     def _emit_status(self) -> None:
         if self._status_callback is not None:
             self._status_callback()
+
+    def _phase_in_handoff(self) -> bool:
+        return self._phase in self.HANDOFF_PHASES

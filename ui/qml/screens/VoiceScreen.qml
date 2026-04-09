@@ -5,7 +5,15 @@ import "../theme" as Theme
 import "../components"
 
 Rectangle {
+    id: voiceRoot
     color: "transparent"
+    property bool voiceActionBusy: voiceBridge.isRecording || voiceActionCooldown.running
+
+    Timer {
+        id: voiceActionCooldown
+        interval: 1200
+        repeat: false
+    }
 
     ScrollView {
         id: voiceScroll
@@ -13,7 +21,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+        ScrollBar.vertical: AppScrollBar {}
 
         ColumnLayout {
             width: voiceScroll.availableWidth
@@ -106,14 +114,22 @@ Rectangle {
                             objectName: "voiceUnderstandingTestButton"
                             text: "Проверить понимание"
                             compact: true
-                            onClicked: voiceBridge.runVoiceUnderstandingTest()
+                            enabled: !voiceRoot.voiceActionBusy
+                            onClicked: {
+                                voiceActionCooldown.restart()
+                                voiceBridge.runVoiceUnderstandingTest()
+                            }
                         }
 
                         SecondaryButton {
                             objectName: "jarvisVoiceTestButton"
                             text: "Сказать «Я на связи»"
                             compact: true
-                            onClicked: voiceBridge.runJarvisVoiceTest()
+                            enabled: !voiceRoot.voiceActionBusy
+                            onClicked: {
+                                voiceActionCooldown.restart()
+                                voiceBridge.runJarvisVoiceTest()
+                            }
                         }
 
                         Item { Layout.fillWidth: true }
