@@ -79,15 +79,16 @@ Rectangle {
         }
 
         Text {
+            objectName: "composerStatusText"
             Layout.fillWidth: true
-            text: root.recording
-                  ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
-                  : (root.hasPriorityWakeHint
-                    ? root.wakeHint
+            text: root.hasPriorityWakeHint
+                  ? root.wakeHint
+                  : root.recording
+                    ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
                     : root.busy
                       ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
                       : (root.idleHint.length ? root.idleHint
-                        : (root.recordingHint.length ? root.recordingHint : "Введите сообщение. Enter отправляет, Shift+Enter добавляет новую строку.")))
+                        : (root.recordingHint.length ? root.recordingHint : "Введите сообщение или нажмите микрофон."))
             color: root.recording || root.busy ? Theme.Colors.accent : Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily
             font.pixelSize: Theme.Typography.micro

@@ -15,7 +15,7 @@ from openai import OpenAI
 from vosk import KaldiRecognizer
 
 from core.routing.text_rules import normalize_text
-from core.voice.faster_whisper_runtime import load_faster_whisper_model
+from core.voice.faster_whisper_runtime import load_faster_whisper_model, resolve_local_faster_whisper_model
 from core.voice.voice_models import TranscriptionResult
 from core.voice.vosk_runtime import load_vosk_model
 
@@ -57,7 +57,7 @@ class STTService:
         if engine == "local_vosk":
             return "локальная модель Vosk готова" if self._local_vosk_available() else "Локальная модель Vosk не найдена"
         if engine == "local_faster_whisper":
-            if self._faster_whisper_available():
+            if self._local_faster_whisper_ready():
                 return "локальный Whisper готов"
             if self._local_vosk_available():
                 return "Whisper недоступен, резервный Vosk готов"
@@ -65,17 +65,17 @@ class STTService:
 
         voice_mode = self._voice_mode()
         if voice_mode == "private":
-            if self._local_faster_whisper_available():
+            if self._local_faster_whisper_ready():
                 return "локальное распознавание готово"
             if self._local_vosk_available():
                 return "локальное распознавание работает через Vosk"
             return "Нужен локальный backend распознавания"
 
-        if groq_key and self._local_faster_whisper_available():
+        if groq_key and self._local_faster_whisper_ready():
             return "распознавание готово"
         if groq_key:
             return "распознавание через Groq готово"
-        if self._local_faster_whisper_available():
+        if self._local_faster_whisper_ready():
             return "локальное распознавание готово"
         if self._local_vosk_available():
             return "локальное распознавание работает через Vosk"
@@ -88,17 +88,23 @@ class STTService:
         if engine == "local_vosk":
             return self._local_vosk_available()
         if engine == "local_faster_whisper":
-            return self._local_faster_whisper_available()
+            return self._local_faster_whisper_ready() or self._local_vosk_available()
         if self._voice_mode() == "private":
-            return self._local_faster_whisper_available()
-        return bool(self._groq_key()) or self._local_faster_whisper_available()
+            return self._local_faster_whisper_ready() or self._local_vosk_available()
+        return bool(self._groq_key()) or self._local_faster_whisper_ready() or self._local_vosk_available()
 
     def warm_up_local_backend(self) -> bool:
         preferred_local = self._preferred_local_engine()
         if preferred_local == "local_faster_whisper":
+            model_source = self._resolve_local_faster_whisper_source()
+            if model_source is None:
+                if self._local_vosk_available():
+                    load_vosk_model(self.local_model_path)
+                    return True
+                return False
             try:
                 load_faster_whisper_model(
-                    self._faster_whisper_model_ref(),
+                    str(model_source),
                     self.faster_whisper_download_root,
                     device="cpu",
                     compute_type="int8",
@@ -134,7 +140,7 @@ class STTService:
 
         if groq_key:
             return self._transcribe_with_groq(raw_bytes)
-        if self._local_faster_whisper_available():
+        if self._local_faster_whisper_ready():
             return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper", "local_vosk"))
         if self._local_vosk_available():
             return self._transcribe_with_local_vosk(raw_bytes)
@@ -151,7 +157,7 @@ class STTService:
             return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper", "local_vosk"))
 
         if voice_mode == "balance":
-            if self._local_faster_whisper_available() or self._local_vosk_available():
+            if self._local_faster_whisper_ready() or self._local_vosk_available():
                 local_result = self._transcribe_local_chain(raw_bytes, ("local_faster_whisper", "local_vosk"))
                 if local_result.ok:
                     return local_result
@@ -178,7 +184,7 @@ class STTService:
 
         for engine in engines:
             if engine == "local_faster_whisper":
-                if not self._faster_whisper_available():
+                if not self._local_faster_whisper_ready():
                     continue
                 result = self._transcribe_with_local_faster_whisper(raw_bytes)
             elif engine == "local_vosk":
@@ -261,10 +267,11 @@ class STTService:
             temp_path.unlink(missing_ok=True)
 
     def _transcribe_with_local_faster_whisper(self, raw_bytes: bytes) -> TranscriptionResult:
-        if not self._faster_whisper_available():
+        model_source = self._resolve_local_faster_whisper_source()
+        if model_source is None:
             return TranscriptionResult(
                 status="model_missing",
-                detail="Локальный Whisper backend не установлен.",
+                detail="Локальная Whisper-модель не найдена.",
                 engine="local_faster_whisper",
                 backend_trace=("local_faster_whisper",),
             )
@@ -273,7 +280,7 @@ class STTService:
         started_at = time.perf_counter()
         try:
             model = load_faster_whisper_model(
-                self._faster_whisper_model_ref(),
+                str(model_source),
                 self.faster_whisper_download_root,
                 device="cpu",
                 compute_type="int8",
@@ -377,11 +384,11 @@ class STTService:
     def _local_vosk_available(self) -> bool:
         return self.local_model_path.exists()
 
-    def _local_faster_whisper_available(self) -> bool:
-        return self._faster_whisper_available() or self._local_vosk_available()
+    def _local_faster_whisper_ready(self) -> bool:
+        return self._faster_whisper_available() and self._resolve_local_faster_whisper_source() is not None
 
     def _preferred_local_engine(self) -> str:
-        if self._faster_whisper_available():
+        if self._local_faster_whisper_ready():
             return "local_faster_whisper"
         if self._local_vosk_available():
             return "local_vosk"
@@ -390,6 +397,14 @@ class STTService:
     def _faster_whisper_model_ref(self) -> str:
         configured = str(self.settings.get("stt_local_model", DEFAULT_FASTER_WHISPER_MODEL)).strip()
         return configured or DEFAULT_FASTER_WHISPER_MODEL
+
+    def _resolve_local_faster_whisper_source(self) -> Path | None:
+        if not self._faster_whisper_available():
+            return None
+        return resolve_local_faster_whisper_model(
+            self._faster_whisper_model_ref(),
+            self.faster_whisper_download_root,
+        )
 
     def _find_faster_whisper_download_root(self) -> Path:
         data_dir = os.environ.get("JARVIS_UNITY_DATA_DIR")

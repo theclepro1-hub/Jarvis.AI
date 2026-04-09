@@ -77,6 +77,84 @@ def test_handle_external_command_ignores_empty_local_noise_without_ai() -> None:
     assert runtime.ai.received == []
 
 
+def test_service_container_defers_heavy_services_until_accessed(monkeypatch) -> None:
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings_store = object()
+    container.chat_history = object()
+    container.settings = _FakeSettings()
+    container.startup = SimpleNamespace(is_enabled=lambda: False)
+    container.registration = SimpleNamespace()
+    container._reminders = None
+    container._telegram = None
+    container._voice = None
+    container._wake = None
+    container._updates = None
+    container._ai = None
+    container._actions = None
+    container._batch_router = None
+    container._pc_control = None
+    container._command_router = None
+
+    created: list[str] = []
+
+    class TrackedAi:
+        def __init__(self, *_args, **_kwargs) -> None:
+            created.append("ai")
+
+    class TrackedActions:
+        def __init__(self, *_args, **_kwargs) -> None:
+            created.append("actions")
+
+    class TrackedBatchRouter:
+        def __init__(self, *_args, **_kwargs) -> None:
+            created.append("batch_router")
+
+    class TrackedPcControl:
+        def __init__(self, *_args, **_kwargs) -> None:
+            created.append("pc_control")
+
+    class TrackedCommandRouter:
+        def __init__(self, *_args, **_kwargs) -> None:
+            created.append("command_router")
+            self.assistant_lines = []
+            self.kind = "ai"
+            self.commands = ["hello"]
+
+        def handle(self, *_args, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(kind="ai", assistant_lines=[], commands=["hello"])
+
+    monkeypatch.setattr("core.services.service_container.AIService", TrackedAi)
+    monkeypatch.setattr("core.services.service_container.ActionRegistry", TrackedActions)
+    monkeypatch.setattr("core.services.service_container.BatchRouter", TrackedBatchRouter)
+    monkeypatch.setattr("core.services.service_container.PcControlService", TrackedPcControl)
+    monkeypatch.setattr("core.services.service_container.CommandRouter", TrackedCommandRouter)
+
+    assert created == []
+    _ = container.ai
+    _ = container.actions
+    _ = container.batch_router
+    _ = container.pc_control
+    _ = container.command_router
+
+    assert created == ["ai", "actions", "batch_router", "pc_control", "command_router"]
+
+
+def test_service_container_telegram_transport_uses_safe_timeout_fallback() -> None:
+    class Settings(_FakeSettings):
+        def __init__(self) -> None:
+            super().__init__()
+            self._registration = {"telegram_bot_token": "bot_token"}
+            self._settings = {"network": {"timeout_seconds": "broken"}}
+
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings = Settings()
+
+    transport = ServiceContainer._create_telegram_transport(container)
+
+    assert transport is not None
+    assert transport.timeout_seconds == 12.0
+
+
 class _FakeSettings:
     def __init__(self) -> None:
         self._registration = {}

@@ -45,6 +45,7 @@ class _Voice:
         self.is_recording = False
         self.warm_up_calls = 0
         self.handoff_calls = 0
+        self.status_calls: list[tuple[str, bool, str]] = []
         self.metrics = {
             "sessionId": "",
             "phase": "idle",
@@ -73,7 +74,10 @@ class _Voice:
         return dict(self.metrics)
 
     def set_wake_runtime_status(self, *_args, **_kwargs) -> None:
-        return None
+        status = str(_args[0]) if _args else str(_kwargs.get("status", ""))
+        ready = bool(_kwargs.get("ready", False))
+        detail = str(_kwargs.get("detail", ""))
+        self.status_calls.append((status, ready, detail))
 
     def mark_wake_route_handoff(self) -> None:
         self.handoff_calls += 1
@@ -190,6 +194,79 @@ def test_voice_bridge_keeps_wake_hint_until_explicit_clear():
     bridge.clearWakeHint()
 
     assert bridge.wakeHint == ""
+
+
+def test_voice_bridge_marks_wake_command_as_recognizing_before_handoff():
+    services = _Services()
+    chat_bridge = _ChatBridge()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=chat_bridge)
+
+    class _WakeResult:
+        ok = True
+        text = "открой параметры"
+
+    services.voice.capture_after_wake_result = lambda _pre_roll: _WakeResult()  # noqa: E731
+
+    bridge._finish_after_wake(b"wake")  # noqa: SLF001
+
+    assert services.voice.status_calls[0] == (
+        "recognizing_command",
+        False,
+        "Распознаю команду после «Джарвис»",
+    )
+    assert services.voice.handoff_calls == 1
+    assert chat_bridge.received == ["открой параметры"]
+    assert state.status == "Готов"
+
+
+def test_voice_bridge_runtime_status_keeps_command_backend_and_exposes_wake_model():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    status = bridge.runtimeStatus
+
+    assert status["wakeWord"] == "Жду «Джарвис»"
+    assert status["wakeModel"] == "загружена"
+    assert status["model"] == "загружена"
+    assert status["command"] == "готово"
+
+
+def test_voice_bridge_failed_warmup_can_retry_on_next_start():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+    wake_ready = threading.Event()
+    voice_ready = threading.Event()
+    attempts = {"voice": 0}
+
+    def wake_warm() -> bool:
+        services.wake.warm_up_calls += 1
+        wake_ready.set()
+        return True
+
+    def voice_warm() -> bool:
+        attempts["voice"] += 1
+        services.voice.warm_up_calls += 1
+        if attempts["voice"] == 1:
+            return False
+        voice_ready.set()
+        return True
+
+    services.wake.warm_up_model = wake_warm
+    services.voice.warm_up_local_stt_backend = voice_warm
+
+    bridge.startWakeRuntime()
+    assert wake_ready.wait(1.0)
+
+    wake_ready.clear()
+    bridge.startWakeRuntime()
+
+    assert wake_ready.wait(1.0)
+    assert voice_ready.wait(1.0)
+    assert services.wake.start_calls == 2
+    assert services.voice.warm_up_calls == 2
 
 
 def test_voice_bridge_is_recording_does_not_force_lazy_voice_service():

@@ -109,6 +109,7 @@ Rectangle {
                 objectName: "chatListView"
                 property bool followBottom: true
                 property bool followBottomPending: false
+                property int followBottomRetries: 0
 
                 function nearBottom() {
                     return (contentHeight - (contentY + height)) <= 48
@@ -117,6 +118,7 @@ Rectangle {
                 function requestFollowBottom() {
                     followBottom = true
                     followBottomPending = true
+                    followBottomRetries = 4
                     scheduleFollowBottom()
                 }
 
@@ -124,9 +126,14 @@ Rectangle {
                     if (!(followBottom || followBottomPending) || count <= 0) {
                         return
                     }
+                    forceLayout()
                     positionViewAtEnd()
                     if (nearBottom()) {
                         followBottomPending = false
+                        followBottomRetries = 0
+                        followBottomTimer.stop()
+                    } else if (followBottomPending && !followBottomTimer.running) {
+                        followBottomTimer.start()
                     }
                 }
 
@@ -156,6 +163,32 @@ Rectangle {
                 onContentXChanged: {
                     if (contentX !== 0) {
                         contentX = 0
+                    }
+                }
+
+                Timer {
+                    id: followBottomTimer
+                    interval: 16
+                    repeat: false
+                    onTriggered: {
+                        if (!(listView.followBottom || listView.followBottomPending) || listView.count <= 0) {
+                            listView.followBottomPending = false
+                            listView.followBottomRetries = 0
+                            return
+                        }
+                        listView.forceLayout()
+                        listView.positionViewAtEnd()
+                        if (listView.nearBottom()) {
+                            listView.followBottomPending = false
+                            listView.followBottomRetries = 0
+                            return
+                        }
+                        if (listView.followBottomRetries > 0) {
+                            listView.followBottomRetries -= 1
+                            restart()
+                        } else {
+                            listView.followBottomPending = false
+                        }
                     }
                 }
 

@@ -213,9 +213,9 @@ class VoiceBridge(QObject):
 
     @Property("QVariantMap", notify=statusChanged)
     def runtimeStatus(self) -> dict[str, str]:
-        status = self.services.voice.runtime_status()
+        status = dict(self.services.voice.runtime_status())
         status["wakeWord"] = self.services.wake.status()
-        status["model"] = self.services.wake.model_status()
+        status["wakeModel"] = self.services.wake.model_status()
         return status
 
     @Property(str, notify=testResultChanged)
@@ -420,6 +420,14 @@ class VoiceBridge(QObject):
         thread.start()
 
     def _finish_after_wake(self, pre_roll: bytes) -> None:
+        if hasattr(self.services.voice, "set_wake_runtime_status"):
+            self.services.voice.set_wake_runtime_status(
+                "recognizing_command",
+                ready=False,
+                detail="Распознаю команду после «Джарвис»",
+            )
+        self.state.status = "Распознаю команду"
+        self.statusChanged.emit()
         if hasattr(self.services.voice, "capture_after_wake_result"):
             result = self.services.voice.capture_after_wake_result(pre_roll)
             if result.ok and result.text.strip():
@@ -455,12 +463,18 @@ class VoiceBridge(QObject):
         def _worker() -> None:
             wake_backend = getattr(self.services, "wake", None)
             voice_backend = getattr(self.services, "voice", None)
+            warmup_ok = True
             try:
                 if wake_backend is not None and hasattr(wake_backend, "warm_up_model"):
-                    wake_backend.warm_up_model()
+                    warmup_ok = bool(wake_backend.warm_up_model()) and warmup_ok
                 if voice_backend is not None and hasattr(voice_backend, "warm_up_local_stt_backend"):
-                    voice_backend.warm_up_local_stt_backend()
+                    warmup_ok = bool(voice_backend.warm_up_local_stt_backend()) and warmup_ok
+            except Exception:
+                warmup_ok = False
             finally:
+                if not warmup_ok:
+                    with self._warmup_lock:
+                        self._warmup_started = False
                 self.statusChanged.emit()
                 self.voiceTimingsChanged.emit()
 

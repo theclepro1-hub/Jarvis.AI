@@ -78,8 +78,12 @@ class PcControlService:
         return self._media_outcome(self.media.mute(), "Переключаю звук", "Системный звук переключён")
 
     def power_action(self, action: str, title: str) -> ActionOutcome:
-        if hasattr(self.action_registry, "run_power_action"):
-            return self.action_registry.run_power_action(action, title)
+        runner = getattr(self.action_registry, "run_power_action", None)
+        if callable(runner):
+            try:
+                return runner(action, title)
+            except OSError as exc:
+                return ActionOutcome(False, f"Не удалось: {title}", str(exc))
         try:
             self._run_power_action(action)
         except OSError as exc:

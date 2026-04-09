@@ -16,6 +16,12 @@ $modelPath = Join-Path $modelCacheDir $modelName
 $modelZip = Join-Path $modelCacheDir "$modelName.zip"
 $modelUrl = "https://alphacephei.com/vosk/models/$modelName.zip"
 $buildStamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$requiredModelFiles = @(
+    "am\final.mdl",
+    "conf\model.conf",
+    "graph\Gr.fst",
+    "ivector\final.ie"
+)
 
 function Remove-Or-Fallback {
     param(
@@ -41,15 +47,68 @@ function Remove-Or-Fallback {
 function Test-ModelSourceReady {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$Path,
+        [string[]]$RequiredFiles = $requiredModelFiles
     )
 
     if (!(Test-Path $Path)) {
         return $false
     }
 
-    $sample = Get-ChildItem -LiteralPath $Path -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-    return $null -ne $sample
+    foreach ($relativePath in $RequiredFiles) {
+        if (!(Test-Path (Join-Path $Path $relativePath))) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Invoke-RetryDownload {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        [Parameter(Mandatory = $true)]
+        [string]$OutFile,
+        [int]$Attempts = 3
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try {
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile
+            if (!(Test-Path $OutFile)) {
+                throw "download_missing"
+            }
+            if ((Get-Item -LiteralPath $OutFile).Length -le 0) {
+                throw "download_empty"
+            }
+            return
+        } catch {
+            Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+            if ($attempt -ge $Attempts) {
+                throw
+            }
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+function Write-ChecksumFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArtifactPath
+    )
+
+    if (!(Test-Path $ArtifactPath)) {
+        return $null
+    }
+
+    $artifact = Get-Item -LiteralPath $ArtifactPath
+    $hash = (Get-FileHash -LiteralPath $ArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $checksumPath = "$ArtifactPath.sha256.txt"
+    $checksumContent = "SHA256 $hash $($artifact.Name)"
+    Set-Content -LiteralPath $checksumPath -Value $checksumContent -Encoding UTF8
+    return $checksumPath
 }
 
 function Assert-NativeSuccess {
@@ -124,14 +183,16 @@ Set-Content -LiteralPath $versionInfoFile -Value $versionInfoContent -Encoding U
 
 if (!(Test-ModelSourceReady -Path $modelPath)) {
     Remove-Item -Recurse -Force $modelPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $modelZip -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $modelCacheDir | Out-Null
     Write-Host "MODEL_DOWNLOAD $modelUrl"
-    Invoke-WebRequest -Uri $modelUrl -OutFile $modelZip
+    Invoke-RetryDownload -Uri $modelUrl -OutFile $modelZip
     Expand-Archive -Path $modelZip -DestinationPath $modelCacheDir -Force
     Remove-Item -LiteralPath $modelZip -Force
 }
 
 if (!(Test-ModelSourceReady -Path $modelPath)) {
+    Remove-Item -Recurse -Force $modelPath -ErrorAction SilentlyContinue
     throw "Vosk model source is missing or empty: $modelPath"
 }
 
@@ -183,6 +244,7 @@ if (!(Test-Path $portableDistPath)) {
 
 $portableZip = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_portable.zip" -f $version)
 Compress-Archive -Path $portableDistPath -DestinationPath $portableZip -Force
+Write-ChecksumFile -ArtifactPath $portableZip | Out-Null
 
 $nativeErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "SilentlyContinue"
@@ -222,6 +284,7 @@ if (!(Test-Path $oneFileExe)) {
 }
 $oneFileRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_onefile.exe" -f $version)
 Copy-Item $oneFileExe $oneFileRelease -Force
+Write-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
 
 $programFilesX86 = ${env:ProgramFiles(x86)}
 if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
@@ -303,6 +366,7 @@ Filename: "{app}\JarvisAi_Unity.exe"; Description: "{cm:LaunchProgram,JARVIS Uni
     if (!(Test-Path $installerRelease)) {
         throw "Installer executable missing: $installerRelease"
     }
+    Write-ChecksumFile -ArtifactPath $installerRelease | Out-Null
     Write-Host "ASSET_OK $installerRelease"
 } else {
     Write-Host "INSTALLER_SKIPPED Inno Setup compiler not found: $innoCompiler"

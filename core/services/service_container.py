@@ -52,27 +52,17 @@ class ServiceContainer:
         _boot_log("services:init:startup-state")
         self.registration = RegistrationService(self.settings)
         _boot_log("services:init:registration")
-        self.ai = AIService(self.settings)
-        _boot_log("services:init:ai")
-        self.actions = ActionRegistry(self.settings)
-        _boot_log("services:init:actions")
-        self.batch_router = BatchRouter(self.actions)
-        _boot_log("services:init:batch-router")
-        self.pc_control = PcControlService(self.actions)
-        _boot_log("services:init:pc-control")
         self._reminders = None
         self._telegram = None
         self._voice = None
         self._wake = None
         self._updates = None
-        self.command_router = CommandRouter(
-            self.actions,
-            self.batch_router,
-            self.ai,
-            self.pc_control,
-            reminder_provider=lambda: self.reminders,
-        )
-        _boot_log("services:init:command-router")
+        self._ai = None
+        self._actions = None
+        self._batch_router = None
+        self._pc_control = None
+        self._command_router = None
+        _boot_log("services:init:lazy-heavy-services")
 
     def handle_external_command(self, text: str, telegram_chat_id: str = "") -> str:
         route = self.command_router.handle(text, source="telegram", telegram_chat_id=telegram_chat_id)
@@ -82,6 +72,47 @@ class ServiceContainer:
             return ""
         clean = " ".join(route.commands).strip() if route.commands else text
         return self.ai.generate_reply(clean, [])
+
+    @property
+    def ai(self) -> AIService:
+        if self._ai is None:
+            _boot_log("services:lazy:ai")
+            self._ai = AIService(self.settings)
+        return self._ai
+
+    @property
+    def actions(self) -> ActionRegistry:
+        if self._actions is None:
+            _boot_log("services:lazy:actions")
+            self._actions = ActionRegistry(self.settings)
+        return self._actions
+
+    @property
+    def batch_router(self) -> BatchRouter:
+        if self._batch_router is None:
+            _boot_log("services:lazy:batch-router")
+            self._batch_router = BatchRouter(self.actions)
+        return self._batch_router
+
+    @property
+    def pc_control(self) -> PcControlService:
+        if self._pc_control is None:
+            _boot_log("services:lazy:pc-control")
+            self._pc_control = PcControlService(self.actions)
+        return self._pc_control
+
+    @property
+    def command_router(self) -> CommandRouter:
+        if self._command_router is None:
+            _boot_log("services:lazy:command-router")
+            self._command_router = CommandRouter(
+                self.actions,
+                self.batch_router,
+                self.ai,
+                self.pc_control,
+                reminder_provider=lambda: self.reminders,
+            )
+        return self._command_router
 
     @property
     def reminders(self) -> ReminderService:
@@ -136,5 +167,10 @@ class ServiceContainer:
         if not token:
             return None
         network = self.settings.get("network", {}) or {}
-        timeout = float(network.get("timeout_seconds", 12.0))
+        timeout_value = network.get("timeout_seconds", 12.0)
+        try:
+            timeout = float(timeout_value)
+        except (TypeError, ValueError):
+            timeout = 12.0
+        timeout = max(3.0, timeout)
         return HttpTelegramTransport(token, timeout_seconds=timeout)

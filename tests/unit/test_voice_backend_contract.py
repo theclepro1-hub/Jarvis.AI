@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import sys
 import threading
+import time
+import types
 
 from core.settings.settings_service import SettingsService
+from core.voice.faster_whisper_runtime import clear_faster_whisper_model_cache, load_faster_whisper_model
 from core.voice.speech_capture_service import SpeechCaptureService
 from core.voice.stt_service import STTService
 from core.voice.tts_service import TTSService
@@ -78,8 +82,11 @@ def test_stt_service_prefers_local_faster_whisper_engine_alias(tmp_path):
 def test_stt_service_local_chain_falls_back_to_vosk(tmp_path):
     settings = SettingsService(FakeStore())
     settings.set("stt_engine", "local")
+    settings.set("stt_local_model", str(tmp_path / "fw-model"))
     model_path = tmp_path / "vosk-model"
     model_path.mkdir(parents=True)
+    (tmp_path / "fw-model").mkdir(parents=True)
+    (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
     service = STTService(settings, local_model_path=model_path)
     service._faster_whisper_available = lambda: True  # noqa: SLF001
     service._transcribe_with_local_faster_whisper = lambda _raw: TranscriptionResult(  # noqa: SLF001
@@ -104,6 +111,98 @@ def test_stt_service_local_chain_falls_back_to_vosk(tmp_path):
     assert result.text == "открой параметры"
     assert result.backend_trace == ("local_faster_whisper", "local_vosk")
     assert result.latency_ms == 155.0
+
+
+def test_stt_service_warmup_skips_remote_faster_whisper_and_uses_vosk(monkeypatch, tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "local")
+    settings.set("stt_local_model", "small")
+    model_path = tmp_path / "vosk-model"
+    model_path.mkdir(parents=True)
+    service = STTService(settings, local_model_path=model_path)
+    service.faster_whisper_download_root = tmp_path / "fw-cache"
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
+
+    faster_whisper_calls = []
+    vosk_calls = []
+
+    monkeypatch.setattr(
+        "core.voice.stt_service.load_faster_whisper_model",
+        lambda *args, **kwargs: faster_whisper_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr("core.voice.stt_service.load_vosk_model", lambda path: vosk_calls.append(path))
+
+    assert service.warm_up_local_backend() is True
+    assert faster_whisper_calls == []
+    assert vosk_calls == [model_path]
+
+
+def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(monkeypatch, tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "local")
+    settings.set("stt_local_model", "small")
+    model_path = tmp_path / "vosk-model"
+    model_path.mkdir(parents=True)
+    service = STTService(settings, local_model_path=model_path)
+    service.faster_whisper_download_root = tmp_path / "fw-cache"
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
+
+    monkeypatch.setattr(
+        service,
+        "_transcribe_with_local_faster_whisper",
+        lambda _raw: (_ for _ in ()).throw(AssertionError("faster-whisper should be skipped")),
+    )
+    service._transcribe_with_local_vosk = lambda _raw: TranscriptionResult(  # noqa: SLF001
+        status="ok",
+        text="открой проводник",
+        detail="ok",
+        engine="local_vosk",
+        backend_trace=("local_vosk",),
+        latency_ms=28.0,
+    )
+
+    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
+
+    assert result.ok is True
+    assert result.text == "открой проводник"
+    assert result.backend_trace == ("local_vosk",)
+
+
+def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeypatch, tmp_path):
+    clear_faster_whisper_model_cache()
+    started = threading.Barrier(2)
+    constructor_calls = []
+
+    class FakeWhisperModel:
+        def __init__(self, model_ref, **kwargs):  # noqa: ANN003
+            constructor_calls.append((model_ref, kwargs))
+            started.wait(timeout=1.0)
+            time.sleep(0.15)
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeWhisperModel))
+
+    elapsed = {}
+
+    def worker(name: str) -> None:
+        begin = time.perf_counter()
+        load_faster_whisper_model(name, tmp_path / "fw-cache")
+        elapsed[name] = time.perf_counter() - begin
+
+    first = threading.Thread(target=worker, args=("model-a",))
+    second = threading.Thread(target=worker, args=("model-b",))
+
+    suite_begin = time.perf_counter()
+    first.start()
+    second.start()
+    first.join(timeout=2.0)
+    second.join(timeout=2.0)
+    suite_elapsed = time.perf_counter() - suite_begin
+
+    assert first.is_alive() is False
+    assert second.is_alive() is False
+    assert len(constructor_calls) == 2
+    assert suite_elapsed < 0.35
+    assert max(elapsed.values()) < 0.35
 
 
 def test_stt_service_normalizes_whitespace_and_repeated_punctuation(tmp_path):

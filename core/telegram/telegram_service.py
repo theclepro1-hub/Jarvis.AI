@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 import inspect
 import json
 import os
@@ -18,7 +17,6 @@ DEFAULT_POLL_INTERVAL_MS = 1000
 DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 2.0
 DEFAULT_DISPATCH_WORKERS = 4
 DEFAULT_MAX_INFLIGHT_DISPATCHES = 24
-DEFAULT_SEEN_UPDATE_IDS_LIMIT = 2048
 
 
 class TelegramTransport(Protocol):
@@ -143,10 +141,10 @@ class TelegramService:
         self._last_error = ""
         self._last_poll_at_utc: datetime | None = None
         self._state_lock = threading.Lock()
+        self._offset_lock = threading.Lock()
         self._dispatch_lock = threading.Lock()
-        self._seen_lock = threading.Lock()
-        self._seen_update_ids: deque[int] = deque()
-        self._seen_update_ids_set: set[int] = set()
+        self._pending_update_ids_set: set[int] = set()
+        self._completed_update_ids_set: set[int] = set()
         self._inflight_dispatches = 0
         self._dispatch_pool = ThreadPoolExecutor(
             max_workers=DEFAULT_DISPATCH_WORKERS,
@@ -233,13 +231,15 @@ class TelegramService:
         return configured == str(user_id).strip()
 
     def load_offset(self) -> int | None:
-        self._offset = self.offset_store.load_offset() if self.offset_store else None
-        return self._offset
+        with self._offset_lock:
+            self._offset = self.offset_store.load_offset() if self.offset_store else None
+            return self._offset
 
     def save_offset(self, offset: int) -> None:
-        self._offset = int(offset)
-        if self.offset_store is not None:
-            self.offset_store.save_offset(self._offset)
+        with self._offset_lock:
+            self._offset = int(offset)
+            if self.offset_store is not None:
+                self.offset_store.save_offset(self._offset)
 
     def poll_once(self, *, async_dispatch: bool = False) -> list[TelegramDispatchResult]:
         if self.transport is None:
@@ -261,18 +261,22 @@ class TelegramService:
             self._last_error = ""
             self._last_poll_at_utc = datetime.now(timezone.utc)
         filtered_updates: list[TelegramUpdate] = []
-        next_offset = self._offset
+        with self._offset_lock:
+            current_offset = self._offset
         for update in updates:
-            if self._offset is not None and update.update_id < self._offset:
+            if current_offset is not None and update.update_id < current_offset:
                 continue
-            if self._is_seen_update(update.update_id):
-                continue
-            self._remember_seen_update(update.update_id)
+            with self._offset_lock:
+                if update.update_id in self._pending_update_ids_set:
+                    continue
+                if update.update_id in self._completed_update_ids_set:
+                    continue
+                self._pending_update_ids_set.add(update.update_id)
             filtered_updates.append(update)
-            current_next = update.update_id + 1
-            next_offset = current_next if next_offset is None else max(next_offset, current_next)
-        if next_offset is not None and next_offset != self._offset:
-            self.save_offset(next_offset)
+        if current_offset is None and filtered_updates:
+            with self._offset_lock:
+                if self._offset is None:
+                    self._offset = min(update.update_id for update in filtered_updates)
 
         if async_dispatch:
             for update in filtered_updates:
@@ -291,7 +295,9 @@ class TelegramService:
 
         results: list[TelegramDispatchResult] = []
         for update in filtered_updates:
-            results.append(self._process_update_safe(update))
+            result = self._process_update_safe(update)
+            results.append(result)
+            self._finalize_dispatch_result(result)
         return results
 
     def process_update(self, update: TelegramUpdate) -> TelegramDispatchResult:
@@ -456,7 +462,12 @@ class TelegramService:
         network = {}
         if hasattr(self.settings, "get"):
             network = self.settings.get("network", {}) or {}
-        timeout = float(network.get("timeout_seconds", 12.0)) if isinstance(network, dict) else 12.0
+        timeout_value = network.get("timeout_seconds", 12.0) if isinstance(network, dict) else 12.0
+        try:
+            timeout = float(timeout_value)
+        except (TypeError, ValueError):
+            timeout = 12.0
+        timeout = max(3.0, timeout)
         return HttpTelegramTransport(token, timeout_seconds=timeout)
 
     def _format_error(self, exc: Exception) -> str:
@@ -466,18 +477,32 @@ class TelegramService:
         return type(exc).__name__
 
     def _is_seen_update(self, update_id: int) -> bool:
-        with self._seen_lock:
-            return update_id in self._seen_update_ids_set
+        with self._offset_lock:
+            return update_id in self._completed_update_ids_set
 
     def _remember_seen_update(self, update_id: int) -> None:
-        with self._seen_lock:
-            if update_id in self._seen_update_ids_set:
+        with self._offset_lock:
+            self._completed_update_ids_set.add(update_id)
+
+    def _should_acknowledge_result(self, result: TelegramDispatchResult) -> bool:
+        if not result.authorized:
+            return True
+        if result.error in {"empty_text", "no_handler"}:
+            return True
+        return bool(result.handled)
+
+    def _finalize_dispatch_result(self, result: TelegramDispatchResult) -> None:
+        with self._offset_lock:
+            self._pending_update_ids_set.discard(result.update_id)
+            if not self._should_acknowledge_result(result):
                 return
-            if len(self._seen_update_ids) >= DEFAULT_SEEN_UPDATE_IDS_LIMIT:
-                old_update_id = self._seen_update_ids.popleft()
-                self._seen_update_ids_set.discard(old_update_id)
-            self._seen_update_ids.append(update_id)
-            self._seen_update_ids_set.add(update_id)
+            self._completed_update_ids_set.add(result.update_id)
+            while self._offset is not None and self._offset in self._completed_update_ids_set:
+                self._completed_update_ids_set.discard(self._offset)
+                self._offset += 1
+            current_offset = self._offset
+        if current_offset is not None and self.offset_store is not None:
+            self.offset_store.save_offset(current_offset)
 
     def _submit_dispatch(self, update: TelegramUpdate) -> None:
         with self._dispatch_lock:
@@ -487,7 +512,8 @@ class TelegramService:
 
     def _dispatch_done(self, future: Future[TelegramDispatchResult]) -> None:
         try:
-            future.result()
+            result = future.result()
+            self._finalize_dispatch_result(result)
         except Exception as exc:  # noqa: BLE001
             with self._state_lock:
                 self._connected = False

@@ -51,7 +51,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Заполните ключи сейчас или пропустите настройку. После этого JARVIS перейдёт в чат."
+                        text: "Можно подключить Groq и Telegram сейчас или пропустить этот шаг. JARVIS всё равно откроет чат, а вернуться к настройке можно позже."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body

@@ -51,7 +51,14 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert "--hidden-import pythoncom" in build_script
     assert "MODEL_DOWNLOAD" in build_script
     assert "Test-ModelSourceReady" in build_script
+    assert "Invoke-RetryDownload" in build_script
+    assert "Write-ChecksumFile" in build_script
+    assert "Get-FileHash" in build_script
     assert r"assets\\models\\$modelName" in build_script
+    assert "am\\final.mdl" in build_script
+    assert "conf\\model.conf" in build_script
+    assert "graph\\Gr.fst" in build_script
+    assert "ivector\\final.ie" in build_script
     assert '--windowed `' in build_script
     assert '--onefile `' in build_script
     assert '--icon $iconPath' in build_script

@@ -422,6 +422,37 @@ def test_composer_enter_sends_and_shift_enter_inserts_newline(ui_runtime) -> Non
     assert "\n" in composer.property("text")
 
 
+def test_composer_status_line_honors_priority_order(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+    status_line = _find(window, "composerStatusText")
+
+    runtime.chat_bridge._set_last_response_hint("Быстро: Groq · 1.5 c")  # noqa: SLF001
+    _pump(app, 120)
+    assert status_line.property("text") == "Быстро: Groq · 1.5 c"
+
+    runtime.chat_bridge._thinking = True  # noqa: SLF001
+    runtime.chat_bridge.thinkingChanged.emit()
+    runtime.chat_bridge._set_status_stage("Обрабатываю предыдущий запрос...")  # noqa: SLF001
+    _pump(app, 120)
+    assert status_line.property("text") == "Обрабатываю предыдущий запрос..."
+
+    runtime.services.voice.is_recording = True
+    runtime.voice_bridge._recording_hint = "Слушаю команду..."  # noqa: SLF001
+    runtime.voice_bridge.recordingHintChanged.emit()
+    runtime.voice_bridge.recordingChanged.emit()
+    _pump(app, 120)
+    assert status_line.property("text") == "Слушаю команду..."
+
+    runtime.voice_bridge._wake_hint = "Услышал «Джарвис». Подхватываю начало команды..."  # noqa: SLF001
+    runtime.voice_bridge.wakeHintChanged.emit()
+    _pump(app, 120)
+    assert status_line.property("text") == "Услышал «Джарвис». Подхватываю начало команды..."
+
+
 def test_nav_spam_clicks_keep_screen_state_sane(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 

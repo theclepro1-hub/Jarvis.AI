@@ -71,7 +71,7 @@ Rectangle {
                 Text {
                     visible: !voiceBridge.canRouteTtsOutput
                     Layout.fillWidth: true
-                    text: "Выбор отдельной колонки пока недоступен. JARVIS будет говорить через системный вывод, пока эта функция не будет готова."
+                    text: "Пока доступен только системный вывод. JARVIS будет говорить через устройство по умолчанию."
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.micro
@@ -102,7 +102,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Скажите короткую фразу. JARVIS покажет, что услышал, как очистил текст и какое действие выбрал. Команда не выполняется."
+                        text: "Скажите короткую фразу. JARVIS покажет, что услышал и какое действие выбрал, но ничего не выполнит."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
@@ -171,7 +171,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Слово активации"
-                description: "JARVIS слушает «Джарвис» локально. Статусы не должны притворяться отдельными сообщениями в чате."
+                description: "JARVIS слушает «Джарвис» локально и не должен засорять чат служебными статусами."
 
                 Item { Layout.fillWidth: true }
 
@@ -186,7 +186,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Статус"
-                description: voiceBridge.summary
+                description: "Короткая сводка по wake-слову, распознаванию и озвучке."
 
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -220,7 +220,16 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Профиль: " + voiceBridge.runtimeStatus["model"]
+                        text: "Модуль активации: " + voiceBridge.runtimeStatus["wakeModel"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Готовность движка: " + voiceBridge.runtimeStatus["model"]
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small

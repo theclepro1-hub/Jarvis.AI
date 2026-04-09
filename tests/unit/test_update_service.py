@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -384,6 +385,49 @@ def test_apply_update_reports_corrupted_download_when_size_mismatch(monkeypatch,
     assert result.status_code == "download_failed"
     assert "download_size_mismatch" in result.last_error
     assert not any(tmp_path.glob("*.download"))
+
+
+def test_apply_update_verifies_checksum_when_sidecar_is_available(monkeypatch, tmp_path: Path) -> None:
+    service = UpdateService(settings=None, current_version="22.3.0")
+    service.assets = [
+        UpdateAsset(
+            name="JarvisAi_Unity_22.4.0_windows_installer.exe",
+            browser_download_url="https://example.test/installer.exe",
+            size=len(b"binary-installer"),
+        )
+    ]
+    service.latest_version_value = "22.4.0"
+    service.release_url_value = "https://example.test/releases/v22.4.0"
+    service.update_available_value = True
+    monkeypatch.setattr(service, "_update_download_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_expected_asset_sha256",
+        lambda _asset: hashlib.sha256(b"binary-installer").hexdigest(),
+    )
+    monkeypatch.setattr(
+        service,
+        "_create_http_client",
+        lambda *args, **kwargs: _FakeHttpClient(response=_FakeResponse(body=b"binary-installer"), calls=[]),
+    )
+
+    class DummyProc:
+        pid = 779
+
+        @staticmethod
+        def poll():  # noqa: ANN205
+            return None
+
+    monkeypatch.setattr(
+        "core.updates.update_service.subprocess.Popen",
+        lambda command, close_fds, creationflags: DummyProc(),
+    )
+
+    result = service.apply_update()
+
+    assert result.ok is True
+    assert result.started is True
+    assert Path(result.installer_path).read_bytes() == b"binary-installer"
 
 
 def test_apply_update_is_manual_only_when_no_installer_asset() -> None:

@@ -40,6 +40,9 @@ class ChatBridge(QObject):
         self._submit_lock = threading.Lock()
         self._dedupe_window_seconds = 1.0
         self._single_flight = True
+        self._response_hint_timer = QTimer(self)
+        self._response_hint_timer.setSingleShot(True)
+        self._response_hint_timer.timeout.connect(lambda: self._set_last_response_hint(""))
         self.workerReplyReady.connect(self._append_assistant_message)
         self.workerStatusReady.connect(self._set_status_stage)
         QTimer.singleShot(0, self._hydrate_initial_state)
@@ -401,6 +404,10 @@ class ChatBridge(QObject):
 
     def _set_last_response_hint(self, text: str) -> None:
         self._last_response_hint = str(text or "").strip()
+        if self._last_response_hint:
+            self._response_hint_timer.start(5000)
+        else:
+            self._response_hint_timer.stop()
         self.lastResponseHintChanged.emit()
 
     def _clear_wake_hint(self) -> None:

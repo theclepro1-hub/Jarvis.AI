@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import hashlib
 import os
+import re
 from pathlib import Path
 import subprocess
 import threading
@@ -577,7 +579,7 @@ class UpdateService:
 
         destination = self._update_download_dir() / asset.name
         if destination.exists():
-            if self._has_valid_asset_size(destination, asset):
+            if self._is_valid_downloaded_asset(destination, asset):
                 return destination.resolve()
             destination.unlink(missing_ok=True)
 
@@ -593,10 +595,8 @@ class UpdateService:
                         for chunk in response.iter_bytes(64 * 1024):
                             if chunk:
                                 handle.write(chunk)
-                if not self._has_valid_asset_size(tmp_path, asset):
-                    raise RuntimeError(
-                        f"download_size_mismatch: expected {asset.size} bytes, got {tmp_path.stat().st_size} bytes"
-                    )
+                if not self._is_valid_downloaded_asset(tmp_path, asset):
+                    raise RuntimeError(self._download_validation_error(tmp_path, asset))
                 tmp_path.replace(destination)
             except Exception:
                 tmp_path.unlink(missing_ok=True)
@@ -604,6 +604,18 @@ class UpdateService:
 
         self._request_with_fallback(request)
         return destination.resolve()
+
+    def _is_valid_downloaded_asset(self, path: Path, asset: UpdateAsset) -> bool:
+        if not self._has_valid_asset_size(path, asset):
+            return False
+        expected_hash = self._expected_asset_sha256(asset)
+        if not expected_hash:
+            return True
+        try:
+            actual_hash = self._file_sha256(path)
+        except Exception:
+            return False
+        return actual_hash == expected_hash
 
     def _has_valid_asset_size(self, path: Path, asset: UpdateAsset) -> bool:
         if not path.exists():
@@ -614,6 +626,50 @@ class UpdateService:
         if asset.size > 0 and actual_size != asset.size:
             return False
         return True
+
+    def _download_validation_error(self, path: Path, asset: UpdateAsset) -> str:
+        if not self._has_valid_asset_size(path, asset):
+            return f"download_size_mismatch: expected {asset.size} bytes, got {path.stat().st_size} bytes"
+        expected_hash = self._expected_asset_sha256(asset)
+        if expected_hash:
+            actual_hash = self._file_sha256(path)
+            return f"download_checksum_mismatch: expected {expected_hash}, got {actual_hash}"
+        return "download_validation_failed"
+
+    def _expected_asset_sha256(self, asset: UpdateAsset) -> str:
+        checksum_asset = self._find_checksum_asset(asset)
+        if checksum_asset is None:
+            return ""
+
+        def request(client: httpx.Client) -> str:
+            response = client.get(checksum_asset.browser_download_url)
+            response.raise_for_status()
+            text = response.text.strip()
+            match = re.search(r"([A-Fa-f0-9]{64})", text)
+            if match is None:
+                raise RuntimeError("checksum_parse_failed")
+            return match.group(1).lower()
+
+        return self._request_with_fallback(request)
+
+    def _find_checksum_asset(self, asset: UpdateAsset) -> UpdateAsset | None:
+        expected_names = {
+            f"{asset.name}.sha256",
+            f"{asset.name}.sha256.txt",
+            f"{asset.name}.sha256sum",
+        }
+        for candidate in self.assets:
+            if candidate.name in expected_names and candidate.browser_download_url:
+                return candidate
+        return None
+
+    def _file_sha256(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                if chunk:
+                    digest.update(chunk)
+        return digest.hexdigest()
 
     def _is_check_in_progress(self) -> bool:
         return self._check_lock.locked()

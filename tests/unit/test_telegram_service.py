@@ -385,6 +385,61 @@ def test_async_dispatch_does_not_silently_drop_later_updates() -> None:
     assert len(transport.sent_messages) == 20
 
 
+def test_async_dispatch_retries_failed_update_before_acknowledging_it() -> None:
+    updates = [TelegramUpdate(update_id=300, chat_id=777, user_id=123456789, text="cmd retry")]
+    transport = FakeTransport(updates, fail_send_message=RuntimeError("send down"))
+    offset_store = FakeOffsetStore(offset=300)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=offset_store,
+        handler=lambda text: f"ok:{text}",
+    )
+
+    queued = service.poll_once(async_dispatch=True)
+    assert queued[0].error == "queued"
+
+    deadline = time.perf_counter() + 3.0
+    while time.perf_counter() < deadline and service.pending_dispatches() > 0:
+        time.sleep(0.01)
+
+    assert service.pending_dispatches() == 0
+    assert transport.sent_messages == []
+    assert offset_store.saved == []
+    assert transport.requested_offsets == [300]
+
+    transport.fail_send_message = None
+
+    results = service.poll_once(async_dispatch=False)
+
+    assert results[0].handled is True
+    assert transport.sent_messages == [(777, "ok:cmd retry")]
+    assert offset_store.saved[-1] == 301
+    assert transport.requested_offsets == [300, 300]
+
+
+def test_http_transport_timeout_falls_back_on_invalid_network_setting() -> None:
+    class Settings:
+        def get_registration(self) -> dict[str, str]:
+            return {"telegram_user_id": "123456789", "telegram_bot_token": "bot_token"}
+
+        def get(self, key: str, default=None):  # noqa: ANN001, ANN201
+            if key == "network":
+                return {"timeout_seconds": "bad"}
+            return default
+
+    service = TelegramService(
+        Settings(),
+        transport=None,
+        offset_store=FakeOffsetStore(offset=0),
+    )
+
+    transport = service._create_http_transport("bot_token")  # noqa: SLF001
+
+    assert transport is not None
+    assert transport.timeout_seconds == 12.0
+
+
 def test_duplicate_update_ids_are_deduped_before_dispatch() -> None:
     updates = [
         TelegramUpdate(update_id=500, chat_id=777, user_id=123456789, text="open youtube"),

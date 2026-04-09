@@ -384,7 +384,10 @@ class ActionRegistry:
             }
 
         if any(normalized.startswith(f"{verb} ") for verb in OPEN_VERBS):
-            items, question = self.resolve_open_command(command)
+            phrases, remainder = self.split_open_target_sequence(self._strip_open_verb(normalized))
+            if remainder or len(phrases) != 1:
+                return None
+            items, question = self.resolve_open_command(normalized)
             if question or len(items) != 1:
                 return None
 
@@ -529,7 +532,10 @@ class ActionRegistry:
         return ActionOutcome(True, "Переключаю звук", "Системный звук переключён")
 
     def run_power_action(self, action: str, title: str) -> ActionOutcome:
-        self._run_power_action(action)
+        try:
+            self._run_power_action(action)
+        except OSError as exc:
+            return ActionOutcome(False, f"Не удалось: {title}", str(exc))
         return ActionOutcome(
             True,
             title,

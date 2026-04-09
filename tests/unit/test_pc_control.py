@@ -90,3 +90,18 @@ def test_pc_control_media_keys_are_marked_sent_but_unverified(monkeypatch):
     assert next_track.status == "sent_unverified"
     assert previous_track.status == "sent_unverified"
     assert "не подтверждает" in play_pause.detail
+
+
+def test_pc_control_power_action_returns_failed_outcome_when_registry_raises(monkeypatch):
+    class BrokenActions(FakeActions):
+        def run_power_action(self, action: str, title: str):  # noqa: ANN001
+            raise OSError("boom")
+
+    monkeypatch.setattr(MediaControl, "_send_input", lambda self, virtual_key: True)
+    service = PcControlService(BrokenActions())
+
+    outcome = service.power_action("lock", "Блокирую экран")
+
+    assert outcome.success is False
+    assert outcome.title == "Не удалось: Блокирую экран"
+    assert outcome.detail == "boom"

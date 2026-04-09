@@ -611,6 +611,28 @@ def test_registry_runs_power_targets_via_shutdown_command(monkeypatch) -> None:
     assert outcomes[0].success is True
     assert launched["close_fds"] is True
     assert launched["command"] == ["shutdown", "/r", "/t", "0"]
+
+
+def test_resolve_system_action_rejects_open_command_with_trailing_noise() -> None:
+    registry, _service = make_registry()
+
+    assert registry.resolve_system_action("открой параметры бла") is None
+    assert registry.resolve_system_action("открой параметры и сделай громче") is None
+
+
+def test_registry_power_action_returns_failed_outcome_on_oserror(monkeypatch) -> None:
+    registry, _service = make_registry()
+
+    def fail_power_action(_action: str) -> None:
+        raise OSError("boom")
+
+    monkeypatch.setattr(registry, "_run_power_action", fail_power_action)
+
+    outcome = registry.run_power_action("lock", "Блокирую экран")
+
+    assert outcome.success is False
+    assert outcome.title == "Не удалось: Блокирую экран"
+    assert outcome.detail == "boom"
 def _broken_agent_test_split_open_target_sequence_handles_system_and_spoken_targets() -> None:
     registry, _service = make_registry()
 
