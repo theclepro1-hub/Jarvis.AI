@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+
 from core.settings.settings_service import SettingsService
 from core.voice.tts_service import TTSService
 from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult
@@ -291,7 +294,7 @@ def test_capture_after_wake_treats_filler_as_not_heard(monkeypatch):
     monkeypatch.setattr(
         voice.stt_service,
         "transcribe_pcm_bytes",
-        lambda _raw: TranscriptionResult(status="ok", text="джарвис эээ", detail="ok", engine="stub"),
+        lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text="джарвис эээ", detail="ok", engine="stub"),
     )
 
     result = voice.capture_after_wake_result(b"")
@@ -316,10 +319,83 @@ def test_capture_after_wake_keeps_short_real_command(monkeypatch):
     monkeypatch.setattr(
         voice.stt_service,
         "transcribe_pcm_bytes",
-        lambda _raw: TranscriptionResult(status="ok", text="джарвис ютуб", detail="ok", engine="stub"),
+        lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text="джарвис ютуб", detail="ok", engine="stub"),
     )
 
     result = voice.capture_after_wake_result(b"")
 
     assert result.ok is True
     assert result.text == "ютуб"
+
+
+def test_manual_capture_stop_cancels_pending_transcription():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    started = threading.Event()
+    notes: list[str] = []
+    texts: list[str] = []
+    finished = threading.Event()
+
+    voice.capture_service.capture_until_silence = lambda: SpeechCaptureResult(  # type: ignore[method-assign]
+        status="ok",
+        raw_audio=b"pcm",
+        speech_started=True,
+        duration_seconds=0.4,
+    )
+
+    def fake_transcribe(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        started.set()
+        while cancel_event is not None and not cancel_event.is_set():
+            time.sleep(0.01)
+        return TranscriptionResult(status="cancelled", detail="Запись остановлена.")
+
+    voice.stt_service.transcribe_pcm_bytes = fake_transcribe  # type: ignore[method-assign]
+
+    voice.start_manual_capture(on_text=texts.append, on_note=notes.append, on_finish=finished.set)
+    assert started.wait(1.0)
+
+    assert voice.stop_manual_capture() == "Останавливаю запись..."
+    assert finished.wait(1.0)
+
+    assert texts == []
+    assert notes == ["Запись остановлена."]
+    assert voice.is_recording is False
+
+
+def test_capture_after_wake_can_be_cancelled_during_transcription(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    started = threading.Event()
+    result_box: dict[str, TranscriptionResult] = {}
+
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+
+    def fake_transcribe(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        started.set()
+        while cancel_event is not None and not cancel_event.is_set():
+            time.sleep(0.01)
+        return TranscriptionResult(status="cancelled", detail="Запись остановлена.", engine="local_vosk")
+
+    voice.stt_service.transcribe_pcm_bytes = fake_transcribe  # type: ignore[method-assign]
+
+    worker = threading.Thread(
+        target=lambda: result_box.setdefault("result", voice.capture_after_wake_result(b"wake")),
+        daemon=True,
+    )
+    worker.start()
+    assert started.wait(1.0)
+
+    voice.cancel_active_pipeline()
+    worker.join(timeout=1.0)
+
+    result = result_box["result"]
+    assert worker.is_alive() is False
+    assert result.status == "cancelled"
+    assert voice.runtime_status()["wakeWord"] == "Запись остановлена."

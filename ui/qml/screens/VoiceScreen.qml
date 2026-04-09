@@ -236,6 +236,26 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
+
+                    Text {
+                        visible: voiceBridge.voiceTimingsSummary.length > 0
+                        text: "Последний wake-сценарий: " + voiceBridge.voiceTimingsSummary
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        visible: voiceBridge.voiceTimings["transcript"] && String(voiceBridge.voiceTimings["transcript"]).length > 0
+                        text: "Что услышал: " + voiceBridge.voiceTimings["transcript"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                 }
             }
 

@@ -250,6 +250,34 @@ def test_chat_bridge_uses_cleaned_ai_text_after_wake_like_prefix(monkeypatch) ->
     assert bridge.messages[-1]["text"] == "AI fallback: как дела"
 
 
+def test_chat_bridge_snapshots_ai_history_per_submission(monkeypatch) -> None:
+    captured: list[tuple[object, tuple[object, ...]]] = []
+
+    class _Thread:
+        def __init__(self, target, args, daemon) -> None:  # noqa: ANN001, D401
+            _ = daemon
+            captured.append((target, args))
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr("ui.bridge.chat_bridge.threading.Thread", _Thread)
+    route = SimpleNamespace(kind="ai", commands=["one"], assistant_lines=[], queue_items=["one"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+
+    bridge.sendMessage("one")
+    bridge.sendMessage("two")
+
+    assert len(captured) == 2
+    first_history = captured[0][1][2]
+    second_history = captured[1][1][2]
+    assert len(first_history) == 1
+    assert first_history[0]["role"] == "assistant"
+    assert len(second_history) == 2
+    assert [item["role"] for item in second_history] == ["assistant", "user"]
+    assert second_history[-1]["text"] == "one"
+
+
 def test_chat_bridge_exposes_last_response_hint_from_ai_result(monkeypatch) -> None:
     monkeypatch.setattr(
         "ui.bridge.chat_bridge.threading.Thread",
@@ -338,7 +366,7 @@ def test_chat_bridge_emits_message_appended_for_user_and_assistant() -> None:
     assert roles == ["user", "assistant"]
 
 
-def test_chat_bridge_blocks_parallel_inflight_message_until_reply(monkeypatch) -> None:
+def test_chat_bridge_allows_different_messages_while_ai_is_pending(monkeypatch) -> None:
     monkeypatch.setattr(
         "ui.bridge.chat_bridge.threading.Thread",
         lambda target, args, daemon: SimpleNamespace(start=lambda: None),
@@ -350,5 +378,30 @@ def test_chat_bridge_blocks_parallel_inflight_message_until_reply(monkeypatch) -
     bridge.sendMessage("first")
     bridge.sendMessage("second")
 
-    assert len(bridge.messages) == before + 1
-    assert bridge.messages[-1]["text"] == "first"
+    assert len(bridge.messages) == before + 2
+    assert [message["text"] for message in bridge.messages[-2:]] == ["first", "second"]
+
+
+def test_chat_bridge_keeps_thinking_true_until_last_pending_reply_finishes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: None),
+    )
+    route = SimpleNamespace(kind="ai", commands=["first"], assistant_lines=[], queue_items=["first"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+
+    bridge.sendMessage("first")
+    bridge.sendMessage("second")
+
+    first_signature = bridge._message_signature("first")  # noqa: SLF001
+    second_signature = bridge._message_signature("second")  # noqa: SLF001
+
+    bridge._append_assistant_message("reply-one", first_signature)  # noqa: SLF001
+
+    assert bridge.thinking is True
+    assert bridge.thinkingLabel != ""
+
+    bridge._append_assistant_message("reply-two", second_signature)  # noqa: SLF001
+
+    assert bridge.thinking is False
+    assert bridge.thinkingLabel == ""

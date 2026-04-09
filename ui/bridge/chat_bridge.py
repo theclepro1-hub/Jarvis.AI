@@ -39,7 +39,6 @@ class ChatBridge(QObject):
         self._recent_submissions: dict[str, float] = {}
         self._submit_lock = threading.Lock()
         self._dedupe_window_seconds = 1.0
-        self._single_flight = True
         self._response_hint_timer = QTimer(self)
         self._response_hint_timer.setSingleShot(True)
         self._response_hint_timer.timeout.connect(lambda: self._set_last_response_hint(""))
@@ -117,7 +116,7 @@ class ChatBridge(QObject):
         self.queueChanged.emit()
 
         if route.kind == "local" and self._should_promote_local_route_to_ai(route):
-            self._start_ai_resolution(clean, signature, route=route)
+            self._start_ai_resolution(clean, signature, route=route, history_snapshot=self._ai_history_snapshot())
             return
 
         if route.kind == "local":
@@ -139,7 +138,7 @@ class ChatBridge(QObject):
             self._release_submission(signature)
             return
 
-        self._start_ai_resolution(clean, signature, route=route)
+        self._start_ai_resolution(clean, signature, route=route, history_snapshot=self._ai_history_snapshot())
 
     @Slot(str)
     def triggerQuickAction(self, action_id: str) -> None:
@@ -181,15 +180,17 @@ class ChatBridge(QObject):
         with self._submit_lock:
             self._inflight_signatures.clear()
             self._recent_submissions.clear()
+        self._thinking = False
+        self.thinkingChanged.emit()
         self._clear_wake_hint()
         self._set_status_stage("")
         self._set_last_response_hint("")
         self._initial_state_hydrated = True
         self.messagesChanged.emit()
 
-    def _resolve_ai_reply(self, text: str, signature: str) -> None:
+    def _resolve_ai_reply(self, text: str, signature: str, history_snapshot: list[dict[str, Any]] | None = None) -> None:
         self.workerStatusReady.emit("Готовлю ответ ИИ…")
-        history = self._messages[:-1]
+        history = history_snapshot if history_snapshot is not None else self._ai_history_snapshot()
         reply_hint = ""
         try:
             ai_service = self.services.ai
@@ -215,12 +216,15 @@ class ChatBridge(QObject):
         self.queueChanged.emit()
         if signature:
             self._release_submission(signature)
-        self._thinking = False
+        has_pending_requests = self._has_inflight_submissions()
+        self._thinking = has_pending_requests
         self.thinkingChanged.emit()
-        self._set_status_stage("")
+        if not has_pending_requests:
+            self._set_status_stage("")
         self._clear_wake_hint()
         self._set_last_response_hint(reply_hint)
-        self.state.status = "Готов"
+        if not has_pending_requests:
+            self.state.status = "Готов"
 
     def _append_local_result(self, route) -> None:
         execution = getattr(route, "execution_result", None)
@@ -416,13 +420,21 @@ class ChatBridge(QObject):
             return
         voice_bridge.clearWakeHint()
 
-    def _start_ai_resolution(self, original_text: str, signature: str, *, route=None) -> None:  # noqa: ANN001
+    def _start_ai_resolution(
+        self,
+        original_text: str,
+        signature: str,
+        *,
+        route=None,
+        history_snapshot: list[dict[str, Any]] | None = None,
+    ) -> None:  # noqa: ANN001
         self._thinking = True
         self.thinkingChanged.emit()
         self._set_last_response_hint("")
         self._set_status_stage(self._initial_ai_stage_label(route))
         ai_text = " ".join(route.commands).strip() if route is not None and route.commands else original_text
-        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text, signature), daemon=True)
+        snapshot = history_snapshot if history_snapshot is not None else self._ai_history_snapshot()
+        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text, signature, snapshot), daemon=True)
         thread.start()
 
     def _should_promote_local_route_to_ai(self, route) -> bool:  # noqa: ANN001
@@ -488,8 +500,6 @@ class ChatBridge(QObject):
             ]
             for key in stale_signatures:
                 self._recent_submissions.pop(key, None)
-            if self._single_flight and self._inflight_signatures:
-                return False
             if signature in self._inflight_signatures:
                 return False
             last_seen = self._recent_submissions.get(signature)
@@ -505,6 +515,14 @@ class ChatBridge(QObject):
         with self._submit_lock:
             self._inflight_signatures.discard(signature)
             self._recent_submissions[signature] = time.monotonic()
+
+    def _has_inflight_submissions(self) -> bool:
+        with self._submit_lock:
+            return bool(self._inflight_signatures)
+
+    def _ai_history_snapshot(self) -> list[dict[str, Any]]:
+        history = list(self._messages[:-1])
+        return [dict(message) for message in history]
 
     def refreshCatalog(self) -> None:
         self._quick_actions = self.services.actions.quick_actions()

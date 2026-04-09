@@ -111,6 +111,19 @@ function Write-ChecksumFile {
     return $checksumPath
 }
 
+function Assert-ChecksumFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ArtifactPath
+    )
+
+    $checksumPath = "$ArtifactPath.sha256.txt"
+    if (!(Test-Path $checksumPath)) {
+        throw "Checksum sidecar missing: $checksumPath"
+    }
+    return $checksumPath
+}
+
 function Assert-NativeSuccess {
     param(
         [Parameter(Mandatory = $true)]
@@ -245,6 +258,7 @@ if (!(Test-Path $portableDistPath)) {
 $portableZip = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_portable.zip" -f $version)
 Compress-Archive -Path $portableDistPath -DestinationPath $portableZip -Force
 Write-ChecksumFile -ArtifactPath $portableZip | Out-Null
+Assert-ChecksumFile -ArtifactPath $portableZip | Out-Null
 
 $nativeErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "SilentlyContinue"
@@ -285,6 +299,7 @@ if (!(Test-Path $oneFileExe)) {
 $oneFileRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_onefile.exe" -f $version)
 Copy-Item $oneFileExe $oneFileRelease -Force
 Write-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
+Assert-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
 
 $programFilesX86 = ${env:ProgramFiles(x86)}
 if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
@@ -367,6 +382,7 @@ Filename: "{app}\JarvisAi_Unity.exe"; Description: "{cm:LaunchProgram,JARVIS Uni
         throw "Installer executable missing: $installerRelease"
     }
     Write-ChecksumFile -ArtifactPath $installerRelease | Out-Null
+    Assert-ChecksumFile -ArtifactPath $installerRelease | Out-Null
     Write-Host "ASSET_OK $installerRelease"
 } else {
     Write-Host "INSTALLER_SKIPPED Inno Setup compiler not found: $innoCompiler"

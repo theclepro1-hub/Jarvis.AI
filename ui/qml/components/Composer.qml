@@ -89,7 +89,9 @@ Rectangle {
                       ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
                       : (root.idleHint.length ? root.idleHint
                         : (root.recordingHint.length ? root.recordingHint : "Введите сообщение или нажмите микрофон."))
-            color: root.recording || root.busy ? Theme.Colors.accent : Theme.Colors.textSoft
+            color: root.hasPriorityWakeHint || root.recording || root.busy
+                   ? Theme.Colors.accent
+                   : Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily
             font.pixelSize: Theme.Typography.micro
             elide: Text.ElideRight

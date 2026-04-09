@@ -27,6 +27,7 @@ class UpdateAsset:
     name: str
     browser_download_url: str
     size: int = 0
+    digest: str = ""
 
 
 @dataclass(slots=True)
@@ -120,6 +121,7 @@ class UpdateService:
                     name=str(asset.get("name") or "").strip(),
                     browser_download_url=str(asset.get("browser_download_url") or "").strip(),
                     size=max(0, int(asset.get("size") or 0)),
+                    digest=str(asset.get("digest") or "").strip(),
                 )
                 for asset in payload.get("assets", [])
                 if isinstance(asset, dict)
@@ -129,7 +131,12 @@ class UpdateService:
             self.last_checked_at_utc = datetime.now(timezone.utc)
 
             preferred_asset = self._pick_preferred_installer_asset()
-            if self.update_available_value and preferred_asset is not None and self.apply_supported_value:
+            if (
+                self.update_available_value
+                and preferred_asset is not None
+                and self.apply_supported_value
+                and self._asset_has_integrity(preferred_asset)
+            ):
                 self._set_status(
                     "update_ready",
                     f"Доступна версия {self.latest_version_value} · можно установить поверх текущей.",
@@ -173,7 +180,7 @@ class UpdateService:
             return False
         if not self.update_available_value:
             return False
-        return self._pick_preferred_installer_asset() is not None
+        return self._can_apply_with_asset(self._pick_preferred_installer_asset())
 
     def apply_update(self) -> UpdateApplyResult:
         if not self.apply_supported_value:
@@ -276,6 +283,23 @@ class UpdateService:
                     release_url=self.release_url_value,
                     requires_manual_step=True,
                 )
+            if not self._asset_has_integrity(asset):
+                message = (
+                    "Installer найден, но у релиза нет checksum/digest для проверки. "
+                    "Автоустановка отключена, скачайте обновление вручную со страницы релиза."
+                )
+                self.last_apply_message_value = message
+                self._set_status("manual_only", message)
+                return UpdateApplyResult(
+                    ok=False,
+                    started=False,
+                    message=message,
+                    asset_name=asset.name,
+                    last_error="installer_integrity_missing",
+                    status_code="manual_only",
+                    release_url=self.release_url_value,
+                    requires_manual_step=True,
+                )
 
             try:
                 installer_path = self._download_asset(asset)
@@ -367,6 +391,7 @@ class UpdateService:
                     "name": asset.name,
                     "browser_download_url": asset.browser_download_url,
                     "size": asset.size,
+                    "digest": asset.digest,
                 }
                 for asset in self.assets
             ],
@@ -382,8 +407,8 @@ class UpdateService:
             "active_installer_pid": self._active_installer_pid(),
             "status_code": self.last_status_code_value,
             "status_message": self.summary(),
-            "manual_download_required": bool(self.update_available_value and preferred_asset is None),
-            "apply_mode": "installer" if preferred_asset is not None else "manual",
+            "manual_download_required": bool(self.update_available_value and not self._can_apply_with_asset(preferred_asset)),
+            "apply_mode": "installer" if self._can_apply_with_asset(preferred_asset) else "manual",
             "installer_launch_arguments": list(INSTALLER_LAUNCH_ARGUMENTS),
         }
 
@@ -427,6 +452,8 @@ class UpdateService:
             return "Сначала дождитесь завершения проверки обновлений."
         if not self.update_available_value:
             return "Сначала проверьте наличие новой версии."
+        if preferred_asset is not None and not self._asset_has_integrity(preferred_asset):
+            return "Installer найден, но у релиза нет checksum/digest. Автоустановка отключена, доступна только ручная установка."
         if preferred_asset is not None:
             return "Будет скачан installer-релиз и запущен поверх текущей версии. Portable и onefile обновляются вручную."
         return "В релизе нет installer-asset. Обновление доступно только вручную через страницу релиза."
@@ -437,6 +464,8 @@ class UpdateService:
         if not self.update_available_value:
             return False
         if preferred_asset is None:
+            return False
+        if not self._asset_has_integrity(preferred_asset):
             return False
         if self._is_apply_in_progress() or self._is_installer_running():
             return False
@@ -637,6 +666,9 @@ class UpdateService:
         return "download_validation_failed"
 
     def _expected_asset_sha256(self, asset: UpdateAsset) -> str:
+        digest_hash = self._parse_sha256_digest(asset.digest)
+        if digest_hash:
+            return digest_hash
         checksum_asset = self._find_checksum_asset(asset)
         if checksum_asset is None:
             return ""
@@ -662,6 +694,23 @@ class UpdateService:
             if candidate.name in expected_names and candidate.browser_download_url:
                 return candidate
         return None
+
+    def _parse_sha256_digest(self, digest: str) -> str:
+        value = str(digest or "").strip().lower()
+        if not value:
+            return ""
+        if value.startswith("sha256:"):
+            value = value.split(":", 1)[1].strip()
+        if re.fullmatch(r"[a-f0-9]{64}", value):
+            return value
+        return ""
+
+    def _asset_has_integrity(self, asset: UpdateAsset | None) -> bool:
+        if asset is None:
+            return False
+        if self._parse_sha256_digest(asset.digest):
+            return True
+        return self._find_checksum_asset(asset) is not None
 
     def _file_sha256(self, path: Path) -> str:
         digest = hashlib.sha256()

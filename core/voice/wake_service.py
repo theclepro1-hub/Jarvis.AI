@@ -75,6 +75,9 @@ class WakeService:
 
     def stop(self) -> None:
         self._stop_event.set()
+        cancel_pipeline = getattr(self.voice, "cancel_active_pipeline", None)
+        if callable(cancel_pipeline):
+            cancel_pipeline()
         self._running = False
         if self._phase != "error":
             self._set_phase("idle", "Слово активации не запущено", ready=False)

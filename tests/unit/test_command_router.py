@@ -355,6 +355,20 @@ def test_command_router_voice_requests_clarification_for_greedy_open_tail():
     assert pc_control.opened_urls == []
 
 
+def test_command_router_text_requests_clarification_for_greedy_open_tail():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой яндекс музыку истины")
+
+    assert result.kind == "local"
+    assert result.assistant_lines[0].startswith("Уточните команду целиком.")
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+    assert result.execution_result.steps[0].status == "needs_input"
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
+
+
 def test_command_router_text_path_also_handles_normalized_multi_action():
     router, actions, pc_control = make_router()
 

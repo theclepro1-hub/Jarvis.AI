@@ -508,13 +508,15 @@ class TelegramService:
         with self._dispatch_lock:
             self._inflight_dispatches += 1
         future = self._dispatch_pool.submit(self._process_update_safe, update)
-        future.add_done_callback(self._dispatch_done)
+        future.add_done_callback(lambda completed, update_id=update.update_id: self._dispatch_done(completed, update_id))
 
-    def _dispatch_done(self, future: Future[TelegramDispatchResult]) -> None:
+    def _dispatch_done(self, future: Future[TelegramDispatchResult], update_id: int) -> None:
         try:
             result = future.result()
             self._finalize_dispatch_result(result)
         except Exception as exc:  # noqa: BLE001
+            with self._offset_lock:
+                self._pending_update_ids_set.discard(update_id)
             with self._state_lock:
                 self._connected = False
                 self._last_error = self._format_error(exc)

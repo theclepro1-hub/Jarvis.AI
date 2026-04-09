@@ -89,10 +89,18 @@ class SettingsStore:
 
     def load(self) -> dict[str, Any]:
         if not self.settings_path.exists():
-            return json.loads(json.dumps(DEFAULT_SETTINGS))
+            return self._default_settings_copy()
 
-        with self.settings_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
+        try:
+            with self.settings_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError, ValueError):
+            self._recover_corrupt_settings()
+            return self._default_settings_copy()
+
+        if not isinstance(data, dict):
+            self._recover_corrupt_settings()
+            return self._default_settings_copy()
 
         merged = self._merge_defaults(data, DEFAULT_SETTINGS)
         self._restore_registration_secrets(merged)
@@ -103,6 +111,28 @@ class SettingsStore:
         if not output_name:
             merged["voice_output_name"] = DEFAULT_SETTINGS["voice_output_name"]
         return merged
+
+    def _default_settings_copy(self) -> dict[str, Any]:
+        return json.loads(json.dumps(DEFAULT_SETTINGS))
+
+    def _recover_corrupt_settings(self) -> None:
+        if not self.settings_path.exists():
+            return
+
+        recovery_name = (
+            f"{self.settings_path.stem}.corrupt-{time.time_ns()}{self.settings_path.suffix}"
+        )
+        recovery_path = self.settings_path.with_name(recovery_name)
+        try:
+            self.settings_path.replace(recovery_path)
+            return
+        except Exception:
+            pass
+
+        try:
+            shutil.copy2(self.settings_path, recovery_path)
+        except Exception:
+            return
 
     def save(self, payload: dict[str, Any]) -> None:
         payload_to_write = self._prepare_for_save(payload)

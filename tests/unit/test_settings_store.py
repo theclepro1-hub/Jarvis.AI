@@ -70,6 +70,20 @@ def test_settings_store_defaults_cover_history_and_pinned_commands() -> None:
     assert payload["pinned_commands"] == []
 
 
+def test_settings_store_recovers_from_corrupt_json(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store = SettingsStore()
+    store.settings_path.write_text('{"theme_mode": "midnight",', encoding="utf-8")
+
+    loaded = store.load()
+
+    assert loaded["theme_mode"] == DEFAULT_SETTINGS["theme_mode"]
+    assert loaded["ai_mode"] == DEFAULT_SETTINGS["ai_mode"]
+    recovery_files = list(tmp_path.glob("settings.corrupt-*.json"))
+    assert len(recovery_files) == 1
+    assert recovery_files[0].read_text(encoding="utf-8").startswith('{"theme_mode": "midnight",')
+
+
 def test_settings_store_falls_back_to_direct_write_when_replace_is_locked(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
     store = SettingsStore()

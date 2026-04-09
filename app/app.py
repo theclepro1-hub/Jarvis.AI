@@ -37,6 +37,15 @@ def _boot_log(message: str) -> None:
         pass
 
 
+def _wake_start_delay_ms() -> int:
+    raw = str(os.environ.get("JARVIS_UNITY_WAKE_START_DELAY_MS", "900") or "900").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 900
+    return max(250, min(value, 5000))
+
+
 def _load_embedded_fonts() -> None:
     fonts_dir = Path(__file__).resolve().parents[1] / "assets" / "fonts"
     if not fonts_dir.exists():
@@ -124,7 +133,7 @@ class JarvisUnityApplication:
             QTimer.singleShot(0, lambda: self.hide_to_tray(show_message=False))
         self._install_background_services()
         if os.environ.get("JARVIS_UNITY_DISABLE_WAKE") != "1":
-            QTimer.singleShot(250, self.voice_bridge.startWakeRuntime)
+            QTimer.singleShot(_wake_start_delay_ms(), self.voice_bridge.startWakeRuntime)
             _boot_log("app:start:wake-scheduled")
 
     def _install_tray_mode(self) -> None:

@@ -53,6 +53,8 @@ class VoiceService:
         self._manual_stop_event = threading.Event()
         self._manual_thread: threading.Thread | None = None
         self._recording = False
+        self._active_pipeline_id = 0
+        self._pipeline_lock = threading.Lock()
         self._wake_phase = "idle"
         self._wake_detail = "Слово активации не запущено"
         self._wake_ready = False
@@ -267,7 +269,7 @@ class VoiceService:
         return self.tts_service.status_text()
 
     def warm_up_local_stt_backend(self) -> bool:
-        return self.stt_service.warm_up_local_backend()
+        return self.stt_service.warm_up_local_backend(cancel_event=self._manual_stop_event)
 
     def available_tts_engines(self) -> list[dict[str, object]]:
         return [
@@ -317,11 +319,11 @@ class VoiceService:
         if self._recording:
             return "Запись уже идёт."
 
-        self._manual_stop_event.clear()
+        self._begin_pipeline()
         self._recording = True
         self._manual_thread = threading.Thread(
             target=self._manual_capture_worker,
-            args=(on_text, on_note, on_finish),
+            args=(self._current_pipeline_id(), on_text, on_note, on_finish),
             daemon=True,
         )
         self._manual_thread.start()
@@ -331,13 +333,14 @@ class VoiceService:
         if not self._recording and (self._manual_thread is None or not self._manual_thread.is_alive()):
             return ""
 
-        self._manual_stop_event.set()
+        self.cancel_active_pipeline()
         return "Останавливаю запись..."
 
     def capture_after_wake(self, pre_roll: bytes) -> str:
         return self.capture_after_wake_result(pre_roll).text
 
     def capture_after_wake_result(self, pre_roll: bytes) -> TranscriptionResult:
+        self._begin_pipeline()
         self.begin_wake_session(pre_roll)
         max_seconds, silence_seconds, energy_threshold, pre_roll_grace = self._wake_capture_tuning()
         wake_capture = SpeechCaptureService(
@@ -361,7 +364,7 @@ class VoiceService:
 
         self.set_wake_runtime_status("transcribing", ready=False, detail="Распознаю команду")
         self.mark_wake_stt_started()
-        transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
+        transcription = self._transcribe_with_cancel(capture.raw_audio, self._current_pipeline_id())
         self.mark_wake_transcription_result(transcription)
         if transcription.ok:
             self.set_wake_runtime_status("routing", ready=False, detail="Команда распознана. Передаю в обработку")
@@ -401,7 +404,9 @@ class VoiceService:
             self.mark_wake_transcription_result(cleaned)
             return cleaned
 
-        if transcription.status == "no_speech":
+        if transcription.status == "cancelled":
+            self.set_wake_runtime_status("idle", ready=False, detail="Запись остановлена.")
+        elif transcription.status == "no_speech":
             self.set_wake_runtime_status(
                 "not_heard",
                 ready=False,
@@ -413,6 +418,7 @@ class VoiceService:
 
     def _manual_capture_worker(
         self,
+        pipeline_id: int,
         on_text: Callable[[str], None] | None,
         on_note: Callable[[str], None] | None,
         on_finish: Callable[[], None] | None,
@@ -420,21 +426,22 @@ class VoiceService:
         try:
             capture = self.capture_service.capture_until_silence()
             if not capture.ok:
-                if on_note is not None:
+                if on_note is not None and self._pipeline_active(pipeline_id):
                     on_note(self._capture_note_from_result(capture))
                 return
 
-            transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
+            transcription = self._transcribe_with_cancel(capture.raw_audio, pipeline_id)
             if transcription.ok:
-                if on_text is not None:
+                if on_text is not None and self._pipeline_active(pipeline_id):
                     on_text(transcription.text)
-            elif on_note is not None:
+            elif on_note is not None and self._pipeline_active(pipeline_id):
                 on_note(self._stt_note_from_result(transcription))
         finally:
-            self._recording = False
-            self._manual_thread = None
-            self._manual_stop_event.clear()
-            if on_finish is not None:
+            if self._pipeline_active(pipeline_id):
+                self._recording = False
+                self._manual_thread = None
+                self._manual_stop_event.clear()
+            if on_finish is not None and self._pipeline_active(pipeline_id):
                 on_finish()
 
     def _capture_note_from_result(self, result: SpeechCaptureResult) -> str:
@@ -447,6 +454,8 @@ class VoiceService:
         return result.detail or "Не удалось получить текст."
 
     def _stt_note_from_result(self, result: TranscriptionResult) -> str:
+        if result.status == "cancelled":
+            return "Запись остановлена."
         if result.status == "stt_key_missing":
             return "Нужен ключ Groq."
         if result.status == "model_missing":
@@ -454,6 +463,59 @@ class VoiceService:
         if result.status == "no_speech":
             return "Не удалось получить текст. Проверьте микрофон или ключ Groq."
         return result.detail or "Не удалось распознать речь."
+
+    def cancel_active_pipeline(self) -> None:
+        self._manual_stop_event.set()
+
+    def _begin_pipeline(self) -> int:
+        with self._pipeline_lock:
+            self._active_pipeline_id += 1
+            self._manual_stop_event.clear()
+            return self._active_pipeline_id
+
+    def _current_pipeline_id(self) -> int:
+        with self._pipeline_lock:
+            return self._active_pipeline_id
+
+    def _pipeline_active(self, pipeline_id: int) -> bool:
+        with self._pipeline_lock:
+            return self._active_pipeline_id == pipeline_id
+
+    def _transcribe_with_cancel(self, raw_bytes: bytes, pipeline_id: int) -> TranscriptionResult:
+        if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
+            return self._cancelled_transcription_result()
+
+        result_box: dict[str, TranscriptionResult] = {}
+        done = threading.Event()
+
+        def worker() -> None:
+            try:
+                result_box["result"] = self.stt_service.transcribe_pcm_bytes(
+                    raw_bytes,
+                    cancel_event=self._manual_stop_event,
+                )
+            except Exception as exc:  # pragma: no cover - defensive path
+                result_box["result"] = TranscriptionResult(
+                    status="stt_failed",
+                    detail=f"Не удалось распознать речь: {exc}",
+                )
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        while not done.wait(0.03):
+            if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
+                return self._cancelled_transcription_result()
+
+        result = result_box.get("result", self._cancelled_transcription_result())
+        if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
+            return self._cancelled_transcription_result()
+        return result
+
+    def _cancelled_transcription_result(self) -> TranscriptionResult:
+        return TranscriptionResult(status="cancelled", detail="Запись остановлена.")
 
     def _set_wake_error_from_capture(self, capture: SpeechCaptureResult) -> None:
         if capture.status == "mic_open_failed":

@@ -250,6 +250,10 @@ class VoiceBridge(QObject):
     def voiceTimings(self) -> dict[str, object]:
         return self.services.voice.latest_wake_metrics()
 
+    @Property(str, notify=voiceTimingsChanged)
+    def voiceTimingsSummary(self) -> str:
+        return self.services.voice.latest_wake_metrics_summary()
+
     @Slot()
     def runWakeWordTest(self) -> None:
         self._test_result = self.services.voice.test_wake_word()

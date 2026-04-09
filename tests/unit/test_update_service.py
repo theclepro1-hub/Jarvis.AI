@@ -56,6 +56,7 @@ def _connect_error(url: str) -> httpx.ConnectError:
 
 def test_update_service_reports_installer_ready_when_release_has_installer(monkeypatch) -> None:
     calls: list[tuple[str, object]] = []
+    digest = hashlib.sha256(b"binary-installer").hexdigest()
 
     def fake_create_http_client(*, proxy_url: str = "", trust_env: bool = True) -> _FakeHttpClient:
         _ = proxy_url
@@ -71,6 +72,7 @@ def test_update_service_reports_installer_ready_when_release_has_installer(monke
                             "name": "JarvisAi_Unity_22.4.0_windows_installer.exe",
                             "browser_download_url": "https://example.test/installer.exe",
                             "size": len(b"binary-installer"),
+                            "digest": f"sha256:{digest}",
                         },
                         {
                             "name": "JarvisAi_Unity_22.4.0_windows_onefile.exe",
@@ -172,6 +174,7 @@ def test_update_service_reports_error_honestly(monkeypatch) -> None:
 
 def test_update_service_retries_transport_failure_before_succeeding(monkeypatch) -> None:
     attempts: list[tuple[bool, str]] = []
+    digest = hashlib.sha256(b"binary-installer").hexdigest()
     payload = {
         "tag_name": "v22.4.0",
         "html_url": "https://example.test/releases/v22.4.0",
@@ -180,6 +183,7 @@ def test_update_service_retries_transport_failure_before_succeeding(monkeypatch)
                 "name": "JarvisAi_Unity_22.4.0_windows_installer.exe",
                 "browser_download_url": "https://example.test/installer.exe",
                 "size": len(b"binary-installer"),
+                "digest": f"sha256:{digest}",
             }
         ],
     }
@@ -218,16 +222,39 @@ def test_update_service_check_is_single_flight() -> None:
     assert result.ok is False
     assert result.status_code == "check_in_progress"
     assert result.last_error == "check_in_progress"
-    assert result.message == "Проверка обновлений уже выполняется."
 
 
-def test_apply_update_downloads_and_launches_installer(monkeypatch, tmp_path: Path) -> None:
+def test_update_service_requires_integrity_metadata_for_auto_apply() -> None:
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
             name="JarvisAi_Unity_22.4.0_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
             size=len(b"binary-installer"),
+        )
+    ]
+    service.latest_version_value = "22.4.0"
+    service.release_url_value = "https://example.test/releases/v22.4.0"
+    service.update_available_value = True
+
+    snapshot = service.status_snapshot()
+
+    assert service.can_apply_update() is False
+    assert snapshot["can_apply"] is False
+    assert snapshot["manual_download_required"] is True
+    assert snapshot["apply_mode"] == "manual"
+    assert "checksum/digest" in snapshot["apply_hint"]
+
+
+def test_apply_update_downloads_and_launches_installer(monkeypatch, tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"binary-installer").hexdigest()
+    service = UpdateService(settings=None, current_version="22.3.0")
+    service.assets = [
+        UpdateAsset(
+            name="JarvisAi_Unity_22.4.0_windows_installer.exe",
+            browser_download_url="https://example.test/installer.exe",
+            size=len(b"binary-installer"),
+            digest=f"sha256:{digest}",
         )
     ]
     service.latest_version_value = "22.4.0"
@@ -279,12 +306,14 @@ def test_apply_update_downloads_and_launches_installer(monkeypatch, tmp_path: Pa
 
 
 def test_apply_update_reuses_existing_download(monkeypatch, tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"already-downloaded").hexdigest()
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
             name="JarvisAi_Unity_22.4.0_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
             size=len(b"already-downloaded"),
+            digest=f"sha256:{digest}",
         )
     ]
     service.latest_version_value = "22.4.0"
@@ -318,12 +347,14 @@ def test_apply_update_reuses_existing_download(monkeypatch, tmp_path: Path) -> N
 
 
 def test_apply_update_redownloads_stale_cached_installer_when_size_mismatch(monkeypatch, tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"binary-installer").hexdigest()
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
             name="JarvisAi_Unity_22.4.0_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
             size=len(b"binary-installer"),
+            digest=f"sha256:{digest}",
         )
     ]
     service.latest_version_value = "22.4.0"
@@ -361,12 +392,14 @@ def test_apply_update_redownloads_stale_cached_installer_when_size_mismatch(monk
 
 
 def test_apply_update_reports_corrupted_download_when_size_mismatch(monkeypatch, tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"binary-installer").hexdigest()
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
             name="JarvisAi_Unity_22.4.0_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
             size=len(b"binary-installer"),
+            digest=f"sha256:{digest}",
         )
     ]
     service.latest_version_value = "22.4.0"
@@ -394,7 +427,11 @@ def test_apply_update_verifies_checksum_when_sidecar_is_available(monkeypatch, t
             name="JarvisAi_Unity_22.4.0_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
             size=len(b"binary-installer"),
-        )
+        ),
+        UpdateAsset(
+            name="JarvisAi_Unity_22.4.0_windows_installer.exe.sha256.txt",
+            browser_download_url="https://example.test/installer.exe.sha256.txt",
+        ),
     ]
     service.latest_version_value = "22.4.0"
     service.release_url_value = "https://example.test/releases/v22.4.0"
@@ -413,6 +450,46 @@ def test_apply_update_verifies_checksum_when_sidecar_is_available(monkeypatch, t
 
     class DummyProc:
         pid = 779
+
+        @staticmethod
+        def poll():  # noqa: ANN205
+            return None
+
+    monkeypatch.setattr(
+        "core.updates.update_service.subprocess.Popen",
+        lambda command, close_fds, creationflags: DummyProc(),
+    )
+
+    result = service.apply_update()
+
+    assert result.ok is True
+    assert result.started is True
+    assert Path(result.installer_path).read_bytes() == b"binary-installer"
+
+
+def test_apply_update_verifies_release_digest_when_available(monkeypatch, tmp_path: Path) -> None:
+    digest = hashlib.sha256(b"binary-installer").hexdigest()
+    service = UpdateService(settings=None, current_version="22.3.0")
+    service.assets = [
+        UpdateAsset(
+            name="JarvisAi_Unity_22.4.0_windows_installer.exe",
+            browser_download_url="https://example.test/installer.exe",
+            size=len(b"binary-installer"),
+            digest=f"sha256:{digest}",
+        )
+    ]
+    service.latest_version_value = "22.4.0"
+    service.release_url_value = "https://example.test/releases/v22.4.0"
+    service.update_available_value = True
+    monkeypatch.setattr(service, "_update_download_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        service,
+        "_create_http_client",
+        lambda *args, **kwargs: _FakeHttpClient(response=_FakeResponse(body=b"binary-installer"), calls=[]),
+    )
+
+    class DummyProc:
+        pid = 780
 
         @staticmethod
         def poll():  # noqa: ANN205

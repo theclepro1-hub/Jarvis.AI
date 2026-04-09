@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -250,11 +251,13 @@ def test_release_gate_updater_is_honest_about_installer_only_flow() -> None:
 
 
 def test_release_gate_updater_exposes_installer_contract_when_available() -> None:
+    digest = hashlib.sha256(b"installer").hexdigest()
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
             name="JarvisAi_Unity_22.4.0_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
+            digest=f"sha256:{digest}",
         )
     ]
     service.latest_version_value = "22.4.0"

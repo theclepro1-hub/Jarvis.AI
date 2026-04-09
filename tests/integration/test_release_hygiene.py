@@ -53,6 +53,7 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert "Test-ModelSourceReady" in build_script
     assert "Invoke-RetryDownload" in build_script
     assert "Write-ChecksumFile" in build_script
+    assert "Assert-ChecksumFile" in build_script
     assert "Get-FileHash" in build_script
     assert r"assets\\models\\$modelName" in build_script
     assert "am\\final.mdl" in build_script
@@ -90,6 +91,7 @@ def test_installer_metadata_matches_runtime_identity() -> None:
     assert "SetupMutex=JarvisAi_Unity_22_setup_mutex" in installer_script
     assert "CloseApplicationsFilter=JarvisAi_Unity.exe" in installer_script
     assert 'Type: filesandordirs; Name: "{app}"' in installer_script
+    assert "AppUserModelID" in installer_script
     assert 'WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"' in bootstrap
     assert 'WINDOWS_APP_DISPLAY_NAME = "JARVIS Unity"' in bootstrap
     assert "QGuiApplication.setApplicationVersion(WINDOWS_APP_VERSION)" in bootstrap

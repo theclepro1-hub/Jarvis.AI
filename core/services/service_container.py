@@ -48,8 +48,12 @@ class ServiceContainer:
         _boot_log("services:init:settings-service")
         self.startup = StartupManager()
         _boot_log("services:init:startup-manager")
-        self.settings.set("startup_enabled", self.startup.is_enabled())
-        _boot_log("services:init:startup-state")
+        startup_enabled = self.startup.is_enabled()
+        if bool(self.settings.get("startup_enabled", startup_enabled)) != startup_enabled:
+            self.settings.set("startup_enabled", startup_enabled)
+            _boot_log("services:init:startup-state:updated")
+        else:
+            _boot_log("services:init:startup-state:unchanged")
         self.registration = RegistrationService(self.settings)
         _boot_log("services:init:registration")
         self._reminders = None

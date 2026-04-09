@@ -64,7 +64,7 @@ def test_voice_service_warms_up_local_stt_backend(monkeypatch):
     voice = VoiceService(settings)
     calls: list[bool] = []
 
-    monkeypatch.setattr(voice.stt_service, "warm_up_local_backend", lambda: calls.append(True) or True)
+    monkeypatch.setattr(voice.stt_service, "warm_up_local_backend", lambda cancel_event=None: calls.append(True) or True)
 
     assert voice.warm_up_local_stt_backend() is True
     assert calls == [True]
@@ -91,3 +91,16 @@ def test_voice_service_reports_wake_timings_in_sequence():
 
     assert summary.index("pre-roll") < summary.index("wake→capture") < summary.index("capture") < summary.index("stt") < summary.index("handoff") < summary.index("total")
     assert "backend wake vosk · stt local_vosk" in summary
+
+
+def test_wake_service_stop_cancels_active_voice_pipeline():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    calls: list[str] = []
+
+    voice.cancel_active_pipeline = lambda: calls.append("cancelled")  # type: ignore[method-assign]
+
+    wake.stop()
+
+    assert calls == ["cancelled"]

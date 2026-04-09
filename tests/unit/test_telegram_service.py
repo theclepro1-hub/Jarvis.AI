@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import Future
 from pathlib import Path
 import time
 from types import SimpleNamespace
 
-from core.telegram.telegram_models import TelegramUpdate
+from core.telegram.telegram_models import TelegramDispatchResult, TelegramUpdate
 from core.telegram.telegram_service import DEFAULT_POLL_INTERVAL_MS, HttpTelegramTransport, TelegramService
 
 
@@ -416,6 +417,30 @@ def test_async_dispatch_retries_failed_update_before_acknowledging_it() -> None:
     assert transport.sent_messages == [(777, "ok:cmd retry")]
     assert offset_store.saved[-1] == 301
     assert transport.requested_offsets == [300, 300]
+
+
+def test_async_dispatch_exception_releases_pending_update_and_does_not_ack() -> None:
+    transport = FakeTransport([])
+    offset_store = FakeOffsetStore(offset=400)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=offset_store,
+        handler=lambda text: f"ok:{text}",
+    )
+    service._pending_update_ids_set.add(401)  # noqa: SLF001
+    service._inflight_dispatches = 1  # noqa: SLF001
+    service._offset = 400  # noqa: SLF001
+
+    future: Future[TelegramDispatchResult] = Future()
+    future.set_exception(RuntimeError("boom"))
+
+    service._dispatch_done(future, 401)  # noqa: SLF001
+
+    assert service.pending_dispatches() == 0
+    assert 401 not in service._pending_update_ids_set  # noqa: SLF001
+    assert offset_store.saved == []
+    assert "RuntimeError" in service.last_error()
 
 
 def test_http_transport_timeout_falls_back_on_invalid_network_setting() -> None:

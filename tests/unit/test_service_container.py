@@ -155,6 +155,42 @@ def test_service_container_telegram_transport_uses_safe_timeout_fallback() -> No
     assert transport.timeout_seconds == 12.0
 
 
+def test_service_container_does_not_write_startup_flag_when_unchanged(monkeypatch) -> None:
+    class FakeSettingsService:
+        def __init__(self, store) -> None:  # noqa: ANN001
+            self.store = store
+            self.values = {"startup_enabled": True}
+            self.set_calls: list[tuple[str, object]] = []
+
+        def get(self, key: str, default=None):  # noqa: ANN001, ANN201
+            return self.values.get(key, default)
+
+        def set(self, key: str, value) -> None:  # noqa: ANN001
+            self.values[key] = value
+            self.set_calls.append((key, value))
+
+        def get_registration(self) -> dict[str, object]:
+            return {}
+
+    class FakeStartupManager:
+        def is_enabled(self) -> bool:
+            return True
+
+    class FakeRegistrationService:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+    monkeypatch.setattr("core.services.service_container.SettingsStore", lambda: object())
+    monkeypatch.setattr("core.services.service_container.ChatHistoryStore", lambda: object())
+    monkeypatch.setattr("core.services.service_container.SettingsService", FakeSettingsService)
+    monkeypatch.setattr("core.services.service_container.StartupManager", FakeStartupManager)
+    monkeypatch.setattr("core.services.service_container.RegistrationService", FakeRegistrationService)
+
+    container = ServiceContainer()
+
+    assert container.settings.set_calls == []
+
+
 class _FakeSettings:
     def __init__(self) -> None:
         self._registration = {}

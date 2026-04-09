@@ -89,14 +89,14 @@ def test_stt_service_local_chain_falls_back_to_vosk(tmp_path):
     (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
     service = STTService(settings, local_model_path=model_path)
     service._faster_whisper_available = lambda: True  # noqa: SLF001
-    service._transcribe_with_local_faster_whisper = lambda _raw: TranscriptionResult(  # noqa: SLF001
+    service._transcribe_with_local_faster_whisper = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
         status="stt_failed",
         detail="fw failed",
         engine="local_faster_whisper",
         backend_trace=("local_faster_whisper",),
         latency_ms=120.0,
     )
-    service._transcribe_with_local_vosk = lambda _raw: TranscriptionResult(  # noqa: SLF001
+    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
         status="ok",
         text="открой параметры",
         detail="ok",
@@ -150,9 +150,9 @@ def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(mo
     monkeypatch.setattr(
         service,
         "_transcribe_with_local_faster_whisper",
-        lambda _raw: (_ for _ in ()).throw(AssertionError("faster-whisper should be skipped")),
+        lambda _raw, _cancel_event=None: (_ for _ in ()).throw(AssertionError("faster-whisper should be skipped")),
     )
-    service._transcribe_with_local_vosk = lambda _raw: TranscriptionResult(  # noqa: SLF001
+    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
         status="ok",
         text="открой проводник",
         detail="ok",
@@ -166,6 +166,42 @@ def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(mo
     assert result.ok is True
     assert result.text == "открой проводник"
     assert result.backend_trace == ("local_vosk",)
+
+
+def test_stt_service_balance_mode_prefers_vosk_before_heavier_whisper(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "auto")
+    settings.set("voice_mode", "balance")
+    settings.set("stt_local_model", str(tmp_path / "fw-model"))
+    model_path = tmp_path / "vosk-model"
+    model_path.mkdir(parents=True)
+    (tmp_path / "fw-model").mkdir(parents=True)
+    (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
+    service = STTService(settings, local_model_path=model_path)
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
+    order: list[str] = []
+
+    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: order.append("local_vosk") or TranscriptionResult(  # noqa: SLF001
+        status="ok",
+        text="открой параметры",
+        detail="ok",
+        engine="local_vosk",
+        backend_trace=("local_vosk",),
+        latency_ms=20.0,
+    )
+    service._transcribe_with_local_faster_whisper = lambda _raw, _cancel_event=None: order.append("local_faster_whisper") or TranscriptionResult(  # noqa: SLF001
+        status="ok",
+        text="открой параметры",
+        detail="ok",
+        engine="local_faster_whisper",
+        backend_trace=("local_faster_whisper",),
+        latency_ms=60.0,
+    )
+
+    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
+
+    assert result.ok is True
+    assert order == ["local_vosk"]
 
 
 def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeypatch, tmp_path):
@@ -203,6 +239,21 @@ def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeyp
     assert len(constructor_calls) == 2
     assert suite_elapsed < 0.35
     assert max(elapsed.values()) < 0.35
+
+
+def test_stt_service_cancels_before_entering_backend(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "local")
+    model_path = tmp_path / "vosk-model"
+    model_path.mkdir(parents=True)
+    service = STTService(settings, local_model_path=model_path)
+    cancelled = threading.Event()
+    cancelled.set()
+
+    result = service.transcribe_pcm_bytes(b"\x00" * 3200, cancel_event=cancelled)
+
+    assert result.status == "cancelled"
+    assert result.detail == "Запись остановлена."
 
 
 def test_stt_service_normalizes_whitespace_and_repeated_punctuation(tmp_path):
