@@ -107,6 +107,29 @@ def test_auto_mode_falls_back_after_timeout() -> None:
     ]
 
 
+def test_generate_reply_result_reports_stage_and_timing_hint() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.groq.com/openai/v1": "чёткий ответ",
+    }
+    service = AIService(
+        FakeSettings({"ai_mode": "fast"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    stages: list[str] = []
+    result = service.generate_reply_result("расскажи", status_callback=stages.append)
+
+    assert result.text == "чёткий ответ"
+    assert result.mode == "fast"
+    assert result.provider == "groq"
+    assert result.provider_label == "Groq"
+    assert result.elapsed_ms >= 0
+    assert result.fallback_used is False
+    assert stages and stages[0].startswith("Быстрый режим: Groq")
+
+
 def test_quality_mode_prioritizes_quality_plan() -> None:
     service = AIService(FakeSettings({"ai_mode": "quality"}))
 

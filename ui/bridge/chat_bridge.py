@@ -16,8 +16,9 @@ class ChatBridge(QObject):
     queueChanged = Signal()
     thinkingChanged = Signal()
     thinkingLabelChanged = Signal()
+    lastResponseHintChanged = Signal()
     saveHistoryEnabledChanged = Signal()
-    workerReplyReady = Signal(str, str)
+    workerReplyReady = Signal(str, str, str)
     workerStatusReady = Signal(str)
 
     def __init__(self, state, services, app_bridge) -> None:
@@ -31,6 +32,7 @@ class ChatBridge(QObject):
         self._app_catalog: list[dict[str, str]] = []
         self._thinking = False
         self._thinking_label = ""
+        self._last_response_hint = ""
         self._initial_state_hydrated = False
         self._inflight_signatures: set[str] = set()
         self._recent_submissions: dict[str, float] = {}
@@ -64,6 +66,10 @@ class ChatBridge(QObject):
     @Property(str, notify=thinkingLabelChanged)
     def thinkingLabel(self) -> str:
         return self._thinking_label
+
+    @Property(str, notify=lastResponseHintChanged)
+    def lastResponseHint(self) -> str:
+        return self._last_response_hint
 
     @Property(bool, notify=saveHistoryEnabledChanged)
     def saveHistoryEnabled(self) -> bool:
@@ -106,11 +112,16 @@ class ChatBridge(QObject):
         self._queue_items = route.queue_items
         self.queueChanged.emit()
 
+        if route.kind == "local" and self._should_promote_local_route_to_ai(route):
+            self._start_ai_resolution(clean, signature, route=route)
+            return
+
         if route.kind == "local":
             self.state.status = "Выполняю локально"
             self._thinking = False
             self.thinkingChanged.emit()
             self._set_status_stage("")
+            self._set_last_response_hint("")
             if route.execution_result is None and not route.assistant_lines:
                 self._queue_items = []
                 self.queueChanged.emit()
@@ -124,12 +135,7 @@ class ChatBridge(QObject):
             self._release_submission(signature)
             return
 
-        self._thinking = True
-        self.thinkingChanged.emit()
-        self._set_status_stage("Отправляю запрос в ИИ...")
-        ai_text = " ".join(route.commands).strip() if route.commands else clean
-        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text, signature), daemon=True)
-        thread.start()
+        self._start_ai_resolution(clean, signature, route=route)
 
     @Slot(str)
     def triggerQuickAction(self, action_id: str) -> None:
@@ -170,19 +176,32 @@ class ChatBridge(QObject):
             self._inflight_signatures.clear()
             self._recent_submissions.clear()
         self._set_status_stage("")
+        self._set_last_response_hint("")
         self._initial_state_hydrated = True
         self.messagesChanged.emit()
 
     def _resolve_ai_reply(self, text: str, signature: str) -> None:
-        self.workerStatusReady.emit("Жду ответ ИИ...")
+        self.workerStatusReady.emit("Готовлю ответ ИИ…")
         history = self._messages[:-1]
+        reply_hint = ""
         try:
-            reply = self.services.ai.generate_reply(text, history)
+            ai_service = self.services.ai
+            if hasattr(ai_service, "generate_reply_result"):
+                result = ai_service.generate_reply_result(
+                    text,
+                    history,
+                    status_callback=self.workerStatusReady.emit,
+                )
+                reply = result.text
+                reply_hint = self._format_ai_response_hint(result)
+            else:
+                reply = ai_service.generate_reply(text, history)
         except Exception as exc:  # noqa: BLE001
             reply = f"ИИ временно недоступен: {type(exc).__name__}"
-        self.workerReplyReady.emit(reply, signature)
+            reply_hint = ""
+        self.workerReplyReady.emit(reply, signature, reply_hint)
 
-    def _append_assistant_message(self, text: str, signature: str = "") -> None:
+    def _append_assistant_message(self, text: str, signature: str = "", reply_hint: str = "") -> None:
         self._append_message("assistant", text)
         self._speak_assistant_text(text)
         self._queue_items = []
@@ -192,6 +211,7 @@ class ChatBridge(QObject):
         self._thinking = False
         self.thinkingChanged.emit()
         self._set_status_stage("")
+        self._set_last_response_hint(reply_hint)
         self.state.status = "Готов"
 
     def _append_local_result(self, route) -> None:
@@ -369,6 +389,69 @@ class ChatBridge(QObject):
         self.thinkingLabelChanged.emit()
         if self._thinking_label:
             self.state.status = self._thinking_label
+
+    def _set_last_response_hint(self, text: str) -> None:
+        self._last_response_hint = str(text or "").strip()
+        self.lastResponseHintChanged.emit()
+
+    def _start_ai_resolution(self, original_text: str, signature: str, *, route=None) -> None:  # noqa: ANN001
+        self._thinking = True
+        self.thinkingChanged.emit()
+        self._set_last_response_hint("")
+        self._set_status_stage(self._initial_ai_stage_label(route))
+        ai_text = " ".join(route.commands).strip() if route is not None and route.commands else original_text
+        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text, signature), daemon=True)
+        thread.start()
+
+    def _should_promote_local_route_to_ai(self, route) -> bool:  # noqa: ANN001
+        execution = getattr(route, "execution_result", None)
+        if execution is None or not getattr(execution, "requires_ai", False):
+            return False
+        steps = list(getattr(execution, "steps", []) or [])
+        if not steps:
+            return True
+        if any(bool(getattr(step, "supported", False)) for step in steps):
+            return False
+        if any(
+            str(getattr(step, "status", "")) == "needs_input" or str(getattr(step, "kind", "")) == "clarify"
+            for step in steps
+        ):
+            return False
+        return True
+
+    def _initial_ai_stage_label(self, route) -> str:  # noqa: ANN001
+        settings = getattr(self.services, "settings", None)
+        mode = "auto"
+        provider = "auto"
+        if settings is not None and hasattr(settings, "get"):
+            mode = str(settings.get("ai_mode", "auto") or "auto").strip().lower()
+            provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
+        if route is not None and getattr(route, "execution_result", None) is not None:
+            return "Локально не хватило уверенности, подключаю ИИ…"
+        if mode == "fast" or provider in {"groq", "cerebras"}:
+            return "Быстрый режим: готовлю ответ…"
+        if mode == "quality" or provider == "gemini":
+            return "Режим качества: готовлю ответ…"
+        if mode == "local":
+            return "Локальный режим: готовлю ответ…"
+        return "Готовлю ответ ИИ…"
+
+    def _format_ai_response_hint(self, result) -> str:  # noqa: ANN001
+        provider_label = str(getattr(result, "provider_label", "") or "").strip()
+        elapsed_ms = int(getattr(result, "elapsed_ms", 0) or 0)
+        mode = str(getattr(result, "mode", "") or "").strip().lower()
+        if not provider_label or elapsed_ms <= 0:
+            return ""
+        mode_label = {
+            "fast": "Быстро",
+            "quality": "Качество",
+            "auto": "Авто",
+            "local": "Локально",
+        }.get(mode, "ИИ")
+        hint = f"{mode_label}: {provider_label} · {elapsed_ms / 1000.0:.1f} с"
+        if bool(getattr(result, "fallback_used", False)):
+            return f"{hint} (резерв)"
+        return hint
 
     def _message_signature(self, text: str) -> str:
         return " ".join(str(text or "").strip().casefold().split())

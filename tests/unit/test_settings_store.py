@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 
 from core.settings.settings_store import DEFAULT_SETTINGS, SettingsStore
@@ -132,3 +133,36 @@ def test_delete_all_data_clears_only_safe_runtime_dir(monkeypatch, tmp_path) -> 
     assert outside_file.exists()
     assert store.base_dir.exists()
     assert list(store.base_dir.iterdir()) == []
+
+
+def test_settings_store_concurrent_saves_keep_valid_json(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store_a = SettingsStore()
+    store_b = SettingsStore()
+
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def writer(store: SettingsStore, theme_mode: str, pinned: str) -> None:
+        try:
+            payload = json.loads(json.dumps(DEFAULT_SETTINGS))
+            payload["theme_mode"] = theme_mode
+            payload["pinned_commands"] = [pinned]
+            barrier.wait(timeout=2.0)
+            store.save(payload)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread_a = threading.Thread(target=writer, args=(store_a, "midnight", "youtube"))
+    thread_b = threading.Thread(target=writer, args=(store_b, "steel", "discord"))
+    thread_a.start()
+    thread_b.start()
+    thread_a.join(timeout=5.0)
+    thread_b.join(timeout=5.0)
+
+    assert not errors
+    raw = store_a.settings_path.read_text(encoding="utf-8")
+    parsed = json.loads(raw)
+    assert parsed["theme_mode"] in {"midnight", "steel"}
+    assert parsed["pinned_commands"] in (["youtube"], ["discord"])
+    assert list(store_a.base_dir.glob("*.tmp")) == []

@@ -55,6 +55,100 @@ NATURAL_ALIAS_TEMPLATES = (
     ),
 )
 OPEN_SEQUENCE_CONNECTOR_PATTERN = re.compile(r"^(?:[\s,.:;!?-]+|и\s+|а\s+ещ[её]\s+|потом\s+)+", re.IGNORECASE)
+SYSTEM_TARGET_IDS = {
+    "system_settings",
+    "system_explorer",
+    "system_task_manager",
+    "system_control_panel",
+    "folder_desktop",
+    "folder_documents",
+    "folder_downloads",
+    "folder_pictures",
+    "folder_videos",
+}
+SYSTEM_ACTION_ALIASES: dict[str, tuple[str, ...]] = {
+    "shutdown": (
+        "выключи компьютер",
+        "выключи пк",
+        "выключи комп",
+        "выключи систему",
+        "выключить компьютер",
+        "выключить пк",
+        "выруби компьютер",
+        "выруби пк",
+        "выруби комп",
+        "заверши работу",
+        "shutdown",
+    ),
+    "restart": (
+        "перезагрузи компьютер",
+        "перезагрузи пк",
+        "перезагрузи комп",
+        "перезагрузи ноутбук",
+        "перезагрузка",
+        "перезапусти систему",
+        "перезапусти компьютер",
+        "restart",
+        "reboot",
+    ),
+    "sleep": (
+        "режим сна",
+        "в сон",
+        "усыпи компьютер",
+        "усыпи пк",
+        "усыпи комп",
+        "переведи компьютер в сон",
+        "переведи в сон",
+        "отправь компьютер в сон",
+        "sleep",
+    ),
+    "hibernate": (
+        "гибернация",
+        "в гибернацию",
+        "отправь компьютер в гибернацию",
+        "переведи компьютер в гибернацию",
+        "усыпи компьютер надолго",
+        "hibernate",
+    ),
+    "logoff": (
+        "выйди из системы",
+        "выйди из учетной записи",
+        "выйди из учётной записи",
+        "выход из системы",
+        "разлогинь",
+        "разлогинься",
+        "логаут",
+        "log off",
+        "sign out",
+        "logout",
+    ),
+    "lock": (
+        "заблокируй экран",
+        "заблокируй компьютер",
+        "заблокируй пк",
+        "блокируй экран",
+        "локни экран",
+        "lock screen",
+        "lock workstation",
+    ),
+}
+SYSTEM_ACTION_TITLES = {
+    "shutdown": "Выключаю компьютер",
+    "restart": "Перезагружаю компьютер",
+    "sleep": "Перевожу компьютер в режим сна",
+    "hibernate": "Перевожу компьютер в гибернацию",
+    "logoff": "Выхожу из системы",
+    "lock": "Блокирую экран",
+}
+SYSTEM_ACTION_CONFIRM_REQUIRED = {"shutdown", "restart", "sleep", "hibernate", "logoff"}
+SYSTEM_ACTION_CONFIRM_PROMPTS = {
+    "shutdown": "Подтвердите выключение: скажите «выключи компьютер подтверждаю».",
+    "restart": "Подтвердите перезагрузку: скажите «перезагрузи компьютер подтверждаю».",
+    "sleep": "Подтвердите режим сна: скажите «режим сна подтверждаю».",
+    "hibernate": "Подтвердите гибернацию: скажите «гибернация подтверждаю».",
+    "logoff": "Подтвердите выход из системы: скажите «выйди из системы подтверждаю».",
+}
+SYSTEM_POLITE_PREFIXES = ("пожалуйста ", "ну ", "давай ", "jarvis ", "джарвис ")
 
 
 class ActionRegistry:
@@ -68,7 +162,7 @@ class ActionRegistry:
             {
                 "id": "youtube",
                 "title": "YouTube",
-                "aliases": ["youtube", "ютуб", "you tube"],
+                "aliases": ["youtube", "ютуб", "ютубе", "ютюб", "ютубчик", "you tube"],
                 "kind": "url",
                 "target": "https://www.youtube.com",
                 "category": "web",
@@ -76,7 +170,7 @@ class ActionRegistry:
             {
                 "id": "browser",
                 "title": "Браузер",
-                "aliases": ["браузер", "browser", "chrome", "гугл"],
+                "aliases": ["браузер", "браузере", "browser", "chrome", "гугл", "гугле", "интернет"],
                 "kind": "url",
                 "target": "https://www.google.com",
                 "category": "web",
@@ -84,7 +178,7 @@ class ActionRegistry:
             {
                 "id": "discord",
                 "title": "Discord",
-                "aliases": ["discord", "дискорд"],
+                "aliases": ["discord", "дискорд", "дискорде", "дискордик"],
                 "kind": "uri",
                 "target": "discord://",
                 "category": "launcher",
@@ -92,7 +186,7 @@ class ActionRegistry:
             {
                 "id": "steam",
                 "title": "Steam",
-                "aliases": ["steam", "стим", "с тим"],
+                "aliases": ["steam", "стим", "стиме", "стимчик", "с тим"],
                 "kind": "uri",
                 "target": "steam://open/main",
                 "category": "launcher",
@@ -100,7 +194,7 @@ class ActionRegistry:
             {
                 "id": "music",
                 "title": "Музыка",
-                "aliases": ["музыка", "музыку", "music", "плеер"],
+                "aliases": ["музыка", "музыку", "музычку", "музычка", "music", "плеер"],
                 "kind": "uri",
                 "target": "mswindowsmusic:",
                 "category": "music",
@@ -109,7 +203,16 @@ class ActionRegistry:
             {
                 "id": "system_settings",
                 "title": "Параметры Windows",
-                "aliases": ["параметры", "настройки windows", "windows settings", "settings"],
+                "aliases": [
+                    "параметры",
+                    "настройки",
+                    "настройки windows",
+                    "настройки виндовс",
+                    "параметры windows",
+                    "параметры виндовс",
+                    "windows settings",
+                    "settings",
+                ],
                 "kind": "uri",
                 "target": "ms-settings:",
                 "category": "system",
@@ -117,7 +220,7 @@ class ActionRegistry:
             {
                 "id": "system_explorer",
                 "title": "Проводник",
-                "aliases": ["проводник", "explorer", "файлы", "файловый менеджер"],
+                "aliases": ["проводник", "проводнике", "explorer", "файлы", "файловый менеджер"],
                 "kind": "uri",
                 "target": "explorer.exe",
                 "category": "system",
@@ -149,7 +252,7 @@ class ActionRegistry:
             {
                 "id": "folder_documents",
                 "title": "Документы",
-                "aliases": ["документы", "documents"],
+                "aliases": ["документы", "documents", "папка документов", "папку документов"],
                 "kind": "shell",
                 "target": "documents",
                 "category": "system",
@@ -157,7 +260,7 @@ class ActionRegistry:
             {
                 "id": "folder_downloads",
                 "title": "Загрузки",
-                "aliases": ["загрузки", "downloads"],
+                "aliases": ["загрузки", "downloads", "папка загрузок", "папку загрузок"],
                 "kind": "shell",
                 "target": "downloads",
                 "category": "system",
@@ -256,6 +359,48 @@ class ActionRegistry:
             return [], "Музыкальное приложение не найдено. Добавьте его во вкладке «Приложения»."
 
         return self.find_items(target_text), ""
+
+    def resolve_system_action(self, command: str) -> dict[str, object] | None:
+        normalized = self._normalize_system_command(command)
+        if not normalized:
+            return None
+
+        action = self._detect_system_action(normalized)
+        if action:
+            return {
+                "action": action,
+                "mode": "power",
+                "title": SYSTEM_ACTION_TITLES[action],
+                "detail": "Системная команда отправлена.",
+                "requires_confirmation": action in SYSTEM_ACTION_CONFIRM_REQUIRED,
+                "confirmation_prompt": SYSTEM_ACTION_CONFIRM_PROMPTS.get(action, ""),
+            }
+
+        if not any(normalized.startswith(f"{verb} ") for verb in OPEN_VERBS):
+            return None
+
+        items, question = self.resolve_open_command(command)
+        if question or len(items) != 1:
+            return None
+
+        item = items[0]
+        if not self.is_system_item(item):
+            return None
+
+        return {
+            "action": "open_target",
+            "mode": "open",
+            "title": f"Открываю {item['title']}",
+            "detail": str(item.get("target", "")),
+            "target": str(item.get("target", "")),
+            "target_kind": str(item.get("kind", "file")),
+            "item_id": str(item.get("id", "")),
+        }
+
+    def is_system_item(self, item: dict[str, str]) -> bool:
+        item_id = str(item.get("id", "")).strip()
+        category = str(item.get("category", "")).casefold()
+        return category == "system" or item_id in SYSTEM_TARGET_IDS
 
     def can_resolve_open_target(self, text: str) -> bool:
         clean = self._consume_open_sequence_connectors(text)
@@ -603,6 +748,20 @@ class ActionRegistry:
             if lower.startswith(prefix):
                 return command[len(prefix) :].strip()
         return command.strip()
+
+    def _normalize_system_command(self, command: str) -> str:
+        clean = re.sub(r"\s+", " ", str(command or "").strip(" .,!?:;")).casefold()
+        for prefix in SYSTEM_POLITE_PREFIXES:
+            if clean.startswith(prefix):
+                clean = clean[len(prefix) :].lstrip()
+                break
+        return clean
+
+    def _detect_system_action(self, text: str) -> str | None:
+        for action, aliases in SYSTEM_ACTION_ALIASES.items():
+            if any(text == alias or text.startswith(f"{alias} ") for alias in aliases):
+                return action
+        return None
 
     def _looks_like_generic_music(self, target_text: str) -> bool:
         return any(word in target_text for word in MUSIC_WORDS) and not any(

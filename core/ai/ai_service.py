@@ -52,6 +52,18 @@ class NetworkSettings:
     timeout_seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class AIReplyResult:
+    text: str
+    mode: str
+    provider: str = ""
+    provider_label: str = ""
+    model: str = ""
+    elapsed_ms: int = 0
+    fallback_used: bool = False
+    error: str = ""
+
+
 PROVIDERS: dict[str, ProviderSpec] = {
     "groq": ProviderSpec(
         key="groq",
@@ -128,19 +140,42 @@ class AIService:
         self._sleep = sleep
 
     def generate_reply(self, user_text: str, history: list[dict[str, str]] | None = None) -> str:
+        return self.generate_reply_result(user_text, history).text
+
+    def generate_reply_result(
+        self,
+        user_text: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> AIReplyResult:
         ai_mode = self._ai_mode()
+        started_at = time.perf_counter()
         if ai_mode == "local":
-            return self._local_unavailable_reply()
+            reply = self._local_unavailable_reply()
+            return AIReplyResult(
+                text=reply,
+                mode=ai_mode,
+                provider="local",
+                provider_label="Локально",
+                elapsed_ms=self._elapsed_ms(started_at),
+                error="local_unavailable",
+            )
 
         messages = self._build_messages(user_text, history or [])
         attempts = self.provider_plan(ai_mode)
         if not attempts:
-            return self._fallback_reply(user_text)
+            reply = self._fallback_reply(user_text)
+            return AIReplyResult(
+                text=reply,
+                mode=ai_mode,
+                elapsed_ms=self._elapsed_ms(started_at),
+                error="no_provider_attempts",
+            )
 
-        started_at = time.perf_counter()
         budget_seconds = self._mode_budget_seconds(ai_mode)
         last_error: str | None = None
-        for attempt in attempts:
+        for index, attempt in enumerate(attempts):
             elapsed = time.perf_counter() - started_at
             remaining_budget = budget_seconds - elapsed
             if remaining_budget <= 0:
@@ -150,6 +185,16 @@ class AIService:
             api_key = self._provider_api_key(spec)
             if not api_key:
                 continue
+            self._report_stage(
+                status_callback,
+                self._attempt_stage_label(
+                    ai_mode=ai_mode,
+                    spec=spec,
+                    model=attempt.model,
+                    attempt_index=index,
+                    attempts_total=len(attempts),
+                ),
+            )
 
             reply, error = self._try_provider(
                 spec,
@@ -160,10 +205,30 @@ class AIService:
                 budget_seconds=remaining_budget,
             )
             if reply:
-                return reply
+                return AIReplyResult(
+                    text=reply,
+                    mode=ai_mode,
+                    provider=spec.key,
+                    provider_label=spec.label,
+                    model=attempt.model,
+                    elapsed_ms=self._elapsed_ms(started_at),
+                    fallback_used=index > 0,
+                )
             last_error = error or last_error
+            if index < len(attempts) - 1:
+                next_spec = PROVIDERS[attempts[index + 1].provider]
+                self._report_stage(
+                    status_callback,
+                    self._fallback_stage_label(spec, next_spec),
+                )
 
-        return self._fallback_reply(user_text, last_error)
+        return AIReplyResult(
+            text=self._fallback_reply(user_text, last_error),
+            mode=ai_mode,
+            elapsed_ms=self._elapsed_ms(started_at),
+            fallback_used=len(attempts) > 1,
+            error=last_error or "",
+        )
 
     def provider_plan(self, ai_mode: str | None = None) -> list[ProviderAttempt]:
         mode = self._normalize_mode(ai_mode or self._ai_mode())
@@ -300,17 +365,49 @@ class AIService:
         if mode == "fast":
             return {
                 "temperature": 0.2,
-                "max_tokens": 180,
+                "max_tokens": 160,
             }
         if mode == "quality":
             return {
                 "temperature": 0.55,
-                "max_tokens": 520,
+                "max_tokens": 560,
             }
         return {
             "temperature": 0.35,
             "max_tokens": 300,
         }
+
+    def _attempt_stage_label(
+        self,
+        *,
+        ai_mode: str,
+        spec: ProviderSpec,
+        model: str,
+        attempt_index: int,
+        attempts_total: int,
+    ) -> str:
+        mode_label = {
+            "fast": "Быстрый режим",
+            "quality": "Качество",
+            "auto": "Авто-режим",
+            "local": "Локально",
+        }.get(ai_mode, "ИИ")
+        if attempts_total <= 1:
+            return f"{mode_label}: {spec.label}…"
+        return f"{mode_label}: {spec.label} ({attempt_index + 1}/{attempts_total})…"
+
+    def _fallback_stage_label(self, current: ProviderSpec, next_spec: ProviderSpec) -> str:
+        return f"{current.label} не ответил, переключаюсь на {next_spec.label}…"
+
+    def _report_stage(self, callback: Callable[[str], None] | None, text: str) -> None:
+        if callback is None:
+            return
+        clean = str(text or "").strip()
+        if clean:
+            callback(clean)
+
+    def _elapsed_ms(self, started_at: float) -> int:
+        return max(0, int((time.perf_counter() - started_at) * 1000))
 
     def _normalize_mode(self, value: str) -> str:
         if value in AI_MODES:

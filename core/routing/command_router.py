@@ -93,6 +93,11 @@ class CommandRouter:
                 )
                 continue
 
+            first_step = plan.steps[0] if plan.steps else None
+            if first_step is not None and (not first_step.supported or first_step.status in {"needs_input", "needs_ai"}):
+                clarification_steps.append(first_step)
+                continue
+
             actionable_plans.append(plan)
 
         if not actionable_plans and not clarification_steps and not unsupported:
@@ -388,6 +393,8 @@ class CommandRouter:
 
     def _preview_plan(self, plan: ExecutionPlan) -> list[ExecutionStep]:
         step = plan.steps[0]
+        if not step.supported or step.status in {"needs_input", "needs_ai", "failed"}:
+            return [step]
         if step.kind == "open_items":
             items = step.payload.get("items", [])
             preview_steps: list[ExecutionStep] = []

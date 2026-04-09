@@ -14,6 +14,12 @@ class FakeActions:
     def resolve_open_command(self, text: str):
         items = []
         lower = text.casefold()
+        if "параметры" in lower or "settings" in lower:
+            items.append({"id": "system_settings", "title": "Параметры Windows", "kind": "uri", "target": "ms-settings:"})
+        if "диспетчер задач" in lower or "task manager" in lower or "taskmgr" in lower:
+            items.append({"id": "system_task_manager", "title": "Диспетчер задач", "kind": "uri", "target": "taskmgr.exe"})
+        if "проводник" in lower or "explorer" in lower or "файлы" in lower:
+            items.append({"id": "system_explorer", "title": "Проводник", "kind": "uri", "target": "explorer.exe"})
         if "steam" in lower or "стим" in lower:
             items.append({"id": "steam", "title": "Steam", "kind": "uri", "target": "steam://open/main"})
         if "discord" in lower or "дискорд" in lower:
@@ -458,3 +464,91 @@ def test_command_router_runs_power_action_without_open_verb() -> None:
     assert pc_control.power == ["lock"]
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "power_action"
+def _broken_agent_test_command_router_aborts_voice_multi_action_when_one_target_needs_input() -> None:
+    router, actions, pc_control = make_router()
+
+    result = router.handle("РѕС‚РєСЂРѕР№ Р±СЂР°СѓР·РµСЂ СЋС‚СѓР± Рё РјСѓР·С‹РєСѓ", source="voice")
+
+    assert result.kind == "local"
+    assert result.assistant_lines[0].startswith("РЈС‚РѕС‡РЅРёС‚Рµ РєРѕРјР°РЅРґСѓ С†РµР»РёРєРѕРј.")
+    assert actions.opened == []
+    assert pc_control.media == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+
+
+def _broken_agent_test_command_router_preview_keeps_missing_target_out_of_executable_summary() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.preview("РѕС‚РєСЂРѕР№ Р±СЂР°СѓР·РµСЂ СЋС‚СѓР± Рё РјСѓР·С‹РєСѓ", source="voice")
+
+    assert result.kind == "preview"
+    assert result.assistant_lines[0].startswith("РЈС‚РѕС‡РЅРёС‚Рµ РєРѕРјР°РЅРґСѓ С†РµР»РёРєРѕРј.")
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+def test_command_router_aborts_voice_multi_action_when_one_target_needs_input_utf8() -> None:
+    router, actions, pc_control = make_router()
+
+    result = router.handle(
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 "
+        "\u044e\u0442\u0443\u0431 \u0438 \u043c\u0443\u0437\u044b\u043a\u0443",
+        source="voice",
+    )
+
+    assert result.kind == "local"
+    assert result.commands == [
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u044e\u0442\u0443\u0431",
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043c\u0443\u0437\u044b\u043a\u0443",
+    ]
+    assert result.assistant_lines == [
+        "\u0412\u044b\u043f\u043e\u043b\u043d\u044f\u044e 2 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f: YouTube, \u042f\u043d\u0434\u0435\u043a\u0441 \u041c\u0443\u0437\u044b\u043a\u0430"
+    ]
+    assert actions.opened == ["youtube", "yandex_music"]
+    assert pc_control.media == []
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
+
+
+def test_command_router_preview_keeps_missing_target_out_of_executable_summary_utf8() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.preview(
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 "
+        "\u044e\u0442\u0443\u0431 \u0438 \u043c\u0443\u0437\u044b\u043a\u0443",
+        source="voice",
+    )
+
+    assert result.kind == "preview"
+    assert result.commands == [
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u044e\u0442\u0443\u0431",
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043c\u0443\u0437\u044b\u043a\u0443",
+    ]
+    assert result.assistant_lines == [
+        "\u0412\u044b\u043f\u043e\u043b\u043d\u044e 2 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f: YouTube, \u042f\u043d\u0434\u0435\u043a\u0441 \u041c\u0443\u0437\u044b\u043a\u0430"
+    ]
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
+
+
+def test_command_router_opens_builtin_windows_settings_without_ai() -> None:
+    router, actions, pc_control = make_router()
+
+    result = router.handle("\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b")
+
+    assert result.kind == "local"
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+    assert actions.opened == ["system_settings"]
+    assert pc_control.opened_urls == []
+
+
+def test_command_router_opens_task_manager_without_ai() -> None:
+    router, actions, pc_control = make_router()
+
+    result = router.handle("\u043e\u0442\u043a\u0440\u043e\u0439 \u0434\u0438\u0441\u043f\u0435\u0442\u0447\u0435\u0440 \u0437\u0430\u0434\u0430\u0447")
+
+    assert result.kind == "local"
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+    assert actions.opened == ["system_task_manager"]
+    assert pc_control.opened_urls == []

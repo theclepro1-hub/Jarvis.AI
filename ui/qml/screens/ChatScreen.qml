@@ -111,6 +111,11 @@ Rectangle {
                 function nearBottom() {
                     return (contentHeight - (contentY + height)) <= 48
                 }
+                function scheduleFollowBottom() {
+                    if (followBottom) {
+                        followBottomTimer.restart()
+                    }
+                }
                 anchors.fill: parent
                 anchors.margins: 18
                 spacing: 16
@@ -120,19 +125,13 @@ Rectangle {
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
                 onCountChanged: {
-                    if (followBottom) {
-                        Qt.callLater(positionViewAtEnd)
-                    }
+                    scheduleFollowBottom()
                 }
                 onContentHeightChanged: {
-                    if (followBottom) {
-                        Qt.callLater(positionViewAtEnd)
-                    }
+                    scheduleFollowBottom()
                 }
                 onHeightChanged: {
-                    if (followBottom) {
-                        Qt.callLater(positionViewAtEnd)
-                    }
+                    scheduleFollowBottom()
                 }
                 onMovementStarted: followBottom = nearBottom()
                 onFlickStarted: followBottom = nearBottom()
@@ -148,7 +147,18 @@ Rectangle {
                         contentX = 0
                     }
                 }
-                Component.onCompleted: Qt.callLater(positionViewAtEnd)
+                Component.onCompleted: scheduleFollowBottom()
+
+                Timer {
+                    id: followBottomTimer
+                    interval: 0
+                    repeat: false
+                    onTriggered: {
+                        if (listView.followBottom) {
+                            listView.positionViewAtEnd()
+                        }
+                    }
+                }
 
                 delegate: Item {
                     required property var modelData
@@ -249,8 +259,6 @@ Rectangle {
                         }
                     }
                 }
-
-                ScrollBar.vertical: AppScrollBar {}
             }
         }
 
@@ -260,6 +268,7 @@ Rectangle {
             Layout.preferredHeight: 96
             busy: chatBridge.thinking
             busyHint: chatBridge.thinkingLabel
+            idleHint: chatBridge.lastResponseHint
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint
             onSubmit: (text) => chatBridge.sendMessage(text)

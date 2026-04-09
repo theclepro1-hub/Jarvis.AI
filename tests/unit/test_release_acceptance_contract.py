@@ -9,6 +9,7 @@ from core.models.action_models import ActionOutcome
 from core.routing.batch_router import BatchRouter
 from core.routing.command_router import CommandRouter
 from core.settings.settings_service import SettingsService
+from core.updates.update_service import UpdateAsset, UpdateService
 from core.voice.voice_service import VoiceService
 from ui.bridge.voice_bridge import VoiceBridge
 
@@ -219,3 +220,49 @@ def test_release_gate_local_commands_do_not_call_llm() -> None:
 
     assert result.kind == "local"
     assert actions.opened == ["youtube"]
+
+
+def test_release_gate_updater_is_honest_about_installer_only_flow() -> None:
+    service = UpdateService(settings=None, current_version="22.3.0")
+    service.assets = [
+        UpdateAsset(
+            name="JarvisAi_Unity_22.3.5_windows_onefile.exe",
+            browser_download_url="https://example.test/onefile.exe",
+        ),
+        UpdateAsset(
+            name="JarvisAi_Unity_22.3.5_windows_portable.zip",
+            browser_download_url="https://example.test/portable.zip",
+        ),
+    ]
+    service.latest_version_value = "22.3.5"
+    service.release_url_value = "https://example.test/releases/v22.3.5"
+    service.update_available_value = True
+
+    snapshot = service.status_snapshot()
+
+    assert snapshot["can_apply"] is False
+    assert snapshot["preferred_installer_asset"] == ""
+    assert snapshot["manual_download_required"] is True
+    assert snapshot["apply_mode"] == "manual"
+    assert "только вручную" in snapshot["apply_hint"]
+
+
+def test_release_gate_updater_exposes_installer_contract_when_available() -> None:
+    service = UpdateService(settings=None, current_version="22.3.0")
+    service.assets = [
+        UpdateAsset(
+            name="JarvisAi_Unity_22.3.5_windows_installer.exe",
+            browser_download_url="https://example.test/installer.exe",
+        )
+    ]
+    service.latest_version_value = "22.3.5"
+    service.release_url_value = "https://example.test/releases/v22.3.5"
+    service.update_available_value = True
+
+    snapshot = service.status_snapshot()
+
+    assert snapshot["can_apply"] is True
+    assert snapshot["preferred_installer_asset"] == "JarvisAi_Unity_22.3.5_windows_installer.exe"
+    assert snapshot["manual_download_required"] is False
+    assert snapshot["apply_mode"] == "installer"
+    assert snapshot["installer_launch_arguments"] == ["/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"]

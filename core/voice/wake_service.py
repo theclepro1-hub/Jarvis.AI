@@ -10,9 +10,10 @@ from pathlib import Path
 import sys
 
 import sounddevice as sd
-from vosk import KaldiRecognizer, Model, SetLogLevel
+from vosk import SetLogLevel
 
 from core.routing.text_rules import STRICT_WAKE_ALIASES, normalize_text, strip_leading_wake_prefix
+from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
 
 
 MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
@@ -89,8 +90,8 @@ class WakeService:
     def _run(self) -> None:
         try:
             self._set_phase("preparing", "Готовлю слово активации", ready=False)
-            model = Model(str(self.model_path))
-            recognizer = self._new_recognizer(model)
+            load_vosk_model(self.model_path)
+            recognizer = self._new_recognizer()
 
             audio_queue: queue.Queue[bytes] = queue.Queue()
 
@@ -150,9 +151,9 @@ class WakeService:
                 return candidate
         return candidates[-1]
 
-    def _new_recognizer(self, model: Model) -> KaldiRecognizer:
+    def _new_recognizer(self):
         grammar = [*STRICT_WAKE_ALIASES, "[unk]"]
-        return KaldiRecognizer(model, self.SAMPLE_RATE, json.dumps(grammar, ensure_ascii=False))
+        return new_vosk_recognizer(self.model_path, self.SAMPLE_RATE, grammar=grammar)
 
     def _contains_wake(self, payload: str, partial: bool = False) -> bool:
         try:

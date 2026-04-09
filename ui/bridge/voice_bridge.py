@@ -26,6 +26,7 @@ class VoiceBridge(QObject):
     recordingChanged = Signal()
     recordingHintChanged = Signal()
     voiceTestChanged = Signal()
+    voiceTimingsChanged = Signal()
     voiceTestTextReady = Signal(str)
     voiceTestNoteReady = Signal(str)
     voiceTestFinished = Signal()
@@ -222,6 +223,10 @@ class VoiceBridge(QObject):
     def recordingHint(self) -> str:
         return self._recording_hint
 
+    @Property("QVariantMap", notify=voiceTimingsChanged)
+    def voiceTimings(self) -> dict[str, object]:
+        return self.services.voice.latest_wake_metrics()
+
     @Slot()
     def runWakeWordTest(self) -> None:
         self._test_result = self.services.voice.test_wake_word()
@@ -328,6 +333,8 @@ class VoiceBridge(QObject):
         self.services.wake.stop()
 
     def _deliver_transcribed_text(self, text: str) -> None:
+        self.services.voice.mark_wake_route_handoff()
+        self.voiceTimingsChanged.emit()
         if self._chat_bridge is not None:
             self._chat_bridge.submitTranscribedText(text)
 
@@ -389,6 +396,7 @@ class VoiceBridge(QObject):
     def _emit_voice_status_change(self) -> None:
         self.summaryChanged.emit()
         self.statusChanged.emit()
+        self.voiceTimingsChanged.emit()
 
     def _wake_failure_note(self, result) -> str:  # noqa: ANN001
         status = str(getattr(result, "status", ""))

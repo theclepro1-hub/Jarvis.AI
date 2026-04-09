@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from PySide6.QtGui import QGuiApplication
 
+from core.ai.ai_service import AIReplyResult
 from core.models.action_models import ExecutionResult, ExecutionStep
 from ui.bridge.chat_bridge import ChatBridge
 
@@ -54,6 +55,21 @@ class _Ai:
     def generate_reply(self, _text: str, _history: list[dict[str, object]]) -> str:
         self.received.append(_text)
         return f"AI fallback: {_text}"
+
+
+class _AiWithResult(_Ai):
+    def generate_reply_result(self, text: str, _history: list[dict[str, object]], *, status_callback=None) -> AIReplyResult:  # noqa: ANN001
+        if status_callback is not None:
+            status_callback("Быстрый режим: Groq…")
+        self.received.append(text)
+        return AIReplyResult(
+            text=f"AI fallback: {text}",
+            mode="fast",
+            provider="groq",
+            provider_label="Groq",
+            model="openai/gpt-oss-20b",
+            elapsed_ms=145,
+        )
 
 
 class _Voice:
@@ -222,6 +238,22 @@ def test_chat_bridge_uses_cleaned_ai_text_after_wake_like_prefix(monkeypatch) ->
 
     assert services.ai.received == ["как дела"]
     assert bridge.messages[-1]["text"] == "AI fallback: как дела"
+
+
+def test_chat_bridge_exposes_last_response_hint_from_ai_result(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["как дела"], assistant_lines=[], queue_items=["как дела"], execution_result=None)
+    bridge, services = _bridge_for(route)
+    services.ai = _AiWithResult()
+
+    bridge.sendMessage("как дела")
+
+    assert services.ai.received == ["как дела"]
+    assert bridge.lastResponseHint == "Быстро: Groq · 0.1 с"
+    assert bridge.thinkingLabel == ""
 
 
 def test_chat_bridge_ignores_empty_local_noise_route() -> None:

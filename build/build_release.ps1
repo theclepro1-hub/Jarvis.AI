@@ -63,11 +63,27 @@ function Assert-NativeSuccess {
     }
 }
 
+function Assert-TextContains {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text,
+        [Parameter(Mandatory = $true)]
+        [string]$Needle,
+        [Parameter(Mandatory = $true)]
+        [string]$Label
+    )
+
+    if ($Text -notlike "*$Needle*") {
+        throw "$Label is missing required marker: $Needle"
+    }
+}
+
 if (!(Test-Path $venvPython)) {
     throw "Virtualenv Python not found: $venvPython"
 }
 
 $version = (& $venvPython -c "from core.updates.update_service import UpdateService; print(UpdateService().current_version)").Trim()
+Write-Host "RELEASE_VERSION $version"
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionInfoFile) | Out-Null
 $versionInfoContent = @"
@@ -228,13 +244,16 @@ DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\JarvisAi_Unity.exe
 UninstallDisplayName=JARVIS Unity
 AppMutex=JarvisAi_Unity_22_instance_mutex
+SetupMutex=JarvisAi_Unity_22_setup_mutex
 CloseApplications=yes
+CloseApplicationsFilter=JarvisAi_Unity.exe
 RestartApplications=yes
 VersionInfoCompany=theclepro1-hub
 VersionInfoDescription=JARVIS Unity desktop assistant
 VersionInfoProductName=JARVIS Unity
 VersionInfoProductVersion=$version
 VersionInfoVersion=$version.0
+VersionInfoTextVersion=$version
 OutputDir=$releaseDir
 OutputBaseFilename=JarvisAi_Unity_$version`_windows_installer
 SetupIconFile=$iconPath
@@ -256,6 +275,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "$portableDistPath\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[UninstallDelete]
+Type: filesandordirs; Name: "{app}"
+
 [Icons]
 Name: "{group}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; AppUserModelID: "theclepro1.JarvisAiUnity"
 Name: "{group}\Uninstall JARVIS Unity"; Filename: "{uninstallexe}"
@@ -264,6 +286,11 @@ Name: "{autodesktop}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; Tasks:
 [Run]
 Filename: "{app}\JarvisAi_Unity.exe"; Description: "{cm:LaunchProgram,JARVIS Unity}"; Flags: nowait postinstall skipifsilent
 "@
+    Assert-TextContains -Text $installerScriptContent -Needle 'AppUserModelID: "theclepro1.JarvisAiUnity"' -Label "Installer shortcut identity"
+    Assert-TextContains -Text $installerScriptContent -Needle "SetupMutex=JarvisAi_Unity_22_setup_mutex" -Label "Installer mutex"
+    Assert-TextContains -Text $installerScriptContent -Needle "CloseApplicationsFilter=JarvisAi_Unity.exe" -Label "Installer close filter"
+    Assert-TextContains -Text $installerScriptContent -Needle "VersionInfoTextVersion=$version" -Label "Installer version text"
+    Assert-TextContains -Text $installerScriptContent -Needle 'Type: filesandordirs; Name: "{app}"' -Label "Installer uninstall cleanup"
     Set-Content -LiteralPath $installerScript -Value $installerScriptContent -Encoding UTF8
     & $innoCompiler /Qp $installerScript
     Assert-NativeSuccess -Step "Inno Setup installer"

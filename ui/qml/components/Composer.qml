@@ -11,6 +11,7 @@ Rectangle {
     property string recordingHint: ""
     property bool busy: false
     property string busyHint: ""
+    property string idleHint: ""
 
     color: Theme.Colors.cardAlt
     radius: Theme.Spacing.radius
@@ -79,7 +80,8 @@ Rectangle {
                   ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
                   : root.busy
                     ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
-                    : (root.recordingHint.length ? root.recordingHint : "Enter отправляет, Shift+Enter переносит строку.")
+                    : (root.idleHint.length ? root.idleHint
+                      : (root.recordingHint.length ? root.recordingHint : "Enter отправляет, Shift+Enter переносит строку."))
             color: root.recording || root.busy ? Theme.Colors.accent : Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily
             font.pixelSize: Theme.Typography.micro

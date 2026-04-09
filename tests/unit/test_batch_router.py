@@ -134,3 +134,29 @@ def test_search_query_splits_on_explicit_connector_before_action():
         "найди чизбургер",
         "открой ютуб",
     ]
+def _broken_agent_test_split_voice_sequence_with_system_and_spoken_launcher_targets():
+    router = make_router()
+    assert router.split("РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹ СЃ С‚РёРј Рё РїСЂРѕРІРѕРґРЅРёРє") == [
+        "РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹",
+        "РѕС‚РєСЂРѕР№ СЃ С‚РёРј",
+        "РѕС‚РєСЂРѕР№ РїСЂРѕРІРѕРґРЅРёРє",
+    ]
+def _broken_agent_test_split_voice_sequence_with_system_and_spoken_launcher_targets_utf8() -> None:
+    router = make_router()
+
+    assert router.split("открой параметры с тим и проводник") == [
+        "открой параметры",
+        "открой с тим",
+        "открой проводник",
+    ]
+def test_split_voice_sequence_with_system_and_spoken_launcher_targets_escapes() -> None:
+    router = make_router()
+
+    assert router.split(
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b "
+        "\u0441 \u0442\u0438\u043c \u0438 \u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a"
+    ) == [
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b",
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0441 \u0442\u0438\u043c",
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a",
+    ]

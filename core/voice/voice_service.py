@@ -3,6 +3,8 @@
 import importlib.util
 import re
 import threading
+import time
+import uuid
 from typing import Callable
 
 import sounddevice as sd
@@ -12,7 +14,7 @@ from core.voice.audio_device_service import AudioDeviceService
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
 from core.voice.stt_service import STTService
 from core.voice.tts_service import TTSService
-from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult
+from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult, WakeSessionMetrics
 
 
 class VoiceService:
@@ -54,6 +56,7 @@ class VoiceService:
         self._wake_phase = "idle"
         self._wake_detail = "Слово активации не запущено"
         self._wake_ready = False
+        self._wake_metrics = WakeSessionMetrics()
         self._audio_devices: AudioDeviceService | None = None
 
         self.capture_service = SpeechCaptureService(
@@ -110,6 +113,9 @@ class VoiceService:
         self._wake_ready = ready
         if detail is not None:
             self._wake_detail = detail
+        if self._wake_metrics.session_id:
+            self._wake_metrics.phase = normalized
+            self._wake_metrics.detail = self._wake_detail
 
     def wake_status_text(self) -> str:
         labels = {
@@ -117,7 +123,7 @@ class VoiceService:
             "waiting_wake": "Жду «Джарвис»",
             "capturing_command": self._wake_detail or "Подхватываю начало команды",
             "transcribing": self._wake_detail or "Распознаю команду",
-            "routing": self._wake_detail or "Распознаю команду",
+            "routing": self._wake_detail or "Передаю команду в обработку",
             "executing": self._wake_detail or "Выполняю",
             "not_heard": self._wake_detail or "Не расслышал",
             "error": self._wake_detail or "Ошибка слова активации",
@@ -165,6 +171,88 @@ class VoiceService:
             "model": self.model_status_text(),
             "tts": self.tts_status_text(),
         }
+
+    def latest_wake_metrics(self) -> dict[str, str | float | bool]:
+        return self._wake_metrics.as_dict()
+
+    def latest_wake_metrics_summary(self) -> str:
+        metrics = self._wake_metrics
+        if not metrics.session_id:
+            return "Нет последнего wake-сеанса."
+
+        parts = []
+        if metrics.pre_roll_ms > 0:
+            parts.append(f"pre-roll {metrics.pre_roll_ms:.0f} мс")
+        if metrics.capture_ms > 0:
+            parts.append(f"capture {metrics.capture_ms:.0f} мс")
+        if metrics.stt_ms > 0:
+            parts.append(f"stt {metrics.stt_ms:.0f} мс")
+        if metrics.total_ms > 0:
+            parts.append(f"total {metrics.total_ms:.0f} мс")
+        backend = metrics.stt_backend or metrics.wake_backend
+        if backend:
+            parts.append(backend)
+        if metrics.final_status:
+            parts.append(metrics.final_status)
+        return " · ".join(parts) if parts else "Нет последнего wake-сеанса."
+
+    def begin_wake_session(self, pre_roll: bytes, wake_backend: str = "vosk") -> None:
+        now = time.perf_counter()
+        self._wake_metrics = WakeSessionMetrics(
+            session_id=uuid.uuid4().hex[:12],
+            phase="capturing_command",
+            detail="Подхватываю начало команды",
+            wake_backend=wake_backend,
+            detected_at=now,
+            capture_started_at=now,
+            pre_roll_bytes=len(pre_roll),
+        )
+
+    def mark_wake_capture_result(self, capture: SpeechCaptureResult) -> None:
+        now = time.perf_counter()
+        if not self._wake_metrics.session_id:
+            self.begin_wake_session(b"")
+        self._wake_metrics.capture_finished_at = now
+        self._wake_metrics.captured_audio_bytes = len(capture.raw_audio)
+        self._wake_metrics.captured_audio_seconds = capture.duration_seconds
+        self._wake_metrics.phase = "transcribing" if capture.ok else "not_heard"
+        self._wake_metrics.detail = capture.detail
+        if not capture.ok:
+            self._wake_metrics.final_status = capture.status
+            self._wake_metrics.failure_detail = capture.detail
+
+    def mark_wake_transcription_result(self, result: TranscriptionResult) -> None:
+        now = time.perf_counter()
+        if not self._wake_metrics.session_id:
+            self.begin_wake_session(b"")
+        if self._wake_metrics.stt_started_at <= 0.0:
+            self._wake_metrics.stt_started_at = now - (result.latency_ms / 1000.0 if result.latency_ms > 0 else 0.0)
+        self._wake_metrics.stt_finished_at = now
+        self._wake_metrics.phase = "routing" if result.ok else "not_heard"
+        self._wake_metrics.detail = result.detail
+        self._wake_metrics.stt_backend = result.engine
+        self._wake_metrics.backend_trace = result.backend_trace
+        self._wake_metrics.transcript = result.text
+        if not result.ok:
+            self._wake_metrics.final_status = result.status
+            self._wake_metrics.failure_detail = result.detail
+
+    def mark_wake_stt_started(self) -> None:
+        if not self._wake_metrics.session_id:
+            self.begin_wake_session(b"")
+        self._wake_metrics.phase = "transcribing"
+        self._wake_metrics.detail = "Распознаю команду"
+        self._wake_metrics.stt_started_at = time.perf_counter()
+
+    def mark_wake_route_handoff(self) -> None:
+        if not self._wake_metrics.session_id:
+            return
+        self.set_wake_runtime_status("routing", ready=False, detail="Передаю команду в обработку")
+        self._wake_metrics.route_handoff_at = time.perf_counter()
+        self._wake_metrics.phase = "routing"
+        self._wake_metrics.detail = "Передаю команду в обработку"
+        self._wake_metrics.final_status = "handoff"
+        self._wake_metrics.failure_detail = ""
 
     def test_wake_word(self) -> str:
         if self._wake_phase == "waiting_wake" and self._wake_ready:
@@ -249,6 +337,7 @@ class VoiceService:
         return self.capture_after_wake_result(pre_roll).text
 
     def capture_after_wake_result(self, pre_roll: bytes) -> TranscriptionResult:
+        self.begin_wake_session(pre_roll)
         max_seconds, silence_seconds, energy_threshold, pre_roll_grace = self._wake_capture_tuning()
         wake_capture = SpeechCaptureService(
             resolve_input_device=self._resolve_input_device,
@@ -264,30 +353,52 @@ class VoiceService:
             ),
         )
         capture = wake_capture.capture_until_silence(pre_roll=pre_roll)
+        self.mark_wake_capture_result(capture)
         if not capture.ok:
             self._set_wake_error_from_capture(capture)
             return TranscriptionResult(status=capture.status, detail=capture.detail, engine="capture")
 
         self.set_wake_runtime_status("transcribing", ready=False, detail="Распознаю команду")
+        self.mark_wake_stt_started()
         transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
+        self.mark_wake_transcription_result(transcription)
         if transcription.ok:
             self.set_wake_runtime_status("routing", ready=False, detail="Распознаю команду")
             stripped_text, matched_prefix, has_tail = self._split_wake_prefix(transcription.text)
             if matched_prefix and not has_tail:
                 detail = "Не расслышал команду"
                 self.set_wake_runtime_status("not_heard", ready=False, detail=detail)
-                return TranscriptionResult(status="no_speech", detail=detail, engine=transcription.engine)
+                failed = TranscriptionResult(
+                    status="no_speech",
+                    detail=detail,
+                    engine=transcription.engine,
+                    backend_trace=transcription.backend_trace,
+                    latency_ms=transcription.latency_ms,
+                )
+                self.mark_wake_transcription_result(failed)
+                return failed
             if self._looks_like_wake_garbage(stripped_text):
                 detail = "Не расслышал команду"
                 self.set_wake_runtime_status("not_heard", ready=False, detail=detail)
-                return TranscriptionResult(status="no_speech", detail=detail, engine=transcription.engine)
-            transcription = TranscriptionResult(
+                failed = TranscriptionResult(
+                    status="no_speech",
+                    detail=detail,
+                    engine=transcription.engine,
+                    backend_trace=transcription.backend_trace,
+                    latency_ms=transcription.latency_ms,
+                )
+                self.mark_wake_transcription_result(failed)
+                return failed
+            cleaned = TranscriptionResult(
                 status="ok",
                 text=stripped_text,
                 detail=transcription.detail,
                 engine=transcription.engine,
+                backend_trace=transcription.backend_trace,
+                latency_ms=transcription.latency_ms,
             )
-            return transcription
+            self.mark_wake_transcription_result(cleaned)
+            return cleaned
 
         if transcription.status == "no_speech":
             self.set_wake_runtime_status(

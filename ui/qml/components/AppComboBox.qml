@@ -181,7 +181,6 @@ ComboBox {
             boundsBehavior: Flickable.StopAtBounds
             flickableDirection: Flickable.VerticalFlick
             highlightMoveDuration: 0
-            ScrollBar.vertical: AppScrollBar {}
         }
     }
 }

@@ -11,9 +11,11 @@ from PySide6.QtWidgets import QApplication
 
 from app.app import JarvisUnityApplication
 from core.services.single_instance import SingleInstanceService
+from core.updates.update_service import DEFAULT_VERSION
 
 WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"
 WINDOWS_APP_DISPLAY_NAME = "JARVIS Unity"
+WINDOWS_APP_VERSION = DEFAULT_VERSION
 
 
 def _boot_log(message: str) -> None:
@@ -49,6 +51,7 @@ def bootstrap() -> int:
     QGuiApplication.setOrganizationDomain("jarvisai.unity")
     QGuiApplication.setApplicationName(WINDOWS_APP_DISPLAY_NAME)
     QGuiApplication.setApplicationDisplayName(WINDOWS_APP_DISPLAY_NAME)
+    QGuiApplication.setApplicationVersion(WINDOWS_APP_VERSION)
     _set_windows_app_user_model_id()
     _boot_log("bootstrap:before-app")
     application = QApplication(sys.argv)

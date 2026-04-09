@@ -611,3 +611,63 @@ def test_registry_runs_power_targets_via_shutdown_command(monkeypatch) -> None:
     assert outcomes[0].success is True
     assert launched["close_fds"] is True
     assert launched["command"] == ["shutdown", "/r", "/t", "0"]
+def _broken_agent_test_split_open_target_sequence_handles_system_and_spoken_targets() -> None:
+    registry, _service = make_registry()
+
+    targets, remainder = registry.split_open_target_sequence("РїР°СЂР°РјРµС‚СЂС‹ СЃ С‚РёРј Рё РїСЂРѕРІРѕРґРЅРёРє")
+
+    assert targets == ["РїР°СЂР°РјРµС‚СЂС‹", "СЃ С‚РёРј", "РїСЂРѕРІРѕРґРЅРёРє"]
+    assert remainder == ""
+
+
+def _broken_agent_test_resolve_system_action_promotes_builtin_windows_target() -> None:
+    registry, _service = make_registry()
+
+    resolved = registry.resolve_system_action("РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹")
+
+    assert resolved is not None
+    assert resolved["mode"] == "open"
+    assert resolved["item_id"] == "system_settings"
+    assert resolved["target_kind"] == "uri"
+def test_split_open_target_sequence_handles_system_and_spoken_targets_utf8() -> None:
+    registry, _service = make_registry()
+
+    targets, remainder = registry.split_open_target_sequence(
+        "\u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u0441 \u0442\u0438\u043c \u0438 \u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a"
+    )
+
+    assert targets == [
+        "\u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b",
+        "\u0441 \u0442\u0438\u043c",
+        "\u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a",
+    ]
+    assert remainder == ""
+
+
+def test_resolve_system_action_promotes_builtin_windows_target_utf8() -> None:
+    registry, _service = make_registry()
+
+    resolved = registry.resolve_system_action(
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b"
+    )
+
+    assert resolved is not None
+    assert resolved["mode"] == "open"
+    assert resolved["item_id"] == "system_settings"
+    assert resolved["target_kind"] == "uri"
+
+
+def test_system_targets_resolve_task_manager_and_control_panel_from_builtin_catalog() -> None:
+    registry, _service = make_registry()
+
+    task_manager_items, task_manager_question = registry.resolve_open_command(
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0434\u0438\u0441\u043f\u0435\u0442\u0447\u0435\u0440 \u0437\u0430\u0434\u0430\u0447"
+    )
+    control_panel_items, control_panel_question = registry.resolve_open_command(
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u043d\u0435\u043b\u044c \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f"
+    )
+
+    assert task_manager_question == ""
+    assert [item["id"] for item in task_manager_items] == ["system_task_manager"]
+    assert control_panel_question == ""
+    assert [item["id"] for item in control_panel_items] == ["system_control_panel"]

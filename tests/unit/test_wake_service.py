@@ -7,6 +7,7 @@ import sys
 from core.settings.settings_service import SettingsService
 from core.voice.voice_service import VoiceService
 from core.voice.wake_service import WakeService
+from core.voice.vosk_runtime import clear_vosk_model_cache
 
 
 class FakeStore:
@@ -145,3 +146,47 @@ def test_wake_service_marks_capture_phase_as_handoff():
 
     wake._phase = "idle"  # noqa: SLF001
     assert wake._phase_in_handoff() is False  # noqa: SLF001
+
+
+def test_wake_service_uses_shared_vosk_runtime_cache(tmp_path, monkeypatch):
+    clear_vosk_model_cache()
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    wake.model_path = tmp_path / "vosk-model-small-ru-0.22"
+    wake.model_path.mkdir(parents=True)
+
+    calls: list[tuple[object, ...]] = []
+
+    class DummyRecognizer:
+        pass
+
+    def fake_new_recognizer(path, sample_rate, grammar=None):  # noqa: ANN001, ANN202
+        calls.append((path, sample_rate, tuple(grammar or ())))
+        return DummyRecognizer()
+
+    monkeypatch.setattr("core.voice.wake_service.new_vosk_recognizer", fake_new_recognizer)
+
+    recognizer = wake._new_recognizer()  # noqa: SLF001
+
+    assert isinstance(recognizer, DummyRecognizer)
+    assert len(calls) == 1
+    assert calls[0][0] == wake.model_path
+    assert calls[0][1] == wake.SAMPLE_RATE
+    assert "\u0434\u0436\u0430\u0440\u0432\u0438\u0441" in calls[0][2]
+
+
+def test_voice_service_reports_handoff_honestly_after_wake_session():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    voice.begin_wake_session(b"pcm", wake_backend="vosk")
+    voice.mark_wake_stt_started()
+    voice.mark_wake_route_handoff()
+
+    metrics = voice.latest_wake_metrics()
+
+    assert metrics["routeHookSeen"] is True
+    assert metrics["finalStatus"] == "handoff"
+    assert "handoff" in voice.latest_wake_metrics_summary()
+    assert voice.wake_status_text() == "Передаю команду в обработку"

@@ -96,7 +96,11 @@ Rectangle {
         anchors.fill: parent
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical: AppScrollBar {}
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AlwaysOff
+            visible: false
+            width: 0
+        }
 
         ColumnLayout {
             width: settingsScroll.availableWidth
