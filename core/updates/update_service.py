@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+from typing import Callable, TypeVar
 
 import httpx
 
@@ -15,12 +16,15 @@ DEFAULT_VERSION = "22.3.5"
 DEFAULT_HTTP_TIMEOUT_SECONDS = 20.0
 USER_AGENT = "JarvisAi_Unity/1.0"
 INSTALLER_LAUNCH_ARGUMENTS = ("/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS")
+HTTP_RETRY_COUNT = 2
+T = TypeVar("T")
 
 
 @dataclass(slots=True)
 class UpdateAsset:
     name: str
     browser_download_url: str
+    size: int = 0
 
 
 @dataclass(slots=True)
@@ -105,16 +109,7 @@ class UpdateService:
 
         self._set_status("checking", "Проверяю обновления...")
         try:
-            response = httpx.get(
-                f"https://api.github.com/repos/{self.repository}/releases/latest",
-                timeout=DEFAULT_HTTP_TIMEOUT_SECONDS,
-                headers={
-                    "Accept": "application/vnd.github+json",
-                    "User-Agent": USER_AGENT,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
+            payload = self._fetch_latest_release_payload()
             latest_version = self._normalize_version(str(payload.get("tag_name") or payload.get("name") or "").strip())
             self.latest_version_value = latest_version or self.current_version_value
             self.release_url_value = str(payload.get("html_url") or "").strip()
@@ -122,6 +117,7 @@ class UpdateService:
                 UpdateAsset(
                     name=str(asset.get("name") or "").strip(),
                     browser_download_url=str(asset.get("browser_download_url") or "").strip(),
+                    size=max(0, int(asset.get("size") or 0)),
                 )
                 for asset in payload.get("assets", [])
                 if isinstance(asset, dict)
@@ -364,7 +360,14 @@ class UpdateService:
             "update_available": self.update_available_value,
             "last_error": self.last_error_value,
             "last_checked_at_utc": self.last_checked_at_utc.isoformat() if self.last_checked_at_utc else "",
-            "assets": [{"name": asset.name, "browser_download_url": asset.browser_download_url} for asset in self.assets],
+            "assets": [
+                {
+                    "name": asset.name,
+                    "browser_download_url": asset.browser_download_url,
+                    "size": asset.size,
+                }
+                for asset in self.assets
+            ],
             "apply_supported": self.apply_supported_value,
             "can_apply": self.can_apply_update(),
             "apply_hint": apply_hint,
@@ -489,6 +492,79 @@ class UpdateService:
         candidates.sort(key=lambda entry: (entry[0], entry[1].name.casefold()))
         return candidates[0][1]
 
+    def _network_settings(self) -> tuple[str, str, float]:
+        network = {}
+        if self.settings is not None and hasattr(self.settings, "get"):
+            raw = self.settings.get("network", {})
+            if isinstance(raw, dict):
+                network = raw
+
+        proxy_mode = str(network.get("proxy_mode", "system")).strip().lower()
+        if proxy_mode not in {"system", "manual", "off"}:
+            proxy_mode = "system"
+
+        proxy_url = str(network.get("proxy_url", "")).strip()
+        timeout_value = network.get("timeout_seconds", DEFAULT_HTTP_TIMEOUT_SECONDS)
+        try:
+            timeout = float(timeout_value)
+        except (TypeError, ValueError):
+            timeout = DEFAULT_HTTP_TIMEOUT_SECONDS
+        timeout = max(3.0, timeout)
+        return proxy_mode, proxy_url, timeout
+
+    def _http_attempts(self) -> list[tuple[str, bool, str]]:
+        proxy_mode, proxy_url, _timeout = self._network_settings()
+        if proxy_mode == "manual" and proxy_url:
+            return [("manual_proxy", False, proxy_url), ("direct_fallback", False, "")]
+        if proxy_mode == "off":
+            return [("direct", False, "")]
+        return [("system_proxy", True, ""), ("direct_fallback", False, "")]
+
+    def _create_http_client(self, *, proxy_url: str = "", trust_env: bool = True) -> httpx.Client:
+        timeout = self._network_settings()[2]
+        transport = httpx.HTTPTransport(retries=HTTP_RETRY_COUNT)
+        client_kwargs: dict[str, object] = {
+            "transport": transport,
+            "timeout": timeout,
+            "follow_redirects": True,
+            "headers": {
+                "Accept": "application/vnd.github+json",
+                "User-Agent": USER_AGENT,
+            },
+            "trust_env": trust_env,
+        }
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
+        return httpx.Client(**client_kwargs)
+
+    def _request_with_fallback(self, request: Callable[[httpx.Client], T]) -> T:
+        last_transport_error: httpx.TransportError | None = None
+        for label, trust_env, proxy_url in self._http_attempts():
+            try:
+                with self._create_http_client(proxy_url=proxy_url, trust_env=trust_env) as client:
+                    return request(client)
+            except httpx.TransportError as exc:
+                last_transport_error = exc
+                self.last_error_value = self._format_error(exc)
+                if label == "direct_fallback":
+                    break
+        if last_transport_error is not None:
+            raise last_transport_error
+        raise RuntimeError("http_request_failed")
+
+    def _fetch_latest_release_payload(self) -> dict[str, object]:
+        url = f"https://api.github.com/repos/{self.repository}/releases/latest"
+
+        def request(client: httpx.Client) -> dict[str, object]:
+            response = client.get(url)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise RuntimeError("invalid_release_payload")
+            return payload
+
+        return self._request_with_fallback(request)
+
     def _update_download_dir(self) -> Path:
         local_app_data = Path(os.environ.get("LOCALAPPDATA") or Path.home())
         path = local_app_data / "JarvisAi_Unity" / "updates"
@@ -500,32 +576,44 @@ class UpdateService:
             raise RuntimeError("asset_url_missing")
 
         destination = self._update_download_dir() / asset.name
-        if destination.exists() and destination.stat().st_size > 0:
-            return destination.resolve()
+        if destination.exists():
+            if self._has_valid_asset_size(destination, asset):
+                return destination.resolve()
+            destination.unlink(missing_ok=True)
 
         tmp_path = destination.with_suffix(destination.suffix + ".download")
         if tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
-        headers = {"User-Agent": USER_AGENT}
-        try:
-            with httpx.stream(
-                "GET",
-                asset.browser_download_url,
-                follow_redirects=True,
-                timeout=DEFAULT_HTTP_TIMEOUT_SECONDS,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                with tmp_path.open("wb") as handle:
-                    for chunk in response.iter_bytes(64 * 1024):
-                        if chunk:
-                            handle.write(chunk)
-            tmp_path.replace(destination)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        def request(client: httpx.Client) -> None:
+            try:
+                with client.stream("GET", asset.browser_download_url) as response:
+                    response.raise_for_status()
+                    with tmp_path.open("wb") as handle:
+                        for chunk in response.iter_bytes(64 * 1024):
+                            if chunk:
+                                handle.write(chunk)
+                if not self._has_valid_asset_size(tmp_path, asset):
+                    raise RuntimeError(
+                        f"download_size_mismatch: expected {asset.size} bytes, got {tmp_path.stat().st_size} bytes"
+                    )
+                tmp_path.replace(destination)
+            except Exception:
+                tmp_path.unlink(missing_ok=True)
+                raise
+
+        self._request_with_fallback(request)
         return destination.resolve()
+
+    def _has_valid_asset_size(self, path: Path, asset: UpdateAsset) -> bool:
+        if not path.exists():
+            return False
+        actual_size = path.stat().st_size
+        if actual_size <= 0:
+            return False
+        if asset.size > 0 and actual_size != asset.size:
+            return False
+        return True
 
     def _is_check_in_progress(self) -> bool:
         return self._check_lock.locked()

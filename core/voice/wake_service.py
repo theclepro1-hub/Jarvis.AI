@@ -87,6 +87,15 @@ class WakeService:
     def model_status(self) -> str:
         return "загружена" if self.model_path.exists() else "не загружена"
 
+    def warm_up_model(self) -> bool:
+        if not self.model_path.exists():
+            return False
+        try:
+            load_vosk_model(self.model_path)
+            return True
+        except Exception:
+            return False
+
     def _run(self) -> None:
         try:
             self._set_phase("preparing", "Готовлю слово активации", ready=False)

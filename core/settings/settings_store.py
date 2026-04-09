@@ -17,8 +17,8 @@ from ctypes import wintypes
 DEFAULT_SETTINGS: dict[str, Any] = {
     "theme_mode": "midnight",
     "startup_enabled": False,
-    "minimize_to_tray_enabled": True,
-    "start_minimized_enabled": True,
+    "minimize_to_tray_enabled": False,
+    "start_minimized_enabled": False,
     "save_history_enabled": True,
     "privacy_mode": "balance",
     "ai_provider": "auto",

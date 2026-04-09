@@ -84,6 +84,9 @@ Rectangle {
         if (status.last_error && status.last_error.length > 0) {
             return "Ошибка проверки"
         }
+        if ((!status.last_checked_at_utc || status.last_checked_at_utc.length === 0) && !status.update_available) {
+            return "Не проверялось"
+        }
         if (status.update_available) {
             return "Есть обновление"
         }
@@ -577,7 +580,7 @@ Rectangle {
 
                         SecondaryButton {
                             visible: settingsRoot.confirmDeleteAllData
-                            text: "РћС‚РјРµРЅР°"
+                            text: "Отмена"
                             onClicked: settingsRoot.confirmDeleteAllData = false
                         }
 
@@ -607,6 +610,37 @@ Rectangle {
 
             SettingsSection {
                 Layout.fillWidth: true
+                title: "Внешний вид"
+                description: "Тема интерфейса должна быть ниже полезных настроек."
+                expanded: false
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Тема"
+                    description: "Меняет весь интерфейс сразу, без разрозненных цветов в отдельных блоках."
+                    helpText: "Тема влияет сразу на всю оболочку. Она не должна мешать подключению и голосу в верхней части экрана."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    Item { Layout.fillWidth: true }
+
+                    AppComboBox {
+                        id: themeCombo
+                        objectName: "themeCombo"
+                        Layout.preferredWidth: 280
+                        model: [
+                            { key: "midnight", title: "Полуночное свечение" },
+                            { key: "steel", title: "Стальной орбит" }
+                        ]
+                        textRole: "title"
+                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.themeMode))
+                        onActivated: (index) => settingsBridge.themeMode = model[index].key
+                    }
+                }
+            }
+
+            SettingsSection {
+                Layout.fillWidth: true
                 title: "Обновления"
                 description: "Версия, канал и проверка релиза на GitHub."
                 expanded: false
@@ -615,7 +649,7 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Статус"
                     description: settingsBridge.updateSummary
-                    helpText: "JARVIS проверяет GitHub Releases и показывает, есть ли новая версия. Установка только вручную, без тихих замен."
+                    helpText: "JARVIS проверяет GitHub Releases, при наличии installer-релиза скачивает установщик и запускает его поверх текущей версии. Если сеть рвётся или installer недоступен, останется ручной переход на страницу релиза."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
@@ -667,37 +701,6 @@ Rectangle {
                                 Layout.fillWidth: true
                             }
                         }
-                    }
-                }
-            }
-
-            SettingsSection {
-                Layout.fillWidth: true
-                title: "Внешний вид"
-                description: "Тема интерфейса должна быть ниже полезных настроек."
-                expanded: false
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Тема"
-                    description: "Меняет весь интерфейс сразу, без разрозненных цветов в отдельных блоках."
-                    helpText: "Тема влияет сразу на всю оболочку. Она не должна мешать подключению и голосу в верхней части экрана."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    Item { Layout.fillWidth: true }
-
-                    AppComboBox {
-                        id: themeCombo
-                        objectName: "themeCombo"
-                        Layout.preferredWidth: 280
-                        model: [
-                            { key: "midnight", title: "Полуночное свечение" },
-                            { key: "steel", title: "Стальной орбит" }
-                        ]
-                        textRole: "title"
-                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.themeMode))
-                        onActivated: (index) => settingsBridge.themeMode = model[index].key
                     }
                 }
             }

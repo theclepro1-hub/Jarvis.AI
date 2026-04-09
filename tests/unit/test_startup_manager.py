@@ -3,10 +3,10 @@ from __future__ import annotations
 from core.settings.startup_manager import StartupManager
 
 
-def test_startup_command_includes_minimized_flag_by_default() -> None:
+def test_startup_command_is_visible_by_default() -> None:
     command = StartupManager()._command()
 
-    assert "--minimized" in command
+    assert "--minimized" not in command
 
 
 def test_startup_command_can_skip_minimized_flag() -> None:

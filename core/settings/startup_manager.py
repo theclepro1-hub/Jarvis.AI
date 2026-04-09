@@ -20,7 +20,7 @@ class StartupManager:
                 return False
         return bool(str(value).strip())
 
-    def set_enabled(self, enabled: bool, *, minimized: bool = True) -> None:
+    def set_enabled(self, enabled: bool, *, minimized: bool = False) -> None:
         if os.environ.get("JARVIS_UNITY_DISABLE_STARTUP_REGISTRY") == "1":
             return
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self.KEY_PATH, 0, winreg.KEY_SET_VALUE) as key:
@@ -32,7 +32,7 @@ class StartupManager:
             except FileNotFoundError:
                 return
 
-    def _command(self, *, minimized: bool = True) -> str:
+    def _command(self, *, minimized: bool = False) -> str:
         suffix = " --minimized" if minimized else ""
         if getattr(sys, "frozen", False):
             return f'"{Path(sys.executable)}"{suffix}'

@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from PySide6.QtCore import QCoreApplication
-
 from core.settings.settings_service import SettingsService
 from core.settings.settings_store import DEFAULT_SETTINGS
+from core.updates.update_service import DEFAULT_VERSION
 from ui.bridge.settings_bridge import SettingsBridge
 
 
@@ -35,12 +34,16 @@ class FakeTelegram:
         return True
 
 
-def _ensure_app() -> QCoreApplication:
-    return QCoreApplication.instance() or QCoreApplication([])
+class _ExplodingUpdatesServices:
+    def __init__(self, settings) -> None:  # noqa: ANN001
+        self.settings = settings
+        self.telegram = FakeTelegram()
+        self._updates = None
 
-
+    @property
+    def updates(self):  # noqa: ANN201
+        raise AssertionError("updates service must stay lazy until user explicitly opens update flow")
 def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> None:
-    _ensure_app()
     store = InMemoryStore()
     settings = SettingsService(store)
     telegram = FakeTelegram()
@@ -61,7 +64,6 @@ def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> Non
 
 
 def test_settings_bridge_mask_placeholder_keeps_existing_secrets() -> None:
-    _ensure_app()
     store = InMemoryStore()
     settings = SettingsService(store)
     settings.save_registration(
@@ -81,3 +83,14 @@ def test_settings_bridge_mask_placeholder_keeps_existing_secrets() -> None:
     assert registration["groq_api_key"] == "fake_groq_existing"
     assert registration["telegram_bot_token"] == "bot_existing"
     assert registration["telegram_user_id"] == "2"
+
+
+def test_settings_bridge_update_properties_do_not_force_lazy_update_service() -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    services = _ExplodingUpdatesServices(settings)
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    assert bridge.updateSummary == f"Версия {DEFAULT_VERSION} · канал стабильный"
+    assert bridge.updateStatus["current_version"] == DEFAULT_VERSION
+    assert bridge.updateStatus["status_code"] == "idle"

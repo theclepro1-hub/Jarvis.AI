@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from core.models.action_models import ActionOutcome
 from core.reminders.reminder_service import ReminderService
 from core.reminders.reminder_store import ReminderStore
@@ -31,6 +33,38 @@ class FakeActions:
         if "музык" in lower:
             items.append({"id": "yandex_music", "title": "Яндекс Музыка", "kind": "file", "target": "C:\\YandexMusic\\YandexMusic.exe"})
         return items, ""
+
+    def split_open_target_sequence(self, text: str):
+        remaining = " ".join(str(text or "").strip().split())
+        phrases: list[str] = []
+        aliases = (
+            ("музыка", "музыку", "музычку", "music", "плеер"),
+            ("яндекс музыка", "яндекс музыку", "яндекс муз", "yandex music"),
+            ("параметры", "settings", "настройки"),
+            ("диспетчер задач", "task manager", "taskmgr"),
+            ("проводник", "explorer", "файлы"),
+            ("youtube", "ютуб", "ютюб"),
+            ("steam", "стим"),
+            ("discord", "дискорд"),
+            ("spotify", "спотифай", "спотик"),
+        )
+        while remaining:
+            remaining = re.sub(r"^(?:[\s,.:;!?-]+|и\s+|а\s+|потом\s+|еще\s+|ещё\s+)+", "", remaining, flags=re.IGNORECASE)
+            if not remaining:
+                break
+            consumed = remaining
+            matched = ""
+            for group in aliases:
+                for alias in group:
+                    alias_value = alias.casefold()
+                    if consumed.casefold().startswith(alias_value):
+                        if len(alias_value) > len(matched):
+                            matched = consumed[: len(alias_value)]
+            if not matched:
+                break
+            phrases.append(matched)
+            remaining = remaining[len(matched) :].lstrip(" ,")
+        return phrases, remaining
 
     def find_items(self, text: str):
         return self.resolve_open_command(text)[0]
@@ -211,6 +245,33 @@ def test_command_router_voice_normalizes_multi_action_without_commas():
     assert pc_control.media == ["up"]
     assert result.execution_result is not None
     assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items", "volume_up"]
+
+
+def test_command_router_voice_normalizes_system_targets_without_commas():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой параметры проводник", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой параметры", "открой проводник"]
+    assert actions.opened == ["system_settings", "system_explorer"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
+
+
+def test_command_router_voice_requests_clarification_for_greedy_open_tail():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой яндекс музыку истины", source="voice")
+
+    assert result.kind == "local"
+    assert result.assistant_lines[0].startswith("Уточните команду целиком.")
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+    assert result.execution_result.steps[0].status == "needs_input"
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
 
 
 def test_command_router_text_path_also_handles_normalized_multi_action():
@@ -500,13 +561,11 @@ def test_command_router_aborts_voice_multi_action_when_one_target_needs_input_ut
         "\u043e\u0442\u043a\u0440\u043e\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u044e\u0442\u0443\u0431",
         "\u043e\u0442\u043a\u0440\u043e\u0439 \u043c\u0443\u0437\u044b\u043a\u0443",
     ]
-    assert result.assistant_lines == [
-        "\u0412\u044b\u043f\u043e\u043b\u043d\u044f\u044e 2 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f: YouTube, \u042f\u043d\u0434\u0435\u043a\u0441 \u041c\u0443\u0437\u044b\u043a\u0430"
-    ]
-    assert actions.opened == ["youtube", "yandex_music"]
+    assert result.assistant_lines[0].startswith("Уточните команду целиком.")
+    assert actions.opened == []
     assert pc_control.media == []
     assert result.execution_result is not None
-    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
+    assert [step.kind for step in result.execution_result.steps] == ["clarify"]
 
 
 def test_command_router_preview_keeps_missing_target_out_of_executable_summary_utf8() -> None:
@@ -523,11 +582,9 @@ def test_command_router_preview_keeps_missing_target_out_of_executable_summary_u
         "\u043e\u0442\u043a\u0440\u043e\u0439 \u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u044e\u0442\u0443\u0431",
         "\u043e\u0442\u043a\u0440\u043e\u0439 \u043c\u0443\u0437\u044b\u043a\u0443",
     ]
-    assert result.assistant_lines == [
-        "\u0412\u044b\u043f\u043e\u043b\u043d\u044e 2 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044f: YouTube, \u042f\u043d\u0434\u0435\u043a\u0441 \u041c\u0443\u0437\u044b\u043a\u0430"
-    ]
+    assert result.assistant_lines[0].startswith("Уточните команду целиком.")
     assert result.execution_result is not None
-    assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
+    assert [step.kind for step in result.execution_result.steps] == ["clarify"]
 
 
 def test_command_router_opens_builtin_windows_settings_without_ai() -> None:

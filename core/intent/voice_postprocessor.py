@@ -92,6 +92,17 @@ class VoiceCommandPostProcessor:
         if len(words) < 2:
             return text
 
+        split_with_registry = getattr(self.action_registry, "split_open_target_sequence", None)
+        if callable(split_with_registry):
+            phrases, remainder = split_with_registry(object_chunk)
+            normalized_phrases = [self._clean_mention(phrase) for phrase in phrases]
+            normalized_phrases = [phrase for phrase in normalized_phrases if phrase]
+            if len(normalized_phrases) >= 2 and not remainder:
+                rebuilt = f"{verb} {' и '.join(normalized_phrases)}"
+                if suffix:
+                    rebuilt = f"{rebuilt} {suffix}"
+                return rebuilt
+
         items, question = self.action_registry.resolve_open_command(f"{verb} {object_chunk}")
         if question or len(items) < 2:
             return text

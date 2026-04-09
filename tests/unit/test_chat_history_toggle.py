@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from PySide6.QtGui import QGuiApplication
-
 from core.settings.settings_store import DEFAULT_SETTINGS
 from ui.bridge.chat_bridge import ChatBridge
 
@@ -47,12 +45,7 @@ class Services:
         self.voice = SimpleNamespace(voice_response_enabled=lambda: False, speak=lambda text, force=False: "ok")
 
 
-def _ensure_app() -> QGuiApplication:
-    return QGuiApplication.instance() or QGuiApplication([])
-
-
 def test_chat_history_toggle_prevents_new_writes() -> None:
-    _ensure_app()
     services = Services()
     bridge = ChatBridge(SimpleNamespace(status="Готов"), services, app_bridge=None)
 

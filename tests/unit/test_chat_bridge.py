@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from PySide6.QtGui import QGuiApplication
-
 from core.ai.ai_service import AIReplyResult
 from core.models.action_models import ExecutionResult, ExecutionStep
 from ui.bridge.chat_bridge import ChatBridge
@@ -94,14 +92,7 @@ class _Services:
         self.ai = _Ai()
         self.voice = _Voice()
         self.settings = SimpleNamespace(get=lambda *_args, **_kwargs: True)
-
-
-def _ensure_app() -> QGuiApplication:
-    return QGuiApplication.instance() or QGuiApplication([])
-
-
 def _bridge_for(route) -> tuple[ChatBridge, _Services]:  # noqa: ANN001
-    _ensure_app()
     services = _Services(route)
     bridge = ChatBridge(_State(), services, app_bridge=None)
     return bridge, services
@@ -297,6 +288,18 @@ def test_chat_bridge_clears_thinking_label_after_ai_reply(monkeypatch) -> None:
     assert bridge.thinking is False
     assert bridge.thinkingLabel == ""
     assert bridge.messages[-1]["role"] == "assistant"
+
+
+def test_chat_bridge_emits_message_appended_for_user_and_assistant() -> None:
+    route = SimpleNamespace(kind="ai", commands=["hello"], assistant_lines=[], queue_items=["hello"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+    roles: list[str] = []
+    bridge.messageAppended.connect(roles.append)
+
+    bridge._append_message("user", "привет")  # noqa: SLF001 - signal wiring regression coverage.
+    bridge._append_message("assistant", "привет!")  # noqa: SLF001 - signal wiring regression coverage.
+
+    assert roles == ["user", "assistant"]
 
 
 def test_chat_bridge_blocks_parallel_inflight_message_until_reply(monkeypatch) -> None:

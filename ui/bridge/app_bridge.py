@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from core.updates.update_service import DEFAULT_VERSION
+
 
 class AppBridge(QObject):
     currentScreenChanged = Signal()
@@ -30,6 +32,7 @@ class AppBridge(QObject):
         self.state.currentScreenChanged.connect(self.currentScreenChanged.emit)
         self.state.statusChanged.connect(self.statusChanged.emit)
         self.state.registrationRequiredChanged.connect(self.registrationRequiredChanged.emit)
+        self._version = DEFAULT_VERSION
 
     @Property(str, notify=currentScreenChanged)
     def currentScreen(self) -> str:
@@ -41,7 +44,7 @@ class AppBridge(QObject):
 
     @Property(str, constant=True)
     def version(self) -> str:
-        return self.services.updates.current_version
+        return self._version
 
     @Property(str, notify=statusChanged)
     def assistantStatus(self) -> str:

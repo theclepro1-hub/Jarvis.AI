@@ -25,6 +25,7 @@ class VoiceBridge(QObject):
     testResultChanged = Signal()
     recordingChanged = Signal()
     recordingHintChanged = Signal()
+    wakeHintChanged = Signal()
     voiceTestChanged = Signal()
     voiceTimingsChanged = Signal()
     voiceTestTextReady = Signal(str)
@@ -42,8 +43,11 @@ class VoiceBridge(QObject):
         self.services = services
         self._test_result = "Проверка ещё не запускалась."
         self._recording_hint = "Ручной микрофон готов."
+        self._wake_hint = ""
         self._voice_test = self._empty_voice_test()
         self._chat_bridge = chat_bridge
+        self._warmup_lock = threading.Lock()
+        self._warmup_started = False
         self.voiceTestTextReady.connect(self._handle_voice_test_text)
         self.voiceTestNoteReady.connect(self._handle_voice_test_note)
         self.voiceTestFinished.connect(self._finish_voice_test)
@@ -52,6 +56,13 @@ class VoiceBridge(QObject):
         self.captureFinished.connect(self._finalize_capture)
         self.wakeDetected.connect(self._handle_wake_detected)
         self.wakeStatusUpdated.connect(self._emit_voice_status_change)
+
+    def _voice_backend_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_voice"):
+            return getattr(self.services, "_voice")
+        if hasattr(self.services, "__dict__") and "voice" in vars(self.services):
+            return vars(self.services).get("voice")
+        return None
 
     @Property(str, notify=modeChanged)
     def mode(self) -> str:
@@ -217,11 +228,16 @@ class VoiceBridge(QObject):
 
     @Property(bool, notify=recordingChanged)
     def isRecording(self) -> bool:
-        return self.services.voice.is_recording
+        voice_backend = self._voice_backend_if_ready()
+        return bool(getattr(voice_backend, "is_recording", False))
 
     @Property(str, notify=recordingHintChanged)
     def recordingHint(self) -> str:
         return self._recording_hint
+
+    @Property(str, notify=wakeHintChanged)
+    def wakeHint(self) -> str:
+        return self._wake_hint
 
     @Property("QVariantMap", notify=voiceTimingsChanged)
     def voiceTimings(self) -> dict[str, object]:
@@ -250,6 +266,8 @@ class VoiceBridge(QObject):
         self.voiceTestChanged.emit()
         self._recording_hint = "Скажите короткую фразу для проверки."
         self.recordingHintChanged.emit()
+        self._wake_hint = ""
+        self.wakeHintChanged.emit()
         self.state.status = "Слушаю"
         self._test_result = "Слушаю..."
         self.testResultChanged.emit()
@@ -303,6 +321,8 @@ class VoiceBridge(QObject):
     def toggleManualCapture(self) -> None:
         if not self.services.voice.is_recording:
             self.services.wake.stop()
+            self._wake_hint = ""
+            self.wakeHintChanged.emit()
             self._recording_hint = self.services.voice.start_manual_capture(
                 on_text=self.transcribedTextReady.emit,
                 on_note=self.voiceNoteReady.emit,
@@ -324,6 +344,7 @@ class VoiceBridge(QObject):
             return
         if self.services.voice.is_recording:
             return
+        self._start_voice_runtime_warmup()
         self.services.wake.start(self._emit_wake_detected, self._emit_wake_status_updated)
         self.summaryChanged.emit()
         self.statusChanged.emit()
@@ -333,6 +354,10 @@ class VoiceBridge(QObject):
         self.services.wake.stop()
 
     def _deliver_transcribed_text(self, text: str) -> None:
+        self._recording_hint = "Команда распознана. Передаю в обработку..."
+        self.recordingHintChanged.emit()
+        self.state.status = "Передаю команду в обработку"
+        self.statusChanged.emit()
         self.services.voice.mark_wake_route_handoff()
         self.voiceTimingsChanged.emit()
         if self._chat_bridge is not None:
@@ -341,13 +366,28 @@ class VoiceBridge(QObject):
     def _push_voice_note(self, note: str) -> None:
         self._recording_hint = note
         self.recordingHintChanged.emit()
-        self.state.status = "Готов"
+        lowered = note.casefold()
+        if "не расслыш" in lowered or "not heard" in lowered:
+            self.state.status = "Не расслышал"
+        elif "микрофон" in lowered or "mic" in lowered:
+            self.state.status = "Ошибка микрофона"
+        elif "ошиб" in lowered or "error" in lowered or "stt" in lowered or "ключ" in lowered:
+            self.state.status = "Ошибка распознавания"
+        elif "останов" in lowered or "cancel" in lowered:
+            self.state.status = "Запись остановлена"
+        else:
+            self.state.status = "Готов"
+        self.statusChanged.emit()
 
     def _finalize_capture(self) -> None:
         self.recordingChanged.emit()
-        self._recording_hint = "Ручной микрофон готов."
-        self.recordingHintChanged.emit()
-        self.state.status = "Готов"
+        self._wake_hint = ""
+        self.wakeHintChanged.emit()
+        if self.state.status not in {"Не расслышал", "Ошибка микрофона", "Ошибка распознавания", "Запись остановлена"}:
+            self._recording_hint = "Ручной микрофон готов."
+            self.recordingHintChanged.emit()
+            self.state.status = "Готов"
+        self.statusChanged.emit()
         if self.wakeWordEnabled:
             self.startWakeRuntime()
 
@@ -360,13 +400,14 @@ class VoiceBridge(QObject):
     def _handle_wake_detected(self, pre_roll: bytes) -> None:
         if self.services.voice.is_recording:
             return
-        self._recording_hint = "Слово активации найдено. Подхватываю начало команды..."
-        self.recordingHintChanged.emit()
-        self.state.status = "Подхватываю команду"
+        self._wake_hint = "Услышал «Джарвис». Подхватываю начало команды..."
+        self.wakeHintChanged.emit()
+        self.state.status = "Услышал «Джарвис»"
+        self.statusChanged.emit()
         self.services.voice.set_wake_runtime_status(
             "capturing_command",
             ready=False,
-            detail="Подхватываю начало команды",
+            detail="Услышал «Джарвис». Подхватываю начало команды",
         )
         thread = threading.Thread(target=self._finish_after_wake, args=(pre_roll,), daemon=True)
         thread.start()
@@ -397,6 +438,26 @@ class VoiceBridge(QObject):
         self.summaryChanged.emit()
         self.statusChanged.emit()
         self.voiceTimingsChanged.emit()
+
+    def _start_voice_runtime_warmup(self) -> None:
+        with self._warmup_lock:
+            if self._warmup_started:
+                return
+            self._warmup_started = True
+
+        def _worker() -> None:
+            wake_backend = getattr(self.services, "wake", None)
+            voice_backend = getattr(self.services, "voice", None)
+            try:
+                if wake_backend is not None and hasattr(wake_backend, "warm_up_model"):
+                    wake_backend.warm_up_model()
+                if voice_backend is not None and hasattr(voice_backend, "warm_up_local_stt_backend"):
+                    voice_backend.warm_up_local_stt_backend()
+            finally:
+                self.statusChanged.emit()
+                self.voiceTimingsChanged.emit()
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _wake_failure_note(self, result) -> str:  # noqa: ANN001
         status = str(getattr(result, "status", ""))

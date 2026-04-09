@@ -273,6 +273,8 @@ class IntentRouter:
                         )
                     ],
                 )
+            if items and not self._open_command_is_confident(text, items):
+                return ExecutionPlan(command=text, question="Что открыть?")
             if items:
                 titles = [str(item.get("title", "")).strip() for item in items if str(item.get("title", "")).strip()]
                 summary = titles[0] if len(titles) == 1 else ", ".join(titles)
@@ -356,6 +358,27 @@ class IntentRouter:
         if hasattr(self.action_registry, "resolve_open_command"):
             return self.action_registry.resolve_open_command(command)
         return self.action_registry.find_items(command), ""
+
+    def _open_command_is_confident(self, command: str, items: list[dict[str, str]]) -> bool:
+        target_text = self._strip_open_verb(command)
+        splitter = getattr(self.action_registry, "split_open_target_sequence", None)
+        if callable(splitter):
+            phrases, remainder = splitter(target_text)
+            if remainder.strip():
+                return False
+            if len(phrases) != len(items):
+                return False
+            return bool(phrases)
+        return len(items) == 1
+
+    def _strip_open_verb(self, command: str) -> str:
+        text = self._normalize(command)
+        lower = text.casefold()
+        for verb in OPEN_VERBS:
+            prefix = f"{verb} "
+            if lower.startswith(prefix):
+                return text[len(verb) :].lstrip()
+        return text
 
     def _search_query(self, text: str) -> str:
         query = text.casefold()

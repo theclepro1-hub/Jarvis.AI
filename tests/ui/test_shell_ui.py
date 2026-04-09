@@ -502,6 +502,23 @@ def test_settings_connections_can_update_registration_fields(ui_runtime) -> None
     assert "Подключения сохранены" in _find(window, "settingsConnectionsFeedback").property("text")
 
 
+def test_settings_updates_section_stays_last(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 200)
+    _click(app, window, _find(window, "navButton_settings"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+
+    settings_screen = Path(__file__).resolve().parents[2] / "ui" / "qml" / "screens" / "SettingsScreen.qml"
+    source = settings_screen.read_text(encoding="utf-8")
+
+    appearance_index = source.index('title: "Внешний вид"')
+    updates_index = source.index('title: "Обновления"')
+
+    assert updates_index > appearance_index
+
+
 def test_scroll_views_accept_scroll_input(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
@@ -571,6 +588,41 @@ def test_chat_viewport_does_not_drift_horizontally_after_theme_change(ui_runtime
     _pump(app, 160)
 
     assert list_view.property("contentX") == 0
+
+
+def test_chat_autoscroll_follows_new_user_and_assistant_messages(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+    for index in range(18):
+        role = "assistant" if index % 2 == 0 else "user"
+        runtime.chat_bridge._append_message(  # noqa: SLF001 - regression coverage for UI follow-bottom wiring.
+            role,
+            (
+                f"Сообщение {index}: длинный текст для проверки автоскролла. "
+                "Он должен держать список внизу после каждого нового ответа или запроса."
+            ),
+        )
+
+    _pump(app, 260)
+    list_view = _wait_for_object(app, window, "chatListView")
+    bottom_y = float(list_view.property("contentY"))
+
+    _wheel(app, window, list_view, 260)
+    scrolled_y = float(list_view.property("contentY"))
+    assert scrolled_y < bottom_y
+
+    runtime.chat_bridge._append_message("user", "новое сообщение пользователя")  # noqa: SLF001
+    _pump(app, 260)
+    after_user = float(list_view.property("contentY"))
+    assert after_user >= bottom_y - 2
+
+    runtime.chat_bridge._append_message("assistant", "новый ответ JARVIS")  # noqa: SLF001
+    _pump(app, 260)
+    after_assistant = float(list_view.property("contentY"))
+    assert after_assistant >= bottom_y - 2
 
 
 def test_chat_execution_card_renders_steps(ui_runtime) -> None:

@@ -230,7 +230,7 @@ if (Test-Path $innoCompiler) {
     $installerScript = Join-Path $installerDir "JarvisAi_Unity.iss"
     $installerScriptContent = @"
 [Setup]
-AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}
+AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}}
 AppName=JARVIS Unity
 AppVersion=$version
 AppVerName=JARVIS Unity $version

@@ -9,9 +9,13 @@ Rectangle {
     signal micPressed()
     property bool recording: false
     property string recordingHint: ""
+    property string wakeHint: ""
     property bool busy: false
     property string busyHint: ""
     property string idleHint: ""
+    readonly property string defaultRecordingIdleHint: "Ручной микрофон готов."
+    readonly property bool hasPriorityWakeHint: wakeHint.length > 0
+                                              && wakeHint !== defaultRecordingIdleHint
 
     color: Theme.Colors.cardAlt
     radius: Theme.Spacing.radius
@@ -80,8 +84,9 @@ Rectangle {
                   ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
                   : root.busy
                     ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
-                    : (root.idleHint.length ? root.idleHint
-                      : (root.recordingHint.length ? root.recordingHint : "Enter отправляет, Shift+Enter переносит строку."))
+                    : (root.hasPriorityWakeHint ? root.wakeHint
+                      : (root.idleHint.length ? root.idleHint
+                        : (root.recordingHint.length ? root.recordingHint : "Enter отправляет, Shift+Enter переносит строку.")))
             color: root.recording || root.busy ? Theme.Colors.accent : Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily
             font.pixelSize: Theme.Typography.micro

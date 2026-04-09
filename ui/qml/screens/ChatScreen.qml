@@ -42,14 +42,14 @@ Rectangle {
                     spacing: 10
 
                     StatusPill {
-                        text: "РґСѓРјР°СЋ"
+                        text: "Думаю..."
                     }
 
                     Text {
                         Layout.fillWidth: true
                         text: chatBridge.thinkingLabel.length > 0
                               ? chatBridge.thinkingLabel
-                              : "JARVIS РµС‰С‘ РЅРµ РѕС‚РІРµС‚РёР», РЅРѕ Р·Р°РїСЂРѕСЃ СѓР¶Рµ РІ СЂР°Р±РѕС‚Рµ."
+                              : "JARVIS ещё не ответил, но запрос уже в работе."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
@@ -108,14 +108,22 @@ Rectangle {
                 id: listView
                 objectName: "chatListView"
                 property bool followBottom: true
+
                 function nearBottom() {
                     return (contentHeight - (contentY + height)) <= 48
                 }
+
                 function scheduleFollowBottom() {
                     if (followBottom) {
                         followBottomTimer.restart()
+                        Qt.callLater(function() {
+                            if (followBottom) {
+                                followBottomTimer.restart()
+                            }
+                        })
                     }
                 }
+
                 anchors.fill: parent
                 anchors.margins: 18
                 spacing: 16
@@ -124,38 +132,48 @@ Rectangle {
                 orientation: ListView.Vertical
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
-                onCountChanged: {
-                    scheduleFollowBottom()
-                }
-                onContentHeightChanged: {
-                    scheduleFollowBottom()
-                }
-                onHeightChanged: {
-                    scheduleFollowBottom()
-                }
+
+                onCountChanged: scheduleFollowBottom()
+                onContentHeightChanged: scheduleFollowBottom()
+                onHeightChanged: scheduleFollowBottom()
                 onMovementStarted: followBottom = nearBottom()
                 onFlickStarted: followBottom = nearBottom()
                 onMovementEnded: followBottom = nearBottom()
                 onFlickEnded: followBottom = nearBottom()
+
                 onContentYChanged: {
                     if (!moving && !flicking) {
                         followBottom = nearBottom()
                     }
                 }
+
                 onContentXChanged: {
                     if (contentX !== 0) {
                         contentX = 0
                     }
                 }
+
                 Component.onCompleted: scheduleFollowBottom()
 
                 Timer {
                     id: followBottomTimer
-                    interval: 0
+                    interval: 16
                     repeat: false
+
                     onTriggered: {
                         if (listView.followBottom) {
                             listView.positionViewAtEnd()
+                        }
+                    }
+                }
+
+                Connections {
+                    target: chatBridge
+
+                    function onMessageAppended(role) {
+                        if (role === "user" || role === "assistant") {
+                            listView.followBottom = true
+                            listView.scheduleFollowBottom()
                         }
                     }
                 }
@@ -268,6 +286,7 @@ Rectangle {
             Layout.preferredHeight: 96
             busy: chatBridge.thinking
             busyHint: chatBridge.thinkingLabel
+            wakeHint: voiceBridge.wakeHint
             idleHint: chatBridge.lastResponseHint
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint

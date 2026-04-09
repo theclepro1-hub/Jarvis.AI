@@ -183,15 +183,23 @@ class VoiceService:
         parts = []
         if metrics.pre_roll_ms > 0:
             parts.append(f"pre-roll {metrics.pre_roll_ms:.0f} мс")
+        if metrics.wake_to_capture_ms > 0:
+            parts.append(f"wake→capture {metrics.wake_to_capture_ms:.0f} мс")
         if metrics.capture_ms > 0:
             parts.append(f"capture {metrics.capture_ms:.0f} мс")
         if metrics.stt_ms > 0:
             parts.append(f"stt {metrics.stt_ms:.0f} мс")
+        if metrics.stt_to_route_ms > 0:
+            parts.append(f"handoff {metrics.stt_to_route_ms:.0f} мс")
         if metrics.total_ms > 0:
             parts.append(f"total {metrics.total_ms:.0f} мс")
-        backend = metrics.stt_backend or metrics.wake_backend
-        if backend:
-            parts.append(backend)
+        backend_parts = []
+        if metrics.wake_backend:
+            backend_parts.append(f"wake {metrics.wake_backend}")
+        if metrics.stt_backend:
+            backend_parts.append(f"stt {metrics.stt_backend}")
+        if backend_parts:
+            parts.append("backend " + " · ".join(backend_parts))
         if metrics.final_status:
             parts.append(metrics.final_status)
         return " · ".join(parts) if parts else "Нет последнего wake-сеанса."
@@ -247,10 +255,10 @@ class VoiceService:
     def mark_wake_route_handoff(self) -> None:
         if not self._wake_metrics.session_id:
             return
-        self.set_wake_runtime_status("routing", ready=False, detail="Передаю команду в обработку")
+        self.set_wake_runtime_status("routing", ready=False, detail="Команда распознана. Передаю в обработку")
         self._wake_metrics.route_handoff_at = time.perf_counter()
         self._wake_metrics.phase = "routing"
-        self._wake_metrics.detail = "Передаю команду в обработку"
+        self._wake_metrics.detail = "Команда распознана. Передаю в обработку"
         self._wake_metrics.final_status = "handoff"
         self._wake_metrics.failure_detail = ""
 
@@ -267,6 +275,9 @@ class VoiceService:
 
     def tts_status_text(self) -> str:
         return self.tts_service.status_text()
+
+    def warm_up_local_stt_backend(self) -> bool:
+        return self.stt_service.warm_up_local_backend()
 
     def available_tts_engines(self) -> list[dict[str, object]]:
         return [
@@ -363,7 +374,7 @@ class VoiceService:
         transcription = self.stt_service.transcribe_pcm_bytes(capture.raw_audio)
         self.mark_wake_transcription_result(transcription)
         if transcription.ok:
-            self.set_wake_runtime_status("routing", ready=False, detail="Распознаю команду")
+            self.set_wake_runtime_status("routing", ready=False, detail="Команда распознана. Передаю в обработку")
             stripped_text, matched_prefix, has_tail = self._split_wake_prefix(transcription.text)
             if matched_prefix and not has_tail:
                 detail = "Не расслышал команду"

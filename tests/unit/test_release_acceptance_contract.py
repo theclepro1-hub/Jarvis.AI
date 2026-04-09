@@ -183,7 +183,7 @@ def test_release_gate_wake_notes_do_not_become_chat_bubbles() -> None:
     bridge._push_voice_note("Не расслышал команду после слова активации.")  # noqa: SLF001
 
     assert chat.appended == []
-    assert state.status == "Готов"
+    assert state.status == "Не расслышал"
 
 
 def test_release_gate_local_commands_do_not_call_llm() -> None:

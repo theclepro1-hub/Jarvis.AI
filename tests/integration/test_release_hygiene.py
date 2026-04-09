@@ -77,6 +77,7 @@ def test_installer_metadata_matches_runtime_identity() -> None:
     assert f"VersionInfoProductVersion={current_version}" in installer_script
     assert f"VersionInfoTextVersion={current_version}" in installer_script
     assert "UninstallDisplayName=JARVIS Unity" in installer_script
+    assert "AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}}" in installer_script
     assert 'AppUserModelID: "theclepro1.JarvisAiUnity"' in installer_script
     assert "AppMutex=JarvisAi_Unity_22_instance_mutex" in installer_script
     assert "SetupMutex=JarvisAi_Unity_22_setup_mutex" in installer_script

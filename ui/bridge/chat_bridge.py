@@ -14,6 +14,7 @@ class ChatBridge(QObject):
     quickActionsChanged = Signal()
     appCatalogChanged = Signal()
     queueChanged = Signal()
+    messageAppended = Signal(str)
     thinkingChanged = Signal()
     thinkingLabelChanged = Signal()
     lastResponseHintChanged = Signal()
@@ -332,6 +333,7 @@ class ChatBridge(QObject):
         if self._should_persist_history():
             self.services.chat_history.save(self._messages)
         self.messagesChanged.emit()
+        self.messageAppended.emit(role)
 
     def _time_string(self) -> str:
         return datetime.now().strftime("%H:%M")

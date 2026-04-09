@@ -189,4 +189,4 @@ def test_voice_service_reports_handoff_honestly_after_wake_session():
     assert metrics["routeHookSeen"] is True
     assert metrics["finalStatus"] == "handoff"
     assert "handoff" in voice.latest_wake_metrics_summary()
-    assert voice.wake_status_text() == "Передаю команду в обработку"
+    assert voice.wake_status_text() == "Команда распознана. Передаю в обработку"

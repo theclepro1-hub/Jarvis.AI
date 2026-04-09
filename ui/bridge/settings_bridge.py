@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from core.updates.update_service import DEFAULT_VERSION
+
 
 _SETTINGS_WRITE_LOCK = threading.RLock()
 
@@ -44,6 +46,42 @@ class SettingsBridge(QObject):
         self._telegramTestFinished.connect(self._on_telegram_test_finished)
         self._updateCheckFinished.connect(self._on_update_check_finished)
 
+    def _updates_service_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_updates"):
+            return getattr(self.services, "_updates")
+        if hasattr(self.services, "__dict__") and "updates" in vars(self.services):
+            return vars(self.services).get("updates")
+        return None
+
+    def _default_update_summary(self) -> str:
+        return f"Версия {DEFAULT_VERSION} · канал стабильный"
+
+    def _default_update_status(self) -> dict[str, object]:
+        return {
+            "current_version": DEFAULT_VERSION,
+            "latest_version": "",
+            "release_url": "",
+            "update_available": False,
+            "last_error": "",
+            "last_checked_at_utc": "",
+            "assets": [],
+            "apply_supported": False,
+            "can_apply": False,
+            "apply_hint": "",
+            "preferred_installer_asset": "",
+            "last_downloaded_installer": "",
+            "last_apply_message": "",
+            "apply_in_progress": False,
+            "check_in_progress": False,
+            "installer_running": False,
+            "active_installer_pid": 0,
+            "status_code": "idle",
+            "status_message": self._default_update_summary(),
+            "manual_download_required": False,
+            "apply_mode": "manual",
+            "installer_launch_arguments": [],
+        }
+
     @Property(str, notify=themeModeChanged)
     def themeMode(self) -> str:
         return self.services.settings.get("theme_mode", "midnight")
@@ -67,7 +105,7 @@ class SettingsBridge(QObject):
 
     @Property(bool, notify=minimizeToTrayEnabledChanged)
     def minimizeToTrayEnabled(self) -> bool:
-        return self.services.settings.get("minimize_to_tray_enabled", True)
+        return self.services.settings.get("minimize_to_tray_enabled", False)
 
     @minimizeToTrayEnabled.setter
     def minimizeToTrayEnabled(self, value: bool) -> None:
@@ -77,7 +115,7 @@ class SettingsBridge(QObject):
 
     @Property(bool, notify=startMinimizedEnabledChanged)
     def startMinimizedEnabled(self) -> bool:
-        return self.services.settings.get("start_minimized_enabled", True)
+        return self.services.settings.get("start_minimized_enabled", False)
 
     @startMinimizedEnabled.setter
     def startMinimizedEnabled(self, value: bool) -> None:
@@ -269,28 +307,17 @@ class SettingsBridge(QObject):
 
     @Property(str, notify=updateSummaryChanged)
     def updateSummary(self) -> str:
-        return self.services.updates.summary()
+        updates = self._updates_service_if_ready()
+        if updates is not None and hasattr(updates, "summary"):
+            return str(updates.summary())
+        return self._default_update_summary()
 
     @Property("QVariantMap", notify=updateSummaryChanged)
     def updateStatus(self) -> dict[str, object]:
-        updates = getattr(self.services, "updates", None)
+        updates = self._updates_service_if_ready()
         if updates is not None and hasattr(updates, "status_snapshot"):
             return dict(updates.status_snapshot())
-        return {
-            "current_version": "",
-            "latest_version": "",
-            "release_url": "",
-            "update_available": False,
-            "last_error": "update service unavailable",
-            "last_checked_at_utc": "",
-            "assets": [],
-            "apply_supported": False,
-            "can_apply": False,
-            "apply_hint": "",
-            "preferred_installer_asset": "",
-            "last_downloaded_installer": "",
-            "last_apply_message": "",
-        }
+        return self._default_update_status()
 
     @Slot(str, str, str, result=bool)
     def saveConnections(self, groq_api_key: str, telegram_bot_token: str, telegram_user_id: str) -> bool:
