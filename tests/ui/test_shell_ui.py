@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QObject, QPoint, Qt
 from PySide6.QtGui import QGuiApplication, QKeySequence, QWheelEvent
 from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
+from shiboken6 import delete
 
 from app.app import JarvisUnityApplication
 from core.actions.action_registry import ActionRegistry
@@ -292,6 +293,10 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_STARTUP_REGISTRY", "1")
     monkeypatch.setattr("app.app.ServiceContainer", _TestServiceContainer)
 
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QGuiApplication):
+        existing.quit()
+        delete(existing)
     app = QGuiApplication.instance() or QGuiApplication([])
     for top_level in list(app.topLevelWindows()):
         top_level.close()
@@ -438,6 +443,8 @@ def test_apps_screen_add_button_and_feedback_work(ui_runtime) -> None:
     _click(app, window, _find(window, "registrationSkipButton"))
     _pump(app, 200)
     _click(app, window, _find(window, "navButton_apps"))
+    _click(app, window, _find(window, "customAppManualButton"))
+    _pump(app, 120)
 
     _find(window, "customAppTitleField").setProperty("text", "Deadlock")
     _find(window, "customAppTargetField").setProperty("text", "steam://rungameid/1422450")

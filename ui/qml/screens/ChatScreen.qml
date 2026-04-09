@@ -108,19 +108,25 @@ Rectangle {
                 id: listView
                 objectName: "chatListView"
                 property bool followBottom: true
+                property bool followBottomPending: false
 
                 function nearBottom() {
                     return (contentHeight - (contentY + height)) <= 48
                 }
 
+                function requestFollowBottom() {
+                    followBottom = true
+                    followBottomPending = true
+                    scheduleFollowBottom()
+                }
+
                 function scheduleFollowBottom() {
-                    if (followBottom) {
-                        followBottomTimer.restart()
-                        Qt.callLater(function() {
-                            if (followBottom) {
-                                followBottomTimer.restart()
-                            }
-                        })
+                    if (!(followBottom || followBottomPending) || count <= 0) {
+                        return
+                    }
+                    positionViewAtEnd()
+                    if (nearBottom()) {
+                        followBottomPending = false
                     }
                 }
 
@@ -153,27 +159,14 @@ Rectangle {
                     }
                 }
 
-                Component.onCompleted: scheduleFollowBottom()
-
-                Timer {
-                    id: followBottomTimer
-                    interval: 16
-                    repeat: false
-
-                    onTriggered: {
-                        if (listView.followBottom) {
-                            listView.positionViewAtEnd()
-                        }
-                    }
-                }
+                Component.onCompleted: requestFollowBottom()
 
                 Connections {
                     target: chatBridge
 
                     function onMessageAppended(role) {
                         if (role === "user" || role === "assistant") {
-                            listView.followBottom = true
-                            listView.scheduleFollowBottom()
+                            listView.requestFollowBottom()
                         }
                     }
                 }

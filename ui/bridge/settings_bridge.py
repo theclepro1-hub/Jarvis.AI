@@ -378,17 +378,13 @@ class SettingsBridge(QObject):
             feedback = ""
             try:
                 ok = bool(telegram.send_test_message(text="JARVIS Unity на связи. Тест Telegram прошёл."))
-            except Exception as exc:  # noqa: BLE001
+            except Exception:  # noqa: BLE001
                 ok = False
-                feedback = f"Telegram не ответил: {type(exc).__name__}"
             if not feedback:
                 if ok:
                     feedback = "Тестовое сообщение отправлено в Telegram."
                 else:
-                    error = ""
-                    if hasattr(telegram, "last_error"):
-                        error = str(telegram.last_error()).strip()
-                    feedback = f"Telegram не ответил: {error or 'проверьте токен и ID'}"
+                    feedback = "Telegram не ответил. Проверьте токен, Telegram ID и сеть."
             self._telegramTestFinished.emit(ok, feedback)
 
         try:

@@ -33,6 +33,15 @@ class _Actions:
                     "target": "explorer.exe",
                 }
             ], ""
+        if "\u043f\u0430\u043d\u0435\u043b\u044c" in lower:
+            return [
+                {
+                    "id": "system_control_panel",
+                    "title": "\u041f\u0430\u043d\u0435\u043b\u044c \u0443\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u044f",
+                    "kind": "uri",
+                    "target": "control.exe",
+                }
+            ], ""
         return [], ""
 
     def find_items(self, _command: str):  # noqa: ANN001, ANN202
@@ -95,3 +104,43 @@ def test_intent_router_opens_builtin_windows_targets_without_question() -> None:
     assert explorer_plan.question == ""
     assert len(explorer_plan.steps) == 1
     assert explorer_plan.steps[0].kind == "open_items"
+
+
+def test_intent_router_opens_built_in_windows_targets_without_open_verb() -> None:
+    router = IntentRouter(_Actions())
+
+    settings_plan = router.build("\u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b")
+    explorer_plan = router.build("\u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a")
+    noisy_panel_plan = router.build("\u043f\u043e \u043f\u0430\u043d\u0435\u043b\u044c")
+    panel_plan = router.build("\u043f\u0430\u043d\u0435\u043b\u044c")
+
+    assert settings_plan is not None
+    assert settings_plan.question == ""
+    assert len(settings_plan.steps) == 1
+    assert settings_plan.steps[0].kind == "open_items"
+
+    assert explorer_plan is not None
+    assert explorer_plan.question == ""
+    assert len(explorer_plan.steps) == 1
+    assert explorer_plan.steps[0].kind == "open_items"
+
+    assert noisy_panel_plan is not None
+    assert noisy_panel_plan.question == ""
+    assert len(noisy_panel_plan.steps) == 1
+    assert noisy_panel_plan.steps[0].kind == "open_items"
+
+    assert panel_plan is not None
+    assert panel_plan.question == ""
+    assert len(panel_plan.steps) == 1
+    assert panel_plan.steps[0].kind == "open_items"
+
+
+def test_intent_router_strips_polite_filler_before_open_resolution() -> None:
+    router = IntentRouter(_Actions())
+
+    plan = router.build("\u043d\u0443 \u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b")
+
+    assert plan is not None
+    assert plan.question == ""
+    assert len(plan.steps) == 1
+    assert plan.steps[0].kind == "open_items"

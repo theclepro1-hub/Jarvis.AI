@@ -177,6 +177,21 @@ def test_voice_bridge_preserves_failure_note_through_finalize():
     assert bridge.recordingHint == "Не расслышал команду после слова активации."
 
 
+def test_voice_bridge_keeps_wake_hint_until_explicit_clear():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    bridge._wake_hint = "Услышал «Джарвис». Подхватываю начало команды..."  # noqa: SLF001
+    bridge._finalize_capture()  # noqa: SLF001
+
+    assert bridge.wakeHint == "Услышал «Джарвис». Подхватываю начало команды..."
+
+    bridge.clearWakeHint()
+
+    assert bridge.wakeHint == ""
+
+
 def test_voice_bridge_is_recording_does_not_force_lazy_voice_service():
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, _LazyVoiceServices(), chat_bridge=_ChatBridge())

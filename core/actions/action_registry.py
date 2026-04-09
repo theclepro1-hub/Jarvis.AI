@@ -9,6 +9,7 @@ from typing import Iterable
 
 from core.actions.launcher_discovery import DiscoveredApp, LauncherDiscovery
 from core.models.action_models import ActionOutcome
+from core.routing.text_rules import strip_leading_command_fillers
 
 
 OPEN_VERBS = ("открой", "открыть", "запусти", "запустить", "включи", "включить")
@@ -54,7 +55,7 @@ NATURAL_ALIAS_TEMPLATES = (
         ("саундклауд", "саунд клоуд", "soundcloud"),
     ),
 )
-OPEN_SEQUENCE_CONNECTOR_PATTERN = re.compile(r"^(?:[\s,.:;!?-]+|и\s+|а\s+ещ[её]\s+|потом\s+)+", re.IGNORECASE)
+OPEN_SEQUENCE_CONNECTOR_PATTERN = re.compile(r"^(?:[\s,.:;!?-]+|и\s+|а\s+ещ[её]\s+|потом\s+|по\s+)+", re.IGNORECASE)
 SYSTEM_TARGET_IDS = {
     "system_settings",
     "system_explorer",
@@ -236,7 +237,7 @@ class ActionRegistry:
             {
                 "id": "system_control_panel",
                 "title": "Панель управления",
-                "aliases": ["панель управления", "control panel", "control"],
+                "aliases": ["панель управления", "панель", "control panel", "control"],
                 "kind": "uri",
                 "target": "control.exe",
                 "category": "system",
@@ -287,7 +288,12 @@ class ActionRegistry:
 
     def quick_actions(self) -> list[dict[str, str]]:
         pinned = [self._find_by_id(action_id) for action_id in self._pinned_command_ids()]
-        curated = [self._find_by_id(action_id) for action_id in QUICK_ACTION_IDS]
+        curated: list[dict[str, str] | None] = []
+        for action_id in QUICK_ACTION_IDS:
+            if action_id == "music":
+                curated.append(self._default_music_item())
+                continue
+            curated.append(self._find_by_id(action_id))
         items: list[dict[str, str]] = []
         seen: set[str] = set()
         for item in [*pinned, *curated]:
@@ -341,7 +347,8 @@ class ActionRegistry:
         return found
 
     def resolve_open_command(self, command: str) -> tuple[list[dict[str, str]], str]:
-        target_text = self._strip_open_verb(command).casefold()
+        clean_command = strip_leading_command_fillers(command)
+        target_text = self._strip_open_verb(clean_command).casefold()
         exact_music = self._exact_music_item(target_text)
         if exact_music:
             return [exact_music], ""
@@ -376,15 +383,35 @@ class ActionRegistry:
                 "confirmation_prompt": SYSTEM_ACTION_CONFIRM_PROMPTS.get(action, ""),
             }
 
-        if not any(normalized.startswith(f"{verb} ") for verb in OPEN_VERBS):
-            return None
+        if any(normalized.startswith(f"{verb} ") for verb in OPEN_VERBS):
+            items, question = self.resolve_open_command(command)
+            if question or len(items) != 1:
+                return None
 
-        items, question = self.resolve_open_command(command)
+            item = items[0]
+            if not self.is_system_item(item):
+                return None
+
+            return {
+                "action": "open_target",
+                "mode": "open",
+                "title": f"Открываю {item['title']}",
+                "detail": str(item.get("target", "")),
+                "target": str(item.get("target", "")),
+                "target_kind": str(item.get("kind", "file")),
+                "item_id": str(item.get("id", "")),
+            }
+
+        items, question = self.resolve_open_command(normalized)
         if question or len(items) != 1:
             return None
 
         item = items[0]
         if not self.is_system_item(item):
+            return None
+
+        phrases, remainder = self.split_open_target_sequence(normalized)
+        if remainder or len(phrases) != 1:
             return None
 
         return {
@@ -403,13 +430,13 @@ class ActionRegistry:
         return category == "system" or item_id in SYSTEM_TARGET_IDS
 
     def can_resolve_open_target(self, text: str) -> bool:
-        clean = self._consume_open_sequence_connectors(text)
+        clean = self._consume_open_sequence_connectors(strip_leading_command_fillers(text))
         if not clean:
             return False
         return self._best_open_target_prefix(clean) is not None
 
     def split_open_target_sequence(self, text: str) -> tuple[list[str], str]:
-        remaining = re.sub(r"\s+", " ", str(text or "").strip(" ,"))
+        remaining = re.sub(r"\s+", " ", strip_leading_command_fillers(str(text or ""))).strip(" ,")
         phrases: list[str] = []
         while remaining:
             remaining = self._consume_open_sequence_connectors(remaining)
@@ -750,7 +777,8 @@ class ActionRegistry:
         return command.strip()
 
     def _normalize_system_command(self, command: str) -> str:
-        clean = re.sub(r"\s+", " ", str(command or "").strip(" .,!?:;")).casefold()
+        clean = strip_leading_command_fillers(str(command or ""))
+        clean = re.sub(r"\s+", " ", clean.strip(" .,!?:;")).casefold()
         for prefix in SYSTEM_POLITE_PREFIXES:
             if clean.startswith(prefix):
                 clean = clean[len(prefix) :].lstrip()

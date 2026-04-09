@@ -84,6 +84,14 @@ class _Voice:
         return "ok"
 
 
+class _WakeBridge:
+    def __init__(self) -> None:
+        self.cleared = 0
+
+    def clearWakeHint(self) -> None:
+        self.cleared += 1
+
+
 class _Services:
     def __init__(self, route) -> None:  # noqa: ANN001
         self.chat_history = _History()
@@ -170,6 +178,17 @@ def test_wake_noise_does_not_enter_chat_history_but_reminders_do() -> None:
     assert bridge.messages[-1]["text"] == "Напоминание: чай"
 
 
+def test_chat_bridge_clears_wake_hint_on_assistant_note() -> None:
+    route = SimpleNamespace(kind="ai", commands=["чай"], assistant_lines=[], queue_items=["чай"], execution_result=None)
+    wake_bridge = _WakeBridge()
+    bridge, _services = _bridge_for(route)
+    bridge.app_bridge = SimpleNamespace(voice_bridge=wake_bridge)
+
+    bridge.appendAssistantNote("Напоминание: чай")
+
+    assert wake_bridge.cleared >= 1
+
+
 def test_clear_history_keeps_only_fresh_welcome_message() -> None:
     route = _route_with_steps(
         [ExecutionStep("open:youtube", "open_url", "Открываю YouTube", status="done")],
@@ -245,6 +264,23 @@ def test_chat_bridge_exposes_last_response_hint_from_ai_result(monkeypatch) -> N
     assert services.ai.received == ["как дела"]
     assert bridge.lastResponseHint == "Быстро: Groq · 0.1 с"
     assert bridge.thinkingLabel == ""
+
+
+def test_chat_bridge_clears_wake_hint_when_execution_result_is_appended() -> None:
+    route = _route_with_steps(
+        [ExecutionStep("open:youtube", "open_url", "Открываю YouTube", status="done")],
+        ["Открываю YouTube"],
+    )
+    wake_bridge = _WakeBridge()
+    bridge, _services = _bridge_for(route)
+    bridge.app_bridge = SimpleNamespace(voice_bridge=wake_bridge)
+
+    bridge.appendExecutionResult(
+        "Выполняю 1 действие",
+        [{"title": "YouTube", "status": "готово"}],
+    )
+
+    assert wake_bridge.cleared >= 1
 
 
 def test_chat_bridge_ignores_empty_local_noise_route() -> None:

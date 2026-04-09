@@ -168,6 +168,7 @@ def test_settings_bridge_send_telegram_test_is_single_flight() -> None:
 
     assert telegram.calls == 1
     assert "Telegram не ответил" in bridge.connectionFeedback
+    assert "timeout" not in bridge.connectionFeedback.lower()
 
 
 def test_settings_bridge_check_for_updates_is_single_flight() -> None:

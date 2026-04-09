@@ -11,25 +11,20 @@ Rectangle {
     signal helpRequested(string text)
     signal helpCleared()
 
-    property bool confirmDeleteAllData: false
-
     function connectionFeedbackText() {
         return settingsBridge.connectionFeedback || ""
     }
 
     function telegramFeedbackText() {
         var feedback = settingsBridge.connectionFeedback || ""
-        if (feedback.indexOf("РўРµСЃС‚") === 0 || feedback.indexOf("Telegram") === 0) {
+        if (feedback.indexOf("Тест") === 0 || feedback.indexOf("Telegram") === 0) {
             return feedback
         }
         return ""
     }
 
     function deleteAllDataHintText() {
-        if (settingsRoot.confirmDeleteAllData) {
-            return "Deleting all local data requires one more click. This clears keys, history, Telegram state and the local profile from %LOCALAPPDATA%."
-        }
-        return "This action is irreversible and wipes the full local JARVIS profile from %LOCALAPPDATA%."
+        return "Это действие необратимо и удаляет ключи, историю, Telegram-состояние и весь локальный профиль JARVIS из %LOCALAPPDATA%."
     }
 
     function aiModeLabel() {
@@ -65,7 +60,7 @@ Rectangle {
     function telegramDetailsText() {
         var status = settingsBridge.telegramStatus
         if (status.lastError && status.lastError.length > 0) {
-            return "Ошибка: " + status.lastError
+            return "Telegram сейчас отвечает с ошибкой. Проверьте токен, Telegram ID и сеть."
         }
         if (status.lastCommand && status.lastCommand.length > 0) {
             var reply = status.lastReply && status.lastReply.length > 0 ? status.lastReply : "ответа ещё нет"
@@ -566,27 +561,14 @@ Rectangle {
                         spacing: 8
 
                         SecondaryButton {
-                            text: settingsRoot.confirmDeleteAllData ? "Точно удалить данные?" : "Удалить все данные"
+                            text: "Удалить все данные"
                             danger: true
-                            onClicked: {
-                                if (!settingsRoot.confirmDeleteAllData) {
-                                    settingsRoot.confirmDeleteAllData = true
-                                    return
-                                }
-                                settingsBridge.deleteAllData()
-                                settingsRoot.confirmDeleteAllData = false
-                            }
-                        }
-
-                        SecondaryButton {
-                            visible: settingsRoot.confirmDeleteAllData
-                            text: "Отмена"
-                            onClicked: settingsRoot.confirmDeleteAllData = false
+                            onClicked: deleteAllDataDialog.open()
                         }
 
                         Text {
                             text: settingsRoot.deleteAllDataHintText()
-                            color: settingsRoot.confirmDeleteAllData ? "#ffb4b4" : Theme.Colors.textSoft
+                            color: "#ffb4b4"
                             font.family: Theme.Typography.bodyFamily
                             font.pixelSize: Theme.Typography.micro
                             wrapMode: Text.WordWrap
@@ -688,7 +670,7 @@ Rectangle {
                                 text: settingsBridge.updateCheckBusy
                                       ? "Идёт проверка обновлений или запуск установщика..."
                                       : settingsBridge.updateStatus.last_error && settingsBridge.updateStatus.last_error.length > 0
-                                      ? settingsBridge.updateStatus.last_error
+                                      ? "Проверка обновлений не удалась. Проверьте сеть или VPN и попробуйте ещё раз."
                                       : settingsBridge.updateStatus.last_apply_message && settingsBridge.updateStatus.last_apply_message.length > 0
                                       ? settingsBridge.updateStatus.last_apply_message
                                       : settingsBridge.updateStatus.apply_hint && settingsBridge.updateStatus.apply_hint.length > 0
@@ -706,6 +688,74 @@ Rectangle {
             }
 
             Item { Layout.preferredHeight: 4 }
+        }
+    }
+
+    Popup {
+        id: deleteAllDataDialog
+        parent: settingsRoot
+        modal: true
+        focus: true
+        width: Math.min(settingsRoot.width - 48, 560)
+        x: Math.round((settingsRoot.width - width) / 2)
+        y: Math.round((settingsRoot.height - height) / 2)
+        padding: 18
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            radius: 24
+            color: Theme.Colors.card
+            border.color: Qt.rgba(1.0, 0.48, 0.48, 0.26)
+            border.width: 1
+        }
+
+        Overlay.modal: Rectangle {
+            color: Qt.rgba(0.0, 0.0, 0.0, 0.45)
+        }
+
+        contentItem: ColumnLayout {
+            width: deleteAllDataDialog.availableWidth
+            spacing: 12
+
+            Text {
+                Layout.fillWidth: true
+                text: "Удалить локальные данные?"
+                color: Theme.Colors.text
+                font.family: Theme.Typography.displayFamily
+                font.pixelSize: Theme.Typography.body
+                font.bold: true
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Будут удалены ключи, история чата, Telegram-состояние и локальный профиль JARVIS из %LOCALAPPDATA%. После этого потребуется повторная настройка."
+                color: Theme.Colors.textSoft
+                font.family: Theme.Typography.bodyFamily
+                font.pixelSize: Theme.Typography.small
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 10
+
+                Item { Layout.fillWidth: true }
+
+                SecondaryButton {
+                    text: "Отмена"
+                    onClicked: deleteAllDataDialog.close()
+                }
+
+                SecondaryButton {
+                    text: "Удалить без возврата"
+                    danger: true
+                    onClicked: {
+                        deleteAllDataDialog.close()
+                        settingsBridge.deleteAllData()
+                    }
+                }
+            }
         }
     }
 }

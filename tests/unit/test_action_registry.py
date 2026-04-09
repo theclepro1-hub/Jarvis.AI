@@ -45,7 +45,7 @@ def test_quick_actions_are_curated_and_limited() -> None:
 
     quick = registry.quick_actions()
 
-    assert [item["id"] for item in quick] == ["youtube", "browser", "music", "steam", "discord"]
+    assert [item["id"] for item in quick] == ["youtube", "browser", "steam", "discord"]
     assert len(quick) <= 7
 
 
@@ -618,6 +618,17 @@ def _broken_agent_test_split_open_target_sequence_handles_system_and_spoken_targ
 
     assert targets == ["РїР°СЂР°РјРµС‚СЂС‹", "СЃ С‚РёРј", "РїСЂРѕРІРѕРґРЅРёРє"]
     assert remainder == ""
+
+
+def test_resolve_system_action_promotes_bare_builtin_windows_target() -> None:
+    registry, _service = make_registry()
+
+    resolved = registry.resolve_system_action("параметры")
+
+    assert resolved is not None
+    assert resolved["mode"] == "open"
+    assert resolved["item_id"] == "system_settings"
+    assert resolved["target_kind"] == "uri"
 
 
 def _broken_agent_test_resolve_system_action_promotes_builtin_windows_target() -> None:

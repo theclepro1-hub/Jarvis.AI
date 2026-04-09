@@ -239,6 +239,13 @@ class VoiceBridge(QObject):
     def wakeHint(self) -> str:
         return self._wake_hint
 
+    @Slot()
+    def clearWakeHint(self) -> None:
+        if not self._wake_hint:
+            return
+        self._wake_hint = ""
+        self.wakeHintChanged.emit()
+
     @Property("QVariantMap", notify=voiceTimingsChanged)
     def voiceTimings(self) -> dict[str, object]:
         return self.services.voice.latest_wake_metrics()
@@ -266,8 +273,7 @@ class VoiceBridge(QObject):
         self.voiceTestChanged.emit()
         self._recording_hint = "Скажите короткую фразу для проверки."
         self.recordingHintChanged.emit()
-        self._wake_hint = ""
-        self.wakeHintChanged.emit()
+        self.clearWakeHint()
         self.state.status = "Слушаю"
         self._test_result = "Слушаю..."
         self.testResultChanged.emit()
@@ -321,8 +327,7 @@ class VoiceBridge(QObject):
     def toggleManualCapture(self) -> None:
         if not self.services.voice.is_recording:
             self.services.wake.stop()
-            self._wake_hint = ""
-            self.wakeHintChanged.emit()
+            self.clearWakeHint()
             self._recording_hint = self.services.voice.start_manual_capture(
                 on_text=self.transcribedTextReady.emit,
                 on_note=self.voiceNoteReady.emit,
@@ -368,12 +373,16 @@ class VoiceBridge(QObject):
         self.recordingHintChanged.emit()
         lowered = note.casefold()
         if "не расслыш" in lowered or "not heard" in lowered:
+            self.clearWakeHint()
             self.state.status = "Не расслышал"
         elif "микрофон" in lowered or "mic" in lowered:
+            self.clearWakeHint()
             self.state.status = "Ошибка микрофона"
         elif "ошиб" in lowered or "error" in lowered or "stt" in lowered or "ключ" in lowered:
+            self.clearWakeHint()
             self.state.status = "Ошибка распознавания"
         elif "останов" in lowered or "cancel" in lowered:
+            self.clearWakeHint()
             self.state.status = "Запись остановлена"
         else:
             self.state.status = "Готов"
@@ -381,8 +390,6 @@ class VoiceBridge(QObject):
 
     def _finalize_capture(self) -> None:
         self.recordingChanged.emit()
-        self._wake_hint = ""
-        self.wakeHintChanged.emit()
         if self.state.status not in {"Не расслышал", "Ошибка микрофона", "Ошибка распознавания", "Запись остановлена"}:
             self._recording_hint = "Ручной микрофон готов."
             self.recordingHintChanged.emit()

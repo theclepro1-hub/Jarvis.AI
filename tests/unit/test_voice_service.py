@@ -43,12 +43,24 @@ class FakeStore:
 def test_voice_runtime_without_key_reports_not_connected():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
+    voice.stt_service._faster_whisper_available = lambda: False  # noqa: SLF001
 
     status = voice.runtime_status()
 
     assert status["model"] == "не подключена"
-    assert status["command"] == "Нужен ключ Groq"
+    assert status["command"] == "Нужен ключ Groq или локальный backend распознавания"
     assert status["tts"] == "голосовые ответы выключены"
+
+
+def test_voice_runtime_auto_mode_reports_local_backend_without_groq():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    voice.stt_service._faster_whisper_available = lambda: True  # noqa: SLF001
+
+    status = voice.runtime_status()
+
+    assert status["model"] == "загружена"
+    assert status["command"] == "локальное распознавание готово"
 
 
 def test_voice_service_defers_audio_device_scan_until_needed(monkeypatch):

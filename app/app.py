@@ -88,6 +88,7 @@ class JarvisUnityApplication:
         _boot_log("app:init:apps-bridge")
         self.voice_bridge = VoiceBridge(self.state, self.services, self.chat_bridge)
         _boot_log("app:init:voice-bridge")
+        self.app_bridge.voice_bridge = self.voice_bridge
         self.settings_bridge = SettingsBridge(self.state, self.services, self.app_bridge, self.chat_bridge)
         _boot_log("app:init:settings-bridge")
         self.registration_bridge = RegistrationBridge(self.state, self.services, self.app_bridge)

@@ -134,6 +134,15 @@ def test_search_query_splits_on_explicit_connector_before_action():
         "найди чизбургер",
         "открой ютуб",
     ]
+
+
+def test_split_open_command_with_noisy_connector_before_builtin_windows_target():
+    router = make_router()
+    assert router.split("открой по панель управления") == [
+        "открой по панель управления",
+    ]
+
+
 def _broken_agent_test_split_voice_sequence_with_system_and_spoken_launcher_targets():
     router = make_router()
     assert router.split("РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹ СЃ С‚РёРј Рё РїСЂРѕРІРѕРґРЅРёРє") == [

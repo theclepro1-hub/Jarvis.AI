@@ -23,8 +23,8 @@ class WakeService:
     SAMPLE_RATE = 16_000
     BLOCK_FRAMES = 1600
     PRE_ROLL_FRAMES = 22
-    POST_WAKE_BRIDGE_FRAMES = 10
-    POST_WAKE_BRIDGE_TIMEOUT = 0.15
+    POST_WAKE_BRIDGE_FRAMES = 6
+    POST_WAKE_BRIDGE_TIMEOUT = 0.05
     HANDOFF_PHASES = {"capturing_command", "transcribing", "routing", "executing"}
 
     def __init__(self, settings_service, voice_service) -> None:

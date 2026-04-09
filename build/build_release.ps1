@@ -158,6 +158,9 @@ $ErrorActionPreference = "SilentlyContinue"
     --workpath $buildDir `
     --specpath $buildDir `
     --paths $root `
+    --collect-all faster_whisper `
+    --collect-all ctranslate2 `
+    --collect-all av `
     --collect-all vosk `
     --hidden-import pyttsx3.drivers.sapi5 `
     --hidden-import win32com.client `
@@ -195,6 +198,9 @@ $ErrorActionPreference = "SilentlyContinue"
     --workpath $oneFileBuildDir `
     --specpath $oneFileBuildDir `
     --paths $root `
+    --collect-all faster_whisper `
+    --collect-all ctranslate2 `
+    --collect-all av `
     --collect-all vosk `
     --hidden-import pyttsx3.drivers.sapi5 `
     --hidden-import win32com.client `

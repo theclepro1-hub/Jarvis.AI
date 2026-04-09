@@ -155,6 +155,7 @@ class ChatBridge(QObject):
         if self._is_system_noise(text):
             return
         self._append_message("assistant", text)
+        self._clear_wake_hint()
         self.state.status = "Готов"
 
     @Slot(str, "QVariantList")
@@ -166,6 +167,7 @@ class ChatBridge(QObject):
             title=title,
             steps=steps,
         )
+        self._clear_wake_hint()
         self.state.status = "Готов"
 
     @Slot()
@@ -176,6 +178,7 @@ class ChatBridge(QObject):
         with self._submit_lock:
             self._inflight_signatures.clear()
             self._recent_submissions.clear()
+        self._clear_wake_hint()
         self._set_status_stage("")
         self._set_last_response_hint("")
         self._initial_state_hydrated = True
@@ -212,6 +215,7 @@ class ChatBridge(QObject):
         self._thinking = False
         self.thinkingChanged.emit()
         self._set_status_stage("")
+        self._clear_wake_hint()
         self._set_last_response_hint(reply_hint)
         self.state.status = "Готов"
 
@@ -228,12 +232,14 @@ class ChatBridge(QObject):
                 steps=execution_steps,
             )
             self._speak_assistant_text(execution_title)
+            self._clear_wake_hint()
             return
 
         if len(route.commands) <= 1 and len(route.assistant_lines) <= 1:
             for line in route.assistant_lines:
                 self._append_message("assistant", line)
                 self._speak_assistant_text(line)
+            self._clear_wake_hint()
             return
 
         execution_title = self._build_execution_title(route)
@@ -246,6 +252,7 @@ class ChatBridge(QObject):
             steps=execution_steps,
         )
         self._speak_assistant_text(execution_title)
+        self._clear_wake_hint()
 
     def _build_execution_title(self, route) -> str:
         execution = getattr(route, "execution_result", None)
@@ -395,6 +402,12 @@ class ChatBridge(QObject):
     def _set_last_response_hint(self, text: str) -> None:
         self._last_response_hint = str(text or "").strip()
         self.lastResponseHintChanged.emit()
+
+    def _clear_wake_hint(self) -> None:
+        voice_bridge = getattr(self.app_bridge, "voice_bridge", None)
+        if voice_bridge is None or not hasattr(voice_bridge, "clearWakeHint"):
+            return
+        voice_bridge.clearWakeHint()
 
     def _start_ai_resolution(self, original_text: str, signature: str, *, route=None) -> None:  # noqa: ANN001
         self._thinking = True

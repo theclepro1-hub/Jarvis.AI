@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from core.routing.text_rules import normalize_text
+from core.routing.text_rules import normalize_text, strip_leading_command_fillers
 
 
 OPEN_VERBS = ("открой", "открыть", "запусти", "запустить", "включи", "включить")
@@ -35,6 +35,14 @@ FOLLOWUP_ACTION_VERBS = (
     "mute",
 )
 
+NOISY_OPEN_PREFIXES = {"откр", "откры", "откро", "открь", "откри"}
+NOISY_VOLUME_REPLACEMENTS = (
+    ("погромче", "громче"),
+    ("по громче", "громче"),
+    ("потише", "тише"),
+    ("по тише", "тише"),
+)
+
 
 @dataclass(slots=True)
 class VoicePostProcessResult:
@@ -55,9 +63,34 @@ class VoiceCommandPostProcessor:
         original = normalize_text(text)
         if not original:
             return VoicePostProcessResult(original="", normalized="", changed=False)
-        normalized = self._normalize_open_multi_target(original)
+        normalized = self._normalize_noisy_transcript(original)
+        normalized = self._normalize_open_multi_target(normalized)
         normalized = normalize_text(normalized)
         return VoicePostProcessResult(original=original, normalized=normalized, changed=(normalized != original))
+
+    def _normalize_noisy_transcript(self, text: str) -> str:
+        normalized = strip_leading_command_fillers(text)
+        normalized = self._normalize_volume_inflections(normalized)
+        normalized = self._normalize_open_prefix_fragment(normalized)
+        return normalized
+
+    def _normalize_volume_inflections(self, text: str) -> str:
+        normalized = text
+        for source, target in NOISY_VOLUME_REPLACEMENTS:
+            normalized = re.sub(rf"\b{re.escape(source)}\b", target, normalized, flags=re.IGNORECASE)
+        return normalized
+
+    def _normalize_open_prefix_fragment(self, text: str) -> str:
+        parts = text.split(" ")
+        if not parts:
+            return text
+        first = parts[0].casefold()
+        if first in {"открой", "открыть"}:
+            return text
+        if first in NOISY_OPEN_PREFIXES:
+            parts[0] = "открой"
+            return " ".join(parts)
+        return text
 
     def _normalize_open_multi_target(self, text: str) -> str:
         lower = text.casefold()
@@ -97,6 +130,11 @@ class VoiceCommandPostProcessor:
             phrases, remainder = split_with_registry(object_chunk)
             normalized_phrases = [self._clean_mention(phrase) for phrase in phrases]
             normalized_phrases = [phrase for phrase in normalized_phrases if phrase]
+            if normalized_phrases and remainder and self._looks_like_followup_action(remainder):
+                rebuilt = f"{verb} {' и '.join(normalized_phrases)} и {remainder}"
+                if suffix:
+                    rebuilt = f"{rebuilt} {suffix}"
+                return rebuilt
             if len(normalized_phrases) >= 2 and not remainder:
                 rebuilt = f"{verb} {' и '.join(normalized_phrases)}"
                 if suffix:
@@ -158,3 +196,9 @@ class VoiceCommandPostProcessor:
 
     def _clean_mention(self, text: str) -> str:
         return re.sub(r"\s+", " ", text.strip(" ,"))
+
+    def _looks_like_followup_action(self, text: str) -> bool:
+        lower = normalize_text(text).casefold()
+        if not lower:
+            return False
+        return any(lower.startswith(token) for token in FOLLOWUP_ACTION_VERBS)

@@ -82,6 +82,13 @@ QUESTION_WORDS = (
     "умеешь",
 )
 
+COMMAND_FILLER_PREFIXES = (
+    "ну",
+    "пожалуйста",
+    "давай",
+    "давайте",
+)
+
 
 def _compile_wake_prefix_pattern(aliases: tuple[str, ...]) -> re.Pattern[str]:
     return re.compile(
@@ -106,6 +113,25 @@ def strip_leading_wake_prefix(text: str, aliases: tuple[str, ...] = WAKE_PREFIX_
     pattern = WAKE_PREFIX_PATTERN if aliases == WAKE_PREFIX_ALIASES else _compile_wake_prefix_pattern(aliases)
     stripped = pattern.sub("", clean, count=1)
     stripped = stripped.lstrip(" ,.:;!?-")
+    return normalize_text(stripped)
+
+
+def strip_leading_command_fillers(text: str) -> str:
+    clean = normalize_text(text)
+    if not clean:
+        return ""
+
+    stripped = clean
+    while True:
+        parts = stripped.split(" ", 1)
+        if len(parts) < 2:
+            break
+        first = parts[0].casefold()
+        if first not in COMMAND_FILLER_PREFIXES:
+            break
+        stripped = parts[1].lstrip(" ,.:;!?-")
+        if not stripped:
+            return clean
     return normalize_text(stripped)
 
 

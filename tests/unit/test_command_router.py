@@ -18,6 +18,8 @@ class FakeActions:
         lower = text.casefold()
         if "параметры" in lower or "settings" in lower:
             items.append({"id": "system_settings", "title": "Параметры Windows", "kind": "uri", "target": "ms-settings:"})
+        if "панель" in lower or "control panel" in lower or "control" in lower:
+            items.append({"id": "system_control_panel", "title": "Панель управления", "kind": "uri", "target": "control.exe"})
         if "диспетчер задач" in lower or "task manager" in lower or "taskmgr" in lower:
             items.append({"id": "system_task_manager", "title": "Диспетчер задач", "kind": "uri", "target": "taskmgr.exe"})
         if "проводник" in lower or "explorer" in lower or "файлы" in lower:
@@ -41,6 +43,7 @@ class FakeActions:
             ("музыка", "музыку", "музычку", "music", "плеер"),
             ("яндекс музыка", "яндекс музыку", "яндекс муз", "yandex music"),
             ("параметры", "settings", "настройки"),
+            ("панель управления", "панель", "control panel", "control"),
             ("диспетчер задач", "task manager", "taskmgr"),
             ("проводник", "explorer", "файлы"),
             ("youtube", "ютуб", "ютюб"),
@@ -49,7 +52,12 @@ class FakeActions:
             ("spotify", "спотифай", "спотик"),
         )
         while remaining:
-            remaining = re.sub(r"^(?:[\s,.:;!?-]+|и\s+|а\s+|потом\s+|еще\s+|ещё\s+)+", "", remaining, flags=re.IGNORECASE)
+            remaining = re.sub(
+                r"^(?:[\s,.:;!?-]+|и\s+|а\s+|потом\s+|еще\s+|ещё\s+|по\s+)+",
+                "",
+                remaining,
+                flags=re.IGNORECASE,
+            )
             if not remaining:
                 break
             consumed = remaining
@@ -258,6 +266,79 @@ def test_command_router_voice_normalizes_system_targets_without_commas():
     assert pc_control.opened_urls == []
     assert result.execution_result is not None
     assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
+
+
+def test_command_router_opens_builtin_windows_target_without_open_verb():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("параметры")
+
+    assert result.kind == "local"
+    assert result.commands == ["параметры"]
+    assert actions.opened == ["system_settings"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_command_router_voice_strips_polite_filler_before_opening_system_target():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("ну открой параметры", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой параметры"]
+    assert actions.opened == ["system_settings"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_voice_post_processor_inserts_followup_connector_after_open_target():
+    router, _actions, _pc_control = make_router()
+
+    normalized = router.voice_post_processor.normalize("открой параметры сделай погромче")
+
+    assert normalized.normalized == "открой параметры и сделай громче"
+    assert normalized.changed is True
+
+
+def test_command_router_recovers_noisy_open_fragment_and_control_panel_connector_from_voice():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("откр по панель управления", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой по панель управления"]
+    assert actions.opened == ["system_control_panel"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_command_router_understands_pogromche_as_volume_up():
+    router, _actions, pc_control = make_router()
+
+    result = router.handle("погромче", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["громче"]
+    assert pc_control.media == ["up"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "volume_up"
+
+
+def test_command_router_splits_open_then_volume_even_with_noisy_voice_suffix():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой параметры сделай погромче", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой параметры", "сделай громче"]
+    assert actions.opened == ["system_settings"]
+    assert pc_control.media == ["up"]
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items", "volume_up"]
 
 
 def test_command_router_voice_requests_clarification_for_greedy_open_tail():

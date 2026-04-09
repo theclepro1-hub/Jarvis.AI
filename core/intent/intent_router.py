@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from core.models.action_models import ExecutionPlan, ExecutionStep
+from core.routing.text_rules import strip_leading_command_fillers
 
 
 OPEN_VERBS = ("открой", "открыть", "запусти", "запустить", "включи", "включить")
@@ -236,6 +237,10 @@ class IntentRouter:
         if power_plan is not None:
             return power_plan
 
+        builtin_system_plan = self._build_builtin_system_plan(text, lower)
+        if builtin_system_plan is not None:
+            return builtin_system_plan
+
         if any(lower.startswith(f"{verb} ") for verb in OPEN_VERBS):
             if self._looks_like_yandex_eda(lower):
                 return ExecutionPlan(
@@ -293,6 +298,50 @@ class IntentRouter:
             return ExecutionPlan(command=text, question="Что открыть?")
 
         return None
+
+    def _build_builtin_system_plan(self, text: str, lower: str) -> ExecutionPlan | None:
+        if any(lower.startswith(f"{verb} ") for verb in OPEN_VERBS):
+            return None
+        resolver = getattr(self.action_registry, "resolve_open_command", None)
+        if not callable(resolver):
+            return None
+
+        items, question = resolver(text)
+        if question or len(items) != 1:
+            return None
+
+        item = items[0]
+        item_id = str(item.get("id", "")).strip()
+        if not (item_id.startswith("system_") or item_id.startswith("folder_")):
+            return None
+
+        splitter = getattr(self.action_registry, "split_open_target_sequence", None)
+        if callable(splitter):
+            phrases, remainder = splitter(text)
+            if remainder or len(phrases) != 1:
+                return None
+
+        return ExecutionPlan(
+            command=text,
+            steps=[
+                ExecutionStep(
+                    id=self._step_id(text, "open_items"),
+                    kind="open_items",
+                    title=f"Открываю {item.get('title', text)}",
+                    detail=str(item.get("target", "")),
+                    payload={
+                        "items": [
+                            {
+                                "id": item_id,
+                                "title": str(item.get("title", text)),
+                                "kind": str(item.get("kind", "file")),
+                                "target": str(item.get("target", "")),
+                            }
+                        ]
+                    },
+                )
+            ],
+        )
 
     def _build_media_step(self, text: str, lower: str) -> ExecutionStep | None:
         if self._matches_any(lower, MEDIA_PLAY_PAUSE):
@@ -413,4 +462,5 @@ class IntentRouter:
         return f"{kind}:{safe[:48] or 'command'}"
 
     def _normalize(self, command: str) -> str:
-        return re.sub(r"\s+", " ", command.strip())
+        clean = strip_leading_command_fillers(command)
+        return re.sub(r"\s+", " ", clean.strip())

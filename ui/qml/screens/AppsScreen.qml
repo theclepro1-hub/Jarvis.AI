@@ -10,7 +10,7 @@ Rectangle {
     color: "transparent"
 
     property string selectedCategory: "music"
-    property bool manualFormOpen: true
+    property bool manualFormOpen: false
     property bool scanCoolingDown: false
 
     Timer {
@@ -271,6 +271,12 @@ Rectangle {
                         }
 
                     SecondaryButton {
+                        objectName: "customAppManualButton"
+                        text: root.manualFormOpen ? "Скрыть ручной ввод" : "Добавить вручную"
+                        onClicked: root.manualFormOpen = !root.manualFormOpen
+                    }
+
+                    SecondaryButton {
                         objectName: "customAppChooseFileButton"
                         text: "Выбрать файл..."
                         onClicked: {
@@ -339,7 +345,7 @@ Rectangle {
 
                     Text {
                         visible: root.scanCoolingDown && appsBridge.feedback.length === 0
-                        text: "JARVIS СѓР¶Рµ РѕР±РЅРѕРІР»СЏРµС‚ СЃРїРёСЃРѕРє РїСЂРёР»РѕР¶РµРЅРёР№. РџРѕРґРѕР¶РґРёС‚Рµ РјРѕРјРµРЅС‚, РїРѕРєР° РїРѕРёСЃРє РЅРµ Р·Р°РєРѕРЅС‡РёС‚СЃСЏ."
+                        text: "JARVIS уже обновляет список приложений. Подождите момент, пока поиск не закончится."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.micro

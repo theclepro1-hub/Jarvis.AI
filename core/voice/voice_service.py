@@ -133,20 +133,10 @@ class VoiceService:
         return labels.get(self._wake_phase, self._wake_detail or "Готов")
 
     def command_status_text(self) -> str:
-        engine = self.stt_service.engine()
-        if engine in {"groq_whisper", "local_vosk"}:
-            return self.stt_service.status_text()
-        if self.stt_service._groq_key():
-            return self.stt_service.status_text()
-        return "Нужен ключ Groq"
+        return self.stt_service.status_text()
 
     def model_status_text(self) -> str:
-        engine = self.stt_service.engine()
-        if engine in {"groq_whisper", "local_vosk"}:
-            return "загружена" if self.stt_service.can_transcribe() else "не подключена"
-        if self.stt_service._groq_key():
-            return "загружена"
-        return "не подключена"
+        return "загружена" if self.stt_service.can_transcribe() else "не подключена"
 
     def summary(self) -> str:
         mode = self.settings.get("voice_mode", "balance")
