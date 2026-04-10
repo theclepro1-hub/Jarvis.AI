@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from core.settings.settings_service import SettingsService
 from core.settings.settings_store import DEFAULT_SETTINGS
-from core.updates.update_service import DEFAULT_VERSION
+from core.version import DEFAULT_VERSION
 from ui.bridge.settings_bridge import SettingsBridge
 
 
@@ -43,6 +43,8 @@ class _ExplodingUpdatesServices:
     @property
     def updates(self):  # noqa: ANN201
         raise AssertionError("updates service must stay lazy until user explicitly opens update flow")
+
+
 def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> None:
     store = InMemoryStore()
     settings = SettingsService(store)

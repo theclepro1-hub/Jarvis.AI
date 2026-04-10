@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
-from core.updates.update_service import DEFAULT_VERSION
+from core.version import DEFAULT_VERSION
 
 
 _SETTINGS_WRITE_LOCK = threading.RLock()
@@ -51,6 +51,20 @@ class SettingsBridge(QObject):
             return getattr(self.services, "_updates")
         if hasattr(self.services, "__dict__") and "updates" in vars(self.services):
             return vars(self.services).get("updates")
+        return None
+
+    def _telegram_service_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_telegram"):
+            return getattr(self.services, "_telegram")
+        if hasattr(self.services, "__dict__") and "telegram" in vars(self.services):
+            return vars(self.services).get("telegram")
+        return None
+
+    def _actions_service_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_actions"):
+            return getattr(self.services, "_actions")
+        if hasattr(self.services, "__dict__") and "actions" in vars(self.services):
+            return vars(self.services).get("actions")
         return None
 
     def _default_update_summary(self) -> str:
@@ -237,14 +251,14 @@ class SettingsBridge(QObject):
 
     @Property(bool, notify=connectionsChanged)
     def telegramConfigured(self) -> bool:
-        telegram = getattr(self.services, "telegram", None)
+        telegram = self._telegram_service_if_ready()
         if telegram is not None and hasattr(telegram, "is_configured"):
             return bool(telegram.is_configured())
         return bool(self.telegramBotToken and self.telegramUserId)
 
     @Property("QVariantMap", notify=telegramStatusChanged)
     def telegramStatus(self) -> dict[str, object]:
-        telegram = getattr(self.services, "telegram", None)
+        telegram = self._telegram_service_if_ready()
         if telegram is not None and hasattr(telegram, "status_snapshot"):
             snapshot = telegram.status_snapshot()
             last_poll = getattr(snapshot, "last_poll_at_utc", None)
@@ -288,7 +302,7 @@ class SettingsBridge(QObject):
 
     @Property("QVariantList", notify=pinnedCommandsChanged)
     def pinnedCommands(self) -> list[dict[str, str]]:
-        actions = getattr(self.services, "actions", None)
+        actions = self._actions_service_if_ready()
         if actions is None or not hasattr(actions, "pinned_commands"):
             return []
         return list(actions.pinned_commands())

@@ -21,6 +21,7 @@ class ChatBridge(QObject):
     saveHistoryEnabledChanged = Signal()
     workerReplyReady = Signal(str, str, str)
     workerStatusReady = Signal(str)
+    catalogSnapshotReady = Signal(object, object)
 
     def __init__(self, state, services, app_bridge) -> None:
         super().__init__()
@@ -35,6 +36,8 @@ class ChatBridge(QObject):
         self._thinking_label = ""
         self._last_response_hint = ""
         self._initial_state_hydrated = False
+        self._catalog_hydrated = False
+        self._catalog_hydrating = False
         self._inflight_signatures: set[str] = set()
         self._recent_submissions: dict[str, float] = {}
         self._submit_lock = threading.Lock()
@@ -44,7 +47,11 @@ class ChatBridge(QObject):
         self._response_hint_timer.timeout.connect(lambda: self._set_last_response_hint(""))
         self.workerReplyReady.connect(self._append_assistant_message)
         self.workerStatusReady.connect(self._set_status_stage)
-        QTimer.singleShot(0, self._hydrate_initial_state)
+        self.catalogSnapshotReady.connect(self._apply_catalog_snapshot)
+        # Let the first frame paint before history hydration, and push catalog work
+        # even further out so it does not compete with the first interactions.
+        QTimer.singleShot(220, self._hydrate_initial_state)
+        QTimer.singleShot(1100, self._hydrate_initial_catalog)
 
     @Property("QVariantList", notify=messagesChanged)
     def messages(self) -> list[dict[str, Any]]:
@@ -527,6 +534,7 @@ class ChatBridge(QObject):
     def refreshCatalog(self) -> None:
         self._quick_actions = self.services.actions.quick_actions()
         self._app_catalog = self.services.actions.app_catalog()
+        self._catalog_hydrated = True
         self.quickActionsChanged.emit()
         self.appCatalogChanged.emit()
 
@@ -534,10 +542,33 @@ class ChatBridge(QObject):
         if self._initial_state_hydrated:
             return
         self._initial_state_hydrated = True
-        self.refreshCatalog()
         if len(self._messages) == 1 and self._messages[0].get("role") == "assistant":
             self._messages = self._load_history()
             self.messagesChanged.emit()
+
+    def _hydrate_initial_catalog(self) -> None:
+        if self._catalog_hydrated or self._catalog_hydrating:
+            return
+        self._catalog_hydrating = True
+
+        def worker() -> None:
+            try:
+                quick_actions = self.services.actions.quick_actions()
+                app_catalog = self.services.actions.app_catalog()
+            except Exception:
+                quick_actions = []
+                app_catalog = []
+            self.catalogSnapshotReady.emit(quick_actions, app_catalog)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_catalog_snapshot(self, quick_actions: object, app_catalog: object) -> None:
+        self._quick_actions = list(quick_actions) if isinstance(quick_actions, list) else []
+        self._app_catalog = list(app_catalog) if isinstance(app_catalog, list) else []
+        self._catalog_hydrated = True
+        self._catalog_hydrating = False
+        self.quickActionsChanged.emit()
+        self.appCatalogChanged.emit()
 
     def _should_persist_history(self) -> bool:
         settings = getattr(self.services, "settings", None)

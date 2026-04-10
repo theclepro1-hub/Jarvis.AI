@@ -9,9 +9,7 @@ from pathlib import Path
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
-from app.app import JarvisUnityApplication
-from core.services.single_instance import SingleInstanceService
-from core.updates.update_service import DEFAULT_VERSION
+from core.version import DEFAULT_VERSION
 
 WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"
 WINDOWS_APP_DISPLAY_NAME = "JARVIS Unity"
@@ -55,17 +53,21 @@ def bootstrap() -> int:
     _set_windows_app_user_model_id()
     _boot_log("bootstrap:before-app")
     application = QApplication(sys.argv)
-    application.setQuitOnLastWindowClosed(False)
+    application.setQuitOnLastWindowClosed(True)
     _boot_log("bootstrap:after-app")
     icon_path = Path(__file__).resolve().parents[1] / "assets" / "icons" / "jarvis_unity.ico"
     if icon_path.exists():
         _boot_log(f"bootstrap:icon:{icon_path}")
         application.setWindowIcon(QIcon(str(icon_path)))
     start_minimized = any(arg in {"--minimized", "--start-minimized", "--tray"} for arg in sys.argv[1:])
+    from core.services.single_instance import SingleInstanceService
+
     single_instance = SingleInstanceService()
     if not single_instance.ensure_primary_instance():
         _boot_log("bootstrap:second-instance")
         return 0
+    from app.app import JarvisUnityApplication
+
     runtime = JarvisUnityApplication(application, start_minimized=start_minimized, single_instance=single_instance)
     _boot_log("bootstrap:after-runtime-init")
     runtime.start()

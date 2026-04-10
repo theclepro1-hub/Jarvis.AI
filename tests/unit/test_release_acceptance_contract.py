@@ -229,16 +229,16 @@ def test_release_gate_updater_is_honest_about_installer_only_flow() -> None:
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
-            name="JarvisAi_Unity_22.4.0_windows_onefile.exe",
+            name="JarvisAi_Unity_22.4.1_windows_onefile.exe",
             browser_download_url="https://example.test/onefile.exe",
         ),
         UpdateAsset(
-            name="JarvisAi_Unity_22.4.0_windows_portable.zip",
+            name="JarvisAi_Unity_22.4.1_windows_portable.zip",
             browser_download_url="https://example.test/portable.zip",
         ),
     ]
-    service.latest_version_value = "22.4.0"
-    service.release_url_value = "https://example.test/releases/v22.4.0"
+    service.latest_version_value = "22.4.1"
+    service.release_url_value = "https://example.test/releases/v22.4.1"
     service.update_available_value = True
 
     snapshot = service.status_snapshot()
@@ -255,19 +255,19 @@ def test_release_gate_updater_exposes_installer_contract_when_available() -> Non
     service = UpdateService(settings=None, current_version="22.3.0")
     service.assets = [
         UpdateAsset(
-            name="JarvisAi_Unity_22.4.0_windows_installer.exe",
+            name="JarvisAi_Unity_22.4.1_windows_installer.exe",
             browser_download_url="https://example.test/installer.exe",
             digest=f"sha256:{digest}",
         )
     ]
-    service.latest_version_value = "22.4.0"
-    service.release_url_value = "https://example.test/releases/v22.4.0"
+    service.latest_version_value = "22.4.1"
+    service.release_url_value = "https://example.test/releases/v22.4.1"
     service.update_available_value = True
 
     snapshot = service.status_snapshot()
 
     assert snapshot["can_apply"] is True
-    assert snapshot["preferred_installer_asset"] == "JarvisAi_Unity_22.4.0_windows_installer.exe"
+    assert snapshot["preferred_installer_asset"] == "JarvisAi_Unity_22.4.1_windows_installer.exe"
     assert snapshot["manual_download_required"] is False
     assert snapshot["apply_mode"] == "installer"
     assert snapshot["installer_launch_arguments"] == ["/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"]

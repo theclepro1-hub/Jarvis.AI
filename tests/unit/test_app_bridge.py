@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from core.updates.update_service import DEFAULT_VERSION
+from core.version import DEFAULT_VERSION
 from ui.bridge.app_bridge import AppBridge
 
 
@@ -36,6 +36,8 @@ class _Services:
     def __init__(self) -> None:
         self.registration = _Registration()
         self.updates = _RaisingUpdates()
+
+
 def test_app_bridge_version_is_constant_and_does_not_touch_updates() -> None:
     bridge = AppBridge(_State(), _Services())
 

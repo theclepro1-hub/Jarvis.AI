@@ -3,22 +3,38 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from core.actions.action_registry import ActionRegistry
-from core.ai.ai_service import AIService
-from core.pc_control.service import PcControlService
-from core.reminders.reminder_service import ReminderService
 from core.services.chat_history_store import ChatHistoryStore
-from core.registration.registration_service import RegistrationService
-from core.routing.batch_router import BatchRouter
-from core.routing.command_router import CommandRouter
 from core.settings.settings_service import SettingsService
 from core.settings.startup_manager import StartupManager
 from core.settings.settings_store import SettingsStore
-from core.telegram.telegram_service import HttpTelegramTransport, TelegramService
-from core.updates.update_service import UpdateService
-from core.voice.voice_service import VoiceService
-from core.voice.wake_service import WakeService
+
+if TYPE_CHECKING:
+    from core.actions.action_registry import ActionRegistry
+    from core.ai.ai_service import AIService
+    from core.pc_control.service import PcControlService
+    from core.registration.registration_service import RegistrationService
+    from core.reminders.reminder_service import ReminderService
+    from core.routing.batch_router import BatchRouter
+    from core.routing.command_router import CommandRouter
+    from core.telegram.telegram_service import HttpTelegramTransport, TelegramService
+    from core.updates.update_service import UpdateService
+    from core.voice.voice_service import VoiceService
+    from core.voice.wake_service import WakeService
+
+AIService = None
+ActionRegistry = None
+BatchRouter = None
+CommandRouter = None
+HttpTelegramTransport = None
+PcControlService = None
+RegistrationService = None
+ReminderService = None
+TelegramService = None
+UpdateService = None
+VoiceService = None
+WakeService = None
 
 
 def _boot_log(message: str) -> None:
@@ -54,7 +70,14 @@ class ServiceContainer:
             _boot_log("services:init:startup-state:updated")
         else:
             _boot_log("services:init:startup-state:unchanged")
-        self.registration = RegistrationService(self.settings)
+        registration_service_cls = RegistrationService
+        if registration_service_cls is None:
+            from core.registration.registration_service import RegistrationService as _RegistrationService
+
+            globals()["RegistrationService"] = _RegistrationService
+            registration_service_cls = _RegistrationService
+
+        self.registration = registration_service_cls(self.settings)
         _boot_log("services:init:registration")
         self._reminders = None
         self._telegram = None
@@ -81,35 +104,65 @@ class ServiceContainer:
     def ai(self) -> AIService:
         if self._ai is None:
             _boot_log("services:lazy:ai")
-            self._ai = AIService(self.settings)
+            ai_service_cls = AIService
+            if ai_service_cls is None:
+                from core.ai.ai_service import AIService as _AIService
+
+                globals()["AIService"] = _AIService
+                ai_service_cls = _AIService
+            self._ai = ai_service_cls(self.settings)
         return self._ai
 
     @property
     def actions(self) -> ActionRegistry:
         if self._actions is None:
             _boot_log("services:lazy:actions")
-            self._actions = ActionRegistry(self.settings)
+            actions_cls = ActionRegistry
+            if actions_cls is None:
+                from core.actions.action_registry import ActionRegistry as _ActionRegistry
+
+                globals()["ActionRegistry"] = _ActionRegistry
+                actions_cls = _ActionRegistry
+            self._actions = actions_cls(self.settings)
         return self._actions
 
     @property
     def batch_router(self) -> BatchRouter:
         if self._batch_router is None:
             _boot_log("services:lazy:batch-router")
-            self._batch_router = BatchRouter(self.actions)
+            batch_router_cls = BatchRouter
+            if batch_router_cls is None:
+                from core.routing.batch_router import BatchRouter as _BatchRouter
+
+                globals()["BatchRouter"] = _BatchRouter
+                batch_router_cls = _BatchRouter
+            self._batch_router = batch_router_cls(self.actions)
         return self._batch_router
 
     @property
     def pc_control(self) -> PcControlService:
         if self._pc_control is None:
             _boot_log("services:lazy:pc-control")
-            self._pc_control = PcControlService(self.actions)
+            pc_control_cls = PcControlService
+            if pc_control_cls is None:
+                from core.pc_control.service import PcControlService as _PcControlService
+
+                globals()["PcControlService"] = _PcControlService
+                pc_control_cls = _PcControlService
+            self._pc_control = pc_control_cls(self.actions)
         return self._pc_control
 
     @property
     def command_router(self) -> CommandRouter:
         if self._command_router is None:
             _boot_log("services:lazy:command-router")
-            self._command_router = CommandRouter(
+            command_router_cls = CommandRouter
+            if command_router_cls is None:
+                from core.routing.command_router import CommandRouter as _CommandRouter
+
+                globals()["CommandRouter"] = _CommandRouter
+                command_router_cls = _CommandRouter
+            self._command_router = command_router_cls(
                 self.actions,
                 self.batch_router,
                 self.ai,
@@ -122,14 +175,26 @@ class ServiceContainer:
     def reminders(self) -> ReminderService:
         if self._reminders is None:
             _boot_log("services:lazy:reminders")
-            self._reminders = ReminderService()
+            reminders_cls = ReminderService
+            if reminders_cls is None:
+                from core.reminders.reminder_service import ReminderService as _ReminderService
+
+                globals()["ReminderService"] = _ReminderService
+                reminders_cls = _ReminderService
+            self._reminders = reminders_cls()
         return self._reminders
 
     @property
     def telegram(self) -> TelegramService:
         if self._telegram is None:
             _boot_log("services:lazy:telegram")
-            self._telegram = TelegramService(
+            telegram_service_cls = TelegramService
+            if telegram_service_cls is None:
+                from core.telegram.telegram_service import TelegramService as _TelegramService
+
+                globals()["TelegramService"] = _TelegramService
+                telegram_service_cls = _TelegramService
+            self._telegram = telegram_service_cls(
                 self.settings,
                 transport=self._create_telegram_transport(),
                 handler=self.handle_external_command,
@@ -140,21 +205,39 @@ class ServiceContainer:
     def voice(self) -> VoiceService:
         if self._voice is None:
             _boot_log("services:lazy:voice")
-            self._voice = VoiceService(self.settings)
+            voice_service_cls = VoiceService
+            if voice_service_cls is None:
+                from core.voice.voice_service import VoiceService as _VoiceService
+
+                globals()["VoiceService"] = _VoiceService
+                voice_service_cls = _VoiceService
+            self._voice = voice_service_cls(self.settings)
         return self._voice
 
     @property
     def wake(self) -> WakeService:
         if self._wake is None:
             _boot_log("services:lazy:wake")
-            self._wake = WakeService(self.settings, self.voice)
+            wake_service_cls = WakeService
+            if wake_service_cls is None:
+                from core.voice.wake_service import WakeService as _WakeService
+
+                globals()["WakeService"] = _WakeService
+                wake_service_cls = _WakeService
+            self._wake = wake_service_cls(self.settings, self.voice)
         return self._wake
 
     @property
     def updates(self) -> UpdateService:
         if self._updates is None:
             _boot_log("services:lazy:updates")
-            self._updates = UpdateService(self.settings)
+            update_service_cls = UpdateService
+            if update_service_cls is None:
+                from core.updates.update_service import UpdateService as _UpdateService
+
+                globals()["UpdateService"] = _UpdateService
+                update_service_cls = _UpdateService
+            self._updates = update_service_cls(self.settings)
         return self._updates
 
     def refresh_telegram_transport(self) -> None:
@@ -170,6 +253,13 @@ class ServiceContainer:
         token = str(registration.get("telegram_bot_token", "")).strip()
         if not token:
             return None
+        transport_cls = HttpTelegramTransport
+        if transport_cls is None:
+            from core.telegram.telegram_service import HttpTelegramTransport as _HttpTelegramTransport
+
+            globals()["HttpTelegramTransport"] = _HttpTelegramTransport
+            transport_cls = _HttpTelegramTransport
+
         network = self.settings.get("network", {}) or {}
         timeout_value = network.get("timeout_seconds", 12.0)
         try:
@@ -177,4 +267,4 @@ class ServiceContainer:
         except (TypeError, ValueError):
             timeout = 12.0
         timeout = max(3.0, timeout)
-        return HttpTelegramTransport(token, timeout_seconds=timeout)
+        return transport_cls(token, timeout_seconds=timeout)

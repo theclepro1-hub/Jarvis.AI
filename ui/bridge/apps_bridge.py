@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from concurrent.futures import ThreadPoolExecutor
 
-from core.actions.launcher_discovery import target_from_file_url
+from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
 class AppsBridge(QObject):
@@ -12,6 +12,9 @@ class AppsBridge(QObject):
     scanResultChanged = Signal()
     defaultMusicAppChanged = Signal()
     pinnedCommandsChanged = Signal()
+    scanBusyChanged = Signal()
+    _scanFinished = Signal(object)
+    _scanFailed = Signal(str)
 
     def __init__(self, services, chat_bridge) -> None:
         super().__init__()
@@ -20,6 +23,10 @@ class AppsBridge(QObject):
         self._feedback = ""
         self._discovered: list[dict[str, str]] = []
         self._scan_result: dict[str, object] = {}
+        self._scan_busy = False
+        self._scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="apps-scan")
+        self._scanFinished.connect(self._apply_scan_result)
+        self._scanFailed.connect(self._apply_scan_failure)
 
     @Property("QVariantList", notify=catalogChanged)
     def catalog(self) -> list[dict[str, str]]:
@@ -32,6 +39,10 @@ class AppsBridge(QObject):
     @Property("QVariantMap", notify=scanResultChanged)
     def scanResult(self) -> dict[str, object]:
         return self._scan_result
+
+    @Property(bool, notify=scanBusyChanged)
+    def scanBusy(self) -> bool:
+        return self._scan_busy
 
     @Property(str, notify=feedbackChanged)
     def feedback(self) -> str:
@@ -84,16 +95,21 @@ class AppsBridge(QObject):
 
     @Slot()
     def scanApplications(self) -> None:
-        result = self.services.actions.scan_and_import_apps()
-        review = result.get("review", [])
-        self._discovered = review if isinstance(review, list) else []
-        self._scan_result = dict(result)
-        self._feedback = str(result.get("summary") or "Новых безопасных приложений не найдено.")
+        if self._scan_busy:
+            return
+        self._set_scan_busy(True)
+        self._feedback = "Ищу приложения и ярлыки. Это может занять несколько секунд."
         self.feedbackChanged.emit()
-        self.discoveredChanged.emit()
-        self.scanResultChanged.emit()
-        self.catalogChanged.emit()
-        self.chat_bridge.refreshCatalog()
+
+        def worker() -> None:
+            try:
+                result = self.services.actions.scan_and_import_apps()
+            except Exception as exc:  # noqa: BLE001
+                self._scanFailed.emit(type(exc).__name__)
+                return
+            self._scanFinished.emit(dict(result))
+
+        self._scan_pool.submit(worker)
 
     @Slot(str)
     def importDiscoveredApp(self, candidate_id: str) -> None:
@@ -149,4 +165,33 @@ class AppsBridge(QObject):
 
     @Slot(str, result=str)
     def targetFromFileUrl(self, file_url: str) -> str:
+        from core.actions.launcher_discovery import target_from_file_url
+
         return target_from_file_url(file_url)
+
+    def _set_scan_busy(self, value: bool) -> None:
+        busy = bool(value)
+        if self._scan_busy == busy:
+            return
+        self._scan_busy = busy
+        self.scanBusyChanged.emit()
+
+    @Slot(object)
+    def _apply_scan_result(self, result: object) -> None:
+        payload = dict(result) if isinstance(result, dict) else {}
+        review = payload.get("review", [])
+        self._discovered = review if isinstance(review, list) else []
+        self._scan_result = payload
+        self._feedback = str(payload.get("summary") or "Новых безопасных приложений не найдено.")
+        self._set_scan_busy(False)
+        self.feedbackChanged.emit()
+        self.discoveredChanged.emit()
+        self.scanResultChanged.emit()
+        self.catalogChanged.emit()
+        self.chat_bridge.refreshCatalog()
+
+    @Slot(str)
+    def _apply_scan_failure(self, error_name: str) -> None:
+        self._set_scan_busy(False)
+        self._feedback = f"Не удалось обновить список приложений: {error_name}"
+        self.feedbackChanged.emit()

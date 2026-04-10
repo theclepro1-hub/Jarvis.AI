@@ -118,7 +118,8 @@ class SingleInstanceService(QObject):
         except RuntimeError:
             return
         if not raw:
-            raw = "show"
+            socket.disconnectFromServer()
+            return
         if raw.startswith("show"):
             self._emit_show_requested()
         socket.disconnectFromServer()

@@ -10,7 +10,6 @@ from pathlib import Path
 import sys
 
 import sounddevice as sd
-from vosk import SetLogLevel
 
 from core.routing.text_rules import STRICT_WAKE_ALIASES, normalize_text, strip_leading_wake_prefix
 from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
@@ -49,7 +48,12 @@ class WakeService:
         self._detail = "Слово активации не запущено"
         self._buffer = deque(maxlen=self.PRE_ROLL_FRAMES)
         self._last_detected_at = 0.0
-        SetLogLevel(-1)
+        try:
+            from vosk import SetLogLevel
+
+            SetLogLevel(-1)
+        except Exception:
+            pass
 
     @property
     def is_running(self) -> bool:

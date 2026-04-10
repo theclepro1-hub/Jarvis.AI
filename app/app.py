@@ -11,14 +11,6 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 from core.services.service_container import ServiceContainer
-from core.services.single_instance import SingleInstanceService
-from core.state.app_state import AppState
-from ui.bridge.app_bridge import AppBridge
-from ui.bridge.apps_bridge import AppsBridge
-from ui.bridge.chat_bridge import ChatBridge
-from ui.bridge.registration_bridge import RegistrationBridge
-from ui.bridge.settings_bridge import SettingsBridge
-from ui.bridge.voice_bridge import VoiceBridge
 
 
 def _boot_log(message: str) -> None:
@@ -38,12 +30,21 @@ def _boot_log(message: str) -> None:
 
 
 def _wake_start_delay_ms() -> int:
-    raw = str(os.environ.get("JARVIS_UNITY_WAKE_START_DELAY_MS", "900") or "900").strip()
+    raw = str(os.environ.get("JARVIS_UNITY_WAKE_START_DELAY_MS", "1500") or "1500").strip()
     try:
         value = int(raw)
     except ValueError:
-        value = 900
+        value = 1500
     return max(250, min(value, 5000))
+
+
+def _background_start_delay_ms() -> int:
+    raw = str(os.environ.get("JARVIS_UNITY_BACKGROUND_START_DELAY_MS", "2200") or "2200").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 1500
+    return max(250, min(value, 10000))
 
 
 def _load_embedded_fonts() -> None:
@@ -64,7 +65,7 @@ class JarvisUnityApplication:
         qapp,
         *,
         start_minimized: bool = False,
-        single_instance: SingleInstanceService | None = None,
+        single_instance=None,
     ) -> None:
         _boot_log("app:init:begin")
         self.qapp = qapp
@@ -82,6 +83,14 @@ class JarvisUnityApplication:
         self._update_checking = False
         _load_embedded_fonts()
         _boot_log("app:init:fonts")
+        from core.state.app_state import AppState
+        from ui.bridge.app_bridge import AppBridge
+        from ui.bridge.apps_bridge import AppsBridge
+        from ui.bridge.chat_bridge import ChatBridge
+        from ui.bridge.registration_bridge import RegistrationBridge
+        from ui.bridge.settings_bridge import SettingsBridge
+        from ui.bridge.voice_bridge import VoiceBridge
+
         self.services = ServiceContainer()
         _boot_log("app:init:services")
         self.state = AppState()
@@ -100,6 +109,7 @@ class JarvisUnityApplication:
         self.app_bridge.voice_bridge = self.voice_bridge
         self.settings_bridge = SettingsBridge(self.state, self.services, self.app_bridge, self.chat_bridge)
         _boot_log("app:init:settings-bridge")
+        self.settings_bridge.minimizeToTrayEnabledChanged.connect(self._sync_window_lifecycle)
         self.registration_bridge = RegistrationBridge(self.state, self.services, self.app_bridge)
         _boot_log("app:init:registration-bridge")
 
@@ -127,20 +137,24 @@ class JarvisUnityApplication:
         if not self.engine.rootObjects():
             raise RuntimeError("Failed to load App.qml")
         self.window = self.engine.rootObjects()[0]
-        self._install_tray_mode()
+        self._install_tray_mode(eager=self._wants_tray_mode())
+        self._sync_window_lifecycle()
         _boot_log("app:start:root-objects")
         if self.start_minimized and self._tray_enabled():
             QTimer.singleShot(0, lambda: self.hide_to_tray(show_message=False))
-        self._install_background_services()
+        QTimer.singleShot(_background_start_delay_ms(), self._install_background_services)
+        _boot_log("app:start:background-services-scheduled")
         if os.environ.get("JARVIS_UNITY_DISABLE_WAKE") != "1":
             QTimer.singleShot(_wake_start_delay_ms(), self.voice_bridge.startWakeRuntime)
             _boot_log("app:start:wake-scheduled")
 
-    def _install_tray_mode(self) -> None:
-        if self.window is not None:
+    def _install_tray_mode(self, *, eager: bool) -> None:
+        if self.window is not None and self._close_filter is None:
             self._close_filter = _WindowCloseFilter(self)
             self.window.installEventFilter(self._close_filter)
 
+        if not eager or self.tray_icon is not None:
+            return
         if not QSystemTrayIcon.isSystemTrayAvailable():
             _boot_log("app:tray:unavailable")
             return
@@ -168,8 +182,26 @@ class JarvisUnityApplication:
         self.tray_icon.show()
         _boot_log("app:tray:ready")
 
+    def _wants_tray_mode(self) -> bool:
+        return bool(self.start_minimized or self.services.settings.get("minimize_to_tray_enabled", False))
+
+    def _sync_window_lifecycle(self) -> None:
+        wants_tray = self._wants_tray_mode()
+        if wants_tray:
+            self._install_tray_mode(eager=True)
+        elif self.tray_icon is not None and not self.start_minimized:
+            self.tray_icon.hide()
+            self.tray_icon.deleteLater()
+            self.tray_icon = None
+            self._tray_menu = None
+        self.qapp.setQuitOnLastWindowClosed(not wants_tray)
+
     def _tray_enabled(self) -> bool:
-        return bool(self.services.settings.get("minimize_to_tray_enabled", True)) and self.tray_icon is not None
+        if not self._wants_tray_mode():
+            return False
+        if self.tray_icon is None:
+            self._install_tray_mode(eager=True)
+        return self.tray_icon is not None
 
     def should_hide_close_to_tray(self) -> bool:
         return not self._force_quit and self._tray_enabled()
@@ -206,10 +238,12 @@ class JarvisUnityApplication:
         self.qapp.quit()
 
     def _handle_tray_activated(self, reason) -> None:
-        if reason in {QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick}:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window()
 
     def _install_background_services(self) -> None:
+        if self._background_timer is not None:
+            return
         self._background_timer = QTimer()
         self._background_timer.setInterval(1000)
         self._background_timer.timeout.connect(self._fire_due_reminders)
@@ -218,20 +252,20 @@ class JarvisUnityApplication:
         self._telegram_timer.setInterval(self._telegram_poll_interval_ms())
         self._telegram_timer.timeout.connect(self._poll_telegram_async)
         self._telegram_timer.start()
-        QTimer.singleShot(250, self._poll_telegram_async)
-        QTimer.singleShot(1000, self._fire_due_reminders)
+        QTimer.singleShot(1200, self._poll_telegram_async)
+        QTimer.singleShot(1600, self._fire_due_reminders)
         self._update_timer = QTimer()
         self._update_timer.setInterval(self._update_check_interval_ms())
         self._update_timer.timeout.connect(self._check_updates_async)
         self._update_timer.start()
-        QTimer.singleShot(2500, self._check_updates_async)
+        QTimer.singleShot(5500, self._check_updates_async)
 
     def _tick_background_services(self) -> None:
         self._fire_due_reminders()
         self._poll_telegram_async()
 
     def _telegram_poll_interval_ms(self) -> int:
-        telegram = getattr(self.services, "telegram", None)
+        telegram = getattr(self.services, "_telegram", None)
         if telegram is None or not hasattr(telegram, "poll_interval_ms"):
             return 1000
         return max(750, int(telegram.poll_interval_ms()))
@@ -252,21 +286,20 @@ class JarvisUnityApplication:
             _boot_log(f"app:reminders:tick-failed:{exc!r}")
 
     def _send_telegram_note_async(self, record, message: str) -> None:  # noqa: ANN001
-        telegram = getattr(self.services, "telegram", None)
-        if telegram is not None and hasattr(telegram, "refresh_configuration"):
-            telegram.refresh_configuration()
-        if telegram is None or not hasattr(telegram, "send_message"):
-            return
-        if hasattr(telegram, "is_configured") and not telegram.is_configured():
-            return
-        chat_id = str(getattr(record, "telegram_chat_id", "") or "").strip()
-        if not chat_id and hasattr(telegram, "telegram_user_id"):
-            chat_id = str(telegram.telegram_user_id()).strip()
-        if not chat_id:
-            return
-
         def worker() -> None:
             try:
+                telegram = self.services.telegram
+                if hasattr(telegram, "refresh_configuration"):
+                    telegram.refresh_configuration()
+                if not hasattr(telegram, "send_message"):
+                    return
+                if hasattr(telegram, "is_configured") and not telegram.is_configured():
+                    return
+                chat_id = str(getattr(record, "telegram_chat_id", "") or "").strip()
+                if not chat_id and hasattr(telegram, "telegram_user_id"):
+                    chat_id = str(telegram.telegram_user_id()).strip()
+                if not chat_id:
+                    return
                 telegram.send_message(chat_id, message)
             except Exception as exc:  # noqa: BLE001
                 _boot_log(f"app:telegram:reminder-send-failed:{exc!r}")
@@ -274,23 +307,21 @@ class JarvisUnityApplication:
         threading.Thread(target=worker, daemon=True).start()
 
     def _poll_telegram_async(self) -> None:
-        telegram = getattr(self.services, "telegram", None)
-        if telegram is None:
-            return
-        if hasattr(telegram, "refresh_configuration"):
-            telegram.refresh_configuration()
-        if hasattr(telegram, "is_configured") and not telegram.is_configured():
-            return
-        if getattr(telegram, "transport", None) is None:
-            return
-        if hasattr(telegram, "can_poll_now") and not telegram.can_poll_now():
-            return
         if self._telegram_polling:
             return
         self._telegram_polling = True
 
         def worker() -> None:
             try:
+                telegram = self.services.telegram
+                if hasattr(telegram, "refresh_configuration"):
+                    telegram.refresh_configuration()
+                if hasattr(telegram, "is_configured") and not telegram.is_configured():
+                    return
+                if getattr(telegram, "transport", None) is None:
+                    return
+                if hasattr(telegram, "can_poll_now") and not telegram.can_poll_now():
+                    return
                 try:
                     telegram.poll_once(async_dispatch=True)
                 except TypeError:
@@ -306,15 +337,15 @@ class JarvisUnityApplication:
         return 6 * 60 * 60 * 1000
 
     def _check_updates_async(self) -> None:
-        updates = getattr(self.services, "updates", None)
-        if updates is None or not hasattr(updates, "check_now"):
-            return
         if self._update_checking:
             return
         self._update_checking = True
 
         def worker() -> None:
             try:
+                updates = self.services.updates
+                if not hasattr(updates, "check_now"):
+                    return
                 updates.check_now()
             except Exception as exc:  # noqa: BLE001
                 _boot_log(f"app:updates:check-failed:{exc!r}")
@@ -334,6 +365,6 @@ class _WindowCloseFilter(QObject):
     def eventFilter(self, watched, event) -> bool:
         if event.type() == QEvent.Type.Close and self.runtime.should_hide_close_to_tray():
             event.ignore()
-            self.runtime.hide_to_tray(show_message=True)
+            self.runtime.hide_to_tray(show_message=False)
             return True
         return super().eventFilter(watched, event)

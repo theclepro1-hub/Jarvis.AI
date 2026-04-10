@@ -131,8 +131,7 @@ YANDEX_EDA_ALIASES = (
     "yandex food",
 )
 
-POWER_CONFIRM_WORDS = ("подтверждаю", "подтвердить", "confirm", "confirmed", "да подтверждаю")
-POWER_CONFIRM_REQUIRED = {"shutdown", "restart", "sleep", "hibernate", "logoff"}
+POWER_CONFIRM_REQUIRED: set[str] = set()
 POWER_ALIASES: dict[str, tuple[str, ...]] = {
     "shutdown": (
         "выключи компьютер",
@@ -376,8 +375,6 @@ class IntentRouter:
         action = self._detect_power_action(normalized)
         if action is None:
             return None
-        if action in POWER_CONFIRM_REQUIRED and not self._has_power_confirmation(normalized):
-            return ExecutionPlan(command=text, question=POWER_CONFIRM_PROMPTS[action])
         title = POWER_TITLES[action]
         step = ExecutionStep(
             id=self._step_id(text, "power_action"),
@@ -393,9 +390,6 @@ class IntentRouter:
             if any(lower.startswith(alias) for alias in aliases):
                 return action
         return None
-
-    def _has_power_confirmation(self, lower: str) -> bool:
-        return any(word in lower for word in POWER_CONFIRM_WORDS)
 
     def _strip_polite_prefix(self, lower: str) -> str:
         for prefix in ("пожалуйста ", "ну ", "jarvis ", "джарвис "):

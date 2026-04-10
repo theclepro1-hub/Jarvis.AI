@@ -11,14 +11,10 @@ import time
 import wave
 from pathlib import Path
 
-import httpx
-from openai import OpenAI
-from vosk import KaldiRecognizer
-
 from core.routing.text_rules import normalize_text
 from core.voice.faster_whisper_runtime import load_faster_whisper_model, resolve_local_faster_whisper_model
 from core.voice.voice_models import TranscriptionResult
-from core.voice.vosk_runtime import load_vosk_model
+from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
 
 
 MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
@@ -36,7 +32,7 @@ class STTService:
         self.settings = settings_service
         self.local_model_path = local_model_path or self._find_local_model_path()
         self.faster_whisper_download_root = self._find_faster_whisper_download_root()
-        self._http_client: httpx.Client | None = None
+        self._http_client = None
         self._http_client_signature: tuple[str, str, float] | None = None
 
     def engine(self) -> str:
@@ -269,6 +265,8 @@ class STTService:
         try:
             if self._is_cancelled(cancel_event):
                 return self._cancelled_result(engine="groq_whisper", backend_trace=("groq_whisper",))
+            from openai import OpenAI
+
             api = OpenAI(
                 api_key=groq_key,
                 base_url="https://api.groq.com/openai/v1",
@@ -405,8 +403,8 @@ class STTService:
         try:
             if self._is_cancelled(cancel_event):
                 return self._cancelled_result(engine="local_vosk", backend_trace=("local_vosk",))
-            model = load_vosk_model(self.local_model_path)
-            recognizer = KaldiRecognizer(model, 16_000)
+            load_vosk_model(self.local_model_path)
+            recognizer = new_vosk_recognizer(self.local_model_path, 16_000)
             recognizer.AcceptWaveform(raw_bytes)
             if self._is_cancelled(cancel_event):
                 return self._cancelled_result(engine="local_vosk", backend_trace=("local_vosk",))
@@ -527,7 +525,9 @@ class STTService:
         value = str(self.settings.get("voice_mode", "balance")).strip().casefold()
         return value if value in {"private", "balance", "quality"} else "balance"
 
-    def _build_http_client(self) -> httpx.Client:
+    def _build_http_client(self):
+        import httpx
+
         network = self.settings.get("network", {}) or {}
         timeout = float(network.get("timeout_seconds", 20.0))
         proxy_mode = str(network.get("proxy_mode", "system") or "system").casefold()

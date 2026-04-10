@@ -141,14 +141,8 @@ SYSTEM_ACTION_TITLES = {
     "logoff": "Выхожу из системы",
     "lock": "Блокирую экран",
 }
-SYSTEM_ACTION_CONFIRM_REQUIRED = {"shutdown", "restart", "sleep", "hibernate", "logoff"}
-SYSTEM_ACTION_CONFIRM_PROMPTS = {
-    "shutdown": "Подтвердите выключение: скажите «выключи компьютер подтверждаю».",
-    "restart": "Подтвердите перезагрузку: скажите «перезагрузи компьютер подтверждаю».",
-    "sleep": "Подтвердите режим сна: скажите «режим сна подтверждаю».",
-    "hibernate": "Подтвердите гибернацию: скажите «гибернация подтверждаю».",
-    "logoff": "Подтвердите выход из системы: скажите «выйди из системы подтверждаю».",
-}
+SYSTEM_ACTION_CONFIRM_REQUIRED: set[str] = set()
+SYSTEM_ACTION_CONFIRM_PROMPTS: dict[str, str] = {}
 SYSTEM_POLITE_PREFIXES = ("пожалуйста ", "ну ", "давай ", "jarvis ", "джарвис ")
 
 
@@ -379,8 +373,8 @@ class ActionRegistry:
                 "mode": "power",
                 "title": SYSTEM_ACTION_TITLES[action],
                 "detail": "Системная команда отправлена.",
-                "requires_confirmation": action in SYSTEM_ACTION_CONFIRM_REQUIRED,
-                "confirmation_prompt": SYSTEM_ACTION_CONFIRM_PROMPTS.get(action, ""),
+                "requires_confirmation": False,
+                "confirmation_prompt": "",
             }
 
         if any(normalized.startswith(f"{verb} ") for verb in OPEN_VERBS):

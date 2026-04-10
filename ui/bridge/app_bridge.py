@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
-from core.updates.update_service import DEFAULT_VERSION
+from core.version import DEFAULT_VERSION
 
 
 class AppBridge(QObject):

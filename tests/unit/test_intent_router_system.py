@@ -48,20 +48,10 @@ class _Actions:
         return []
 
 
-def test_intent_router_requires_confirmation_for_shutdown() -> None:
+def test_intent_router_executes_shutdown_without_confirmation() -> None:
     router = IntentRouter(_Actions())
 
     plan = router.build("\u0432\u044b\u043a\u043b\u044e\u0447\u0438 \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440")
-
-    assert plan is not None
-    assert plan.question == "\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u0435 \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435: \u0441\u043a\u0430\u0436\u0438\u0442\u0435 \u00ab\u0432\u044b\u043a\u043b\u044e\u0447\u0438 \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u044e\u00bb."
-    assert plan.steps == []
-
-
-def test_intent_router_executes_shutdown_when_confirmed() -> None:
-    router = IntentRouter(_Actions())
-
-    plan = router.build("\u0432\u044b\u043a\u043b\u044e\u0447\u0438 \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0430\u044e")
 
     assert plan is not None
     assert plan.question == ""

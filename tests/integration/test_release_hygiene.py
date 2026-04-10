@@ -38,7 +38,7 @@ def test_release_docs_exist() -> None:
         Path("docs/SECURITY.md"),
         Path("docs/AI_NETWORK.md"),
         Path("docs/RELEASE_READINESS.md"),
-        Path("docs/RELEASE_22.4.0.md"),
+        Path("docs/RELEASE_22.4.1.md"),
     ]:
         assert relpath.exists()
 

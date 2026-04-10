@@ -12,9 +12,10 @@ from typing import Callable, TypeVar
 
 import httpx
 
+from core.version import DEFAULT_VERSION
+
 
 DEFAULT_GITHUB_REPOSITORY = "theclepro1-hub/Jarvis.AI"
-DEFAULT_VERSION = "22.4.0"
 DEFAULT_HTTP_TIMEOUT_SECONDS = 20.0
 USER_AGENT = "JarvisAi_Unity/1.0"
 INSTALLER_LAUNCH_ARGUMENTS = ("/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS")
