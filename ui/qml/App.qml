@@ -89,7 +89,7 @@ ApplicationWindow {
 
                         Text {
                             text: appBridge.currentScreen === "registration"
-                                  ? "Ключи и подключения. Можно заполнить сразу или вернуться позже в обычные настройки."
+                                  ? "Для старта выберите режим AI и заполните Groq с Telegram."
                                   : appBridge.currentScreen === "voice"
                                     ? "Настройте микрофон, слово активации и способ распознавания."
                                   : appBridge.currentScreen === "apps"

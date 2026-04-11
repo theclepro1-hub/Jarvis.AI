@@ -23,7 +23,7 @@ Rectangle {
 
         ColumnLayout {
             id: contentColumn
-            width: Math.min(registrationScroll.width - 32, 820)
+            width: Math.min(registrationScroll.width - 32, 760)
             x: Math.max(16, (registrationScroll.width - width) / 2)
             y: 28
             spacing: 14
@@ -40,7 +40,7 @@ Rectangle {
                     id: form
                     anchors.fill: parent
                     anchors.margins: 24
-                    spacing: 12
+                    spacing: 14
 
                     Text {
                         text: "Первый запуск"
@@ -59,7 +59,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Сейчас нужны только ключ для чата и Telegram-доступ. После этого в настройках можно выбрать быстрый, стандартный, умный или приватный режим."
+                        text: "Для старта нужны только ключ Groq, Telegram bot token и Telegram ID. Всё остальное можно настроить позже в обычных настройках."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
@@ -68,7 +68,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Слово активации всегда остаётся локальным. Режимы начинают работать после перехода в настройки."
+                        text: "Режим AI можно выбрать сразу и поменять позже в настройках одним кликом."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
@@ -76,88 +76,35 @@ Rectangle {
                         Layout.fillWidth: true
                     }
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        color: Qt.rgba(0.08, 0.14, 0.22, 0.86)
-                        radius: 22
-                        border.color: Qt.rgba(0.41, 0.94, 0.82, 0.18)
-                        border.width: 1
-                        implicitHeight: onboardingModeColumn.implicitHeight + 24
-
-                        ColumnLayout {
-                            id: onboardingModeColumn
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 8
-
-                            Text {
-                                text: "Р РµР¶РёРј JARVIS"
-                                color: Theme.Colors.text
-                                font.family: Theme.Typography.displayFamily
-                                font.pixelSize: Theme.Typography.small
-                                font.bold: true
-                            }
-
-                            AppComboBox {
-                                id: registrationAssistantModeCombo
-                                objectName: "registrationAssistantModeCombo"
-                                Layout.preferredWidth: 320
-                                model: settingsBridge.assistantModeOptions
-                                textRole: "title"
-                                currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.assistantMode))
-                                onActivated: (index) => settingsBridge.assistantMode = model[index].key
-                            }
-
-                            Text {
-                                text: settingsBridge.assistantModeSummary
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.small
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-
-                            Text {
-                                text: "Р§С‚Рѕ Р»РѕРєР°Р»СЊРЅРѕ: " + settingsBridge.assistantStatus.local
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.micro
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-
-                            Text {
-                                text: "Р§С‚Рѕ РјРѕР¶РµС‚ СѓР№С‚Рё РЅР°СЂСѓР¶Сѓ: " + settingsBridge.assistantStatus.outside
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.micro
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
+                    Text {
+                        text: "Режим AI"
+                        color: Theme.Colors.text
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: Theme.Typography.small
+                        font.bold: true
                     }
 
-                    RowLayout {
+                    AppComboBox {
+                        id: registrationAssistantModeCombo
+                        objectName: "registrationAssistantModeCombo"
+                        Layout.preferredWidth: 320
+                        model: settingsBridge.assistantModeOptions
+                        textRole: "title"
+                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.assistantMode))
+                        onActivated: (index) => settingsBridge.assistantMode = model[index].key
+                    }
+
+                    StatusPill {
+                        text: settingsBridge.assistantUserStatus
+                    }
+
+                    Text {
+                        text: settingsBridge.assistantModeSummary
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
                         Layout.fillWidth: true
-                        spacing: 10
-
-                        PrimaryButton {
-                            objectName: "registrationSaveButton"
-                            text: "Продолжить к режимам"
-                            onClicked: registrationBridge.saveRegistration(
-                                           groqField.text,
-                                           userIdField.text,
-                                           botTokenField.text
-                                       )
-                        }
-
-                        SecondaryButton {
-                            objectName: "registrationSkipButton"
-                            text: "Пропустить и открыть чат"
-                            onClicked: registrationBridge.skipForNow()
-                        }
-
-                        Item { Layout.fillWidth: true }
                     }
 
                     InputField {
@@ -220,6 +167,23 @@ Rectangle {
                         wrapMode: Text.WrapAnywhere
                         Layout.fillWidth: true
                         onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        PrimaryButton {
+                            objectName: "registrationSaveButton"
+                            text: "Продолжить"
+                            onClicked: registrationBridge.saveRegistration(
+                                           groqField.text,
+                                           userIdField.text,
+                                           botTokenField.text
+                                       )
+                        }
+
+                        Item { Layout.fillWidth: true }
                     }
 
                     Text {

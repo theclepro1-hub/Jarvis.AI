@@ -63,18 +63,10 @@ class RegistrationBridge(QObject):
             telegram_bot_token,
         )
         if record.is_complete:
-            self._feedback = "Подключение сохранено. Можно переходить в новый JARVIS."
+            self._feedback = "Подключения сохранены. Открываю JARVIS."
             self.feedbackChanged.emit()
             self.registrationChanged.emit()
             self.app_bridge.finishRegistration()
             return
-        self._feedback = "Нужны все три поля: Groq API Key, Telegram User ID и Telegram Bot Token."
+        self._feedback = "Заполните три поля: ключ Groq, Telegram ID и токен Telegram-бота."
         self.feedbackChanged.emit()
-
-    @Slot()
-    def skipForNow(self) -> None:
-        self.services.registration.skip()
-        self._feedback = "Регистрацию можно завершить позже в настройках."
-        self.feedbackChanged.emit()
-        self.registrationChanged.emit()
-        self.app_bridge.finishRegistration()

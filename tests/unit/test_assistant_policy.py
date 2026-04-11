@@ -112,7 +112,7 @@ def test_standard_policy_reports_local_degradation_when_models_are_missing() -> 
         "local_faster_whisper_missing",
         "local_vosk_missing",
     )
-    assert "fallback" in policy.display_summary.casefold()
+    assert policy.display_summary.startswith("Стандартный режим")
 
 
 def test_local_llama_ready_delegates_to_backend_status(monkeypatch: pytest.MonkeyPatch) -> None:

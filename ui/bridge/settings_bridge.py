@@ -143,14 +143,10 @@ class SettingsBridge(QObject):
 
     def _assistant_mode_options(self) -> list[dict[str, str]]:
         return [
-            {"key": "fast", "title": "Быстрый", "note": "Облачный маршрут первым. Минимальная задержка."},
-            {
-                "key": "standard",
-                "title": "Стандартный",
-                "note": "Локальный приоритет там, где backend уже готов, с честным fallback.",
-            },
-            {"key": "smart", "title": "Умный", "note": "Приоритет качества ответа и более сильных cloud-маршрутов."},
-            {"key": "private", "title": "Приватный", "note": "Никакого cloud text/STT fallback. Только локальные backend'ы."},
+            {"key": "fast", "title": "Быстрый", "note": "Максимум скорости."},
+            {"key": "standard", "title": "Стандартный", "note": "Лучший баланс на каждый день."},
+            {"key": "smart", "title": "Умный", "note": "Приоритет качества ответа."},
+            {"key": "private", "title": "Приватный", "note": "Только локальная работа."},
         ]
 
     def _format_route(self, route: tuple[str, ...]) -> str:
@@ -160,58 +156,90 @@ class SettingsBridge(QObject):
 
     def _privacy_text(self, guarantee: str) -> str:
         mapping = {
-            "cloud_first": "cloud-first",
-            "local_first_with_fallback": "local-first with fallback",
-            "quality_first": "quality-first",
-            "no_cloud_ever": "no cloud ever",
+            "cloud_first": "Облако в приоритете",
+            "local_first_with_fallback": "Сначала локально, потом облако",
+            "quality_first": "Качество в приоритете",
+            "no_cloud_ever": "Только локально",
         }
-        return mapping.get(str(guarantee or "").strip(), "mixed")
+        return mapping.get(str(guarantee or "").strip(), "Смешанный режим")
 
     def _local_readiness_text(self) -> str:
-        issues = set(self._assistant_policy().readiness_issues)
-        if not issues:
-            return "Локальные backend'ы готовы."
-        labels = {
-            "local_llama_missing": "local Llama",
-            "local_faster_whisper_missing": "local faster-whisper",
-            "local_vosk_missing": "local Vosk",
-        }
-        missing = ", ".join(labels[item] for item in sorted(issues) if item in labels)
-        if self.assistantMode == "private":
-            return f"Не хватает: {missing}. Cloud fallback в private отключён."
-        return f"Не хватает: {missing}."
+        from core.ai.local_llm_service import LocalLLMService
+
+        status = LocalLLMService(self.services.settings).status()
+        if status.ready:
+            return "Локальная модель готова."
+        if status.backend == "ollama":
+            if not status.model_path:
+                return "Укажите модель Ollama, чтобы включить локальный режим."
+            if "not installed" in status.detail.casefold():
+                return "Модель Ollama ещё не скачана на этот компьютер."
+            return "Ollama сейчас недоступен."
+        if not status.model_path:
+            return "Добавьте .gguf-модель, чтобы включить приватный режим."
+        if "not found" in status.detail.casefold():
+            return "Файл .gguf не найден."
+        if "llama_cpp is not installed" in status.detail:
+            return "Нужен пакет llama-cpp-python и .gguf-модель."
+        return "Локальная модель пока не готова."
 
     def _outside_text(self, policy) -> str:  # noqa: ANN202
         if policy.mode == "private":
-            return "РќРёС‡РµРіРѕ: private РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚ text/STT РІ РѕР±Р»Р°РєРѕ."
-        if policy.text_cloud_allowed and policy.stt_cloud_allowed:
-            return "РўРµРєСЃС‚ Рё STT РјРѕРіСѓС‚ СѓС…РѕРґРёС‚СЊ РІ РѕР±Р»Р°РєРѕ РїРѕ СЂРµР¶РёРјСѓ Рё fallback-Р»РѕРіРёРєРµ."
-        if policy.text_cloud_allowed:
-            return "Р’ РѕР±Р»Р°РєРѕ РјРѕР¶РµС‚ СѓР№С‚Рё С‚РѕР»СЊРєРѕ text AI. Wake Рё STT РѕСЃС‚Р°СЋС‚СЃСЏ Р»РѕРєР°Р»СЊРЅРµРµ."
-        if policy.stt_cloud_allowed:
-            return "Р’ РѕР±Р»Р°РєРѕ РјРѕР¶РµС‚ СѓР№С‚Рё С‚РѕР»СЊРєРѕ STT РїРѕСЃР»Рµ wake-СЃР»РѕРІР°."
-        return "РћР±Р»Р°С‡РЅС‹Рµ fallback-РјР°СЂС€СЂСѓС‚С‹ РѕС‚РєР»СЋС‡РµРЅС‹."
+            return "Ничего не уходит наружу."
+        if policy.mode == "standard":
+            if policy.text_cloud_allowed and policy.stt_cloud_allowed:
+                return "При нехватке локальных моделей часть обработки может временно идти через облако."
+            if policy.text_cloud_allowed:
+                return "Текст может временно уходить в облако."
+            if policy.stt_cloud_allowed:
+                return "Распознавание речи может временно уходить в облако после wake."
+            return "Облачный fallback отключён."
+        if policy.mode == "fast":
+            return "Приоритет у быстрых облачных маршрутов."
+        if policy.mode == "smart":
+            return "Приоритет у качества ответа."
+        return "Режим автоматически подбирает маршрут."
 
     def _local_text(self, policy) -> str:  # noqa: ANN202
-        wake = "wake word РІСЃРµРіРґР° Р»РѕРєР°Р»СЊРЅС‹Р№"
-        return f"{wake}; text: {self._format_route(policy.text_route)}; stt: {self._format_route(policy.stt_route)}"
+        if policy.mode == "private":
+            return "Wake word, STT и текст работают локально."
+        return "Wake word всегда локальный. Остальное подбирается автоматически."
+
+    def _assistant_user_status_text(self, policy) -> str:  # noqa: ANN202
+        has_ai_key, _ = self._assistant_registration_state()
+        issues = set(policy.readiness_issues)
+        if policy.mode == "private":
+            return "Нужна локальная модель" if issues else "Готово: всё локально"
+        if policy.mode == "standard":
+            if "local_llama_missing" in issues:
+                return "Сейчас работает через облако" if has_ai_key else "Нужен ключ AI"
+            return "Готово"
+        if policy.mode in {"fast", "smart"} and not has_ai_key:
+            return "Нужен ключ AI"
+        return "Готово"
 
     def _assistant_status_snapshot(self) -> dict[str, object]:
         policy = self._assistant_policy()
-        text_route = self._format_route(policy.text_route)
-        stt_route = self._format_route(policy.stt_route)
         privacy = self._privacy_text(policy.privacy_guarantee)
         readiness = self._local_readiness_text()
+        user_status = self._assistant_user_status_text(policy)
+        mode_label = {
+            "fast": "Быстрый",
+            "standard": "Стандартный",
+            "smart": "Умный",
+            "private": "Приватный",
+        }.get(policy.mode, "Режим")
         return {
-            "mode": self.assistantMode,
-            "wake": "local",
-            "text": text_route,
-            "stt": stt_route,
+            "mode": policy.mode,
+            "wake": "Локально",
+            "text": "Автоматически",
+            "stt": "Автоматически",
             "privacy": privacy,
             "readiness": readiness,
             "outside": self._outside_text(policy),
             "local": self._local_text(policy),
-            "summary": f"wake local · text {text_route} · stt {stt_route} · privacy {privacy}",
+            "summary": f"Режим: {mode_label}. {user_status}",
+            "userStatus": user_status,
             "cloudAllowed": bool(policy.text_cloud_allowed or policy.stt_cloud_allowed),
             "textCloudAllowed": bool(policy.text_cloud_allowed),
             "sttCloudAllowed": bool(policy.stt_cloud_allowed),
@@ -455,6 +483,10 @@ class SettingsBridge(QObject):
                 return str(item.get("note", "")).strip()
         return ""
 
+    @Property(str, notify=assistantStatusChanged)
+    def assistantUserStatus(self) -> str:
+        return str(self._assistant_status_snapshot().get("userStatus", "Готово"))
+
     @Property("QVariantMap", notify=assistantStatusChanged)
     def assistantStatus(self) -> dict[str, object]:
         return self._assistant_status_snapshot()
@@ -463,23 +495,12 @@ class SettingsBridge(QObject):
     def assistantReadiness(self) -> str:
         has_ai_key, telegram_ready = self._assistant_registration_state()
         if has_ai_key and telegram_ready:
-            return "Полный режим готов"
+            return "Подключения готовы"
         if has_ai_key:
-            return "Чат готов, Telegram не завершён"
+            return "Нужен Telegram"
         if telegram_ready:
-            return "Telegram готов, нужен AI key"
-        return "Нужен AI key и Telegram"
-
-    @Property(str, notify=connectionsChanged)
-    def assistantConnectionHint(self) -> str:
-        has_ai_key, telegram_ready = self._assistant_registration_state()
-        if has_ai_key and telegram_ready:
-            return "Есть AI key и Telegram. Можно свободно переключаться между fast, standard, smart и private."
-        if has_ai_key:
-            return "AI-ответы уже доступны. Чтобы завершить поток регистрация → напоминания → Telegram, добавьте bot token и Telegram ID."
-        if telegram_ready:
-            return "Telegram подключён, но без AI key ассистент останется в локальном режиме для части сценариев."
-        return "Для полного assistant-mode потока добавьте хотя бы один AI key и завершите Telegram-настройку."
+            return "Нужен AI key"
+        return "Нужны AI key и Telegram"
 
     @Property("QVariantList", notify=assistantModeChanged)
     def assistantModeOptions(self) -> list[dict[str, str]]:
@@ -495,7 +516,7 @@ class SettingsBridge(QObject):
     @Property("QVariantList", notify=assistantStatusChanged)
     def textBackendOverrideOptions(self) -> list[dict[str, str]]:
         return [
-            {"key": "auto", "title": "РђРІС‚Рѕ"},
+            {"key": "auto", "title": "Авто"},
             {"key": "local_llama", "title": "Local Llama"},
             {"key": "groq", "title": "Groq"},
             {"key": "gemini", "title": "Gemini"},
@@ -506,7 +527,7 @@ class SettingsBridge(QObject):
     @Property("QVariantList", notify=assistantStatusChanged)
     def sttBackendOverrideOptions(self) -> list[dict[str, str]]:
         return [
-            {"key": "auto", "title": "РђРІС‚Рѕ"},
+            {"key": "auto", "title": "Авто"},
             {"key": "local_faster_whisper", "title": "local faster-whisper"},
             {"key": "local_vosk", "title": "local Vosk"},
             {"key": "groq_whisper", "title": "Groq Whisper"},

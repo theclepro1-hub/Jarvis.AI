@@ -51,10 +51,6 @@ def bootstrap() -> int:
     application = QApplication(sys.argv)
     application.setQuitOnLastWindowClosed(True)
     _boot_log("bootstrap:after-app")
-    icon_path = Path(__file__).resolve().parents[1] / "assets" / "icons" / "jarvis_unity.ico"
-    if icon_path.exists():
-        _boot_log(f"bootstrap:icon:{icon_path}")
-        application.setWindowIcon(QIcon(str(icon_path)))
     start_minimized = any(arg in {"--minimized", "--start-minimized", "--tray"} for arg in sys.argv[1:])
     from core.services.single_instance import SingleInstanceService
 
@@ -62,6 +58,10 @@ def bootstrap() -> int:
     if not single_instance.ensure_primary_instance():
         _boot_log("bootstrap:second-instance")
         return 0
+    icon_path = Path(__file__).resolve().parents[1] / "assets" / "icons" / "jarvis_unity.ico"
+    if icon_path.exists():
+        _boot_log(f"bootstrap:icon:{icon_path}")
+        application.setWindowIcon(QIcon(str(icon_path)))
     from app.app import JarvisUnityApplication
 
     runtime = JarvisUnityApplication(application, start_minimized=start_minimized, single_instance=single_instance)

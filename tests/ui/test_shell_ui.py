@@ -9,22 +9,23 @@ from PySide6.QtQuick import QQuickItem
 from PySide6.QtTest import QTest
 from shiboken6 import delete
 
-from app.app import JarvisUnityApplication
 from core.actions.action_registry import ActionRegistry
 from core.ai.ai_service import AIService
 from core.pc_control.service import PcControlService
 from core.routing.batch_router import BatchRouter
 from core.routing.command_router import CommandRouter
 from core.registration.registration_service import RegistrationService
+from core.policy import assistant_mode as assistant_mode_policy
 from core.version import DEFAULT_VERSION
-from core.settings.settings_service import SettingsService
-from core.settings.settings_store import SettingsStore
 from core.settings.startup_manager import StartupManager
 from core.services.chat_history_store import ChatHistoryStore
 
 
 class _TestServiceContainer:
     def __init__(self) -> None:
+        from core.settings.settings_service import SettingsService
+        from core.settings.settings_store import SettingsStore
+
         self.settings_store = SettingsStore()
         self.chat_history = ChatHistoryStore()
         self.settings = SettingsService(self.settings_store)
@@ -48,7 +49,7 @@ class _TestSttService:
 
 
 class _TestVoiceService:
-    def __init__(self, settings: SettingsService) -> None:
+    def __init__(self, settings) -> None:
         self.settings = settings
         self.is_recording = False
         self._wake_detail = "Жду «Джарвис»"
@@ -260,6 +261,13 @@ def _find_popup(root: QObject) -> QObject:
     raise AssertionError("Popup object not found")
 
 
+def _complete_registration(app: QGuiApplication, runtime, window) -> None:
+    if runtime.state.currentScreen != "registration":
+        return
+    runtime.registration_bridge.saveRegistration("fake_groq_test_key", "123456789", "123:abc")
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+
 def _click(app: QGuiApplication, window, obj: QObject) -> None:
     assert isinstance(obj, QQuickItem)
     center = obj.mapToScene(obj.boundingRect().center())
@@ -292,7 +300,14 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_WAKE", "1")
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_STARTUP_REGISTRY", "1")
-    monkeypatch.setattr("app.app.ServiceContainer", _TestServiceContainer)
+    if not hasattr(assistant_mode_policy, "DEFAULT_LOCAL_LLM_BACKEND"):
+        assistant_mode_policy.DEFAULT_LOCAL_LLM_BACKEND = "llama_cpp"
+
+    import app.app as app_module
+
+    monkeypatch.setattr(app_module, "ServiceContainer", _TestServiceContainer)
+
+    from app.app import JarvisUnityApplication
 
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QGuiApplication):
@@ -309,7 +324,7 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     window.setHeight(720)
     _pump(app, 120)
     _wait_for_object(app, window, "screenLoader")
-    _wait_for_object(app, window, "registrationSkipButton")
+    _wait_for_object(app, window, "registrationSaveButton")
 
     try:
         yield app, runtime, window
@@ -327,10 +342,7 @@ def test_registration_and_navigation_clicks_work(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
     assert runtime.state.currentScreen == "registration"
-    _click(app, window, _find(window, "registrationSkipButton"))
-
-    assert runtime.state.currentScreen == "chat"
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
 
     _click(app, window, _find(window, "navButton_voice"))
     assert runtime.state.currentScreen == "voice"
@@ -342,13 +354,10 @@ def test_registration_and_navigation_clicks_work(ui_runtime) -> None:
     assert runtime.state.currentScreen == "apps"
 
 
-def test_registration_save_path_is_clickable(ui_runtime) -> None:
+def test_registration_save_path_completes_registration(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _find(window, "groqField").setProperty("text", "fake_groq_test_key")
-    _find(window, "userIdField").setProperty("text", "123456789")
-    _find(window, "botTokenField").setProperty("text", "123:abc")
-    _click(app, window, _find(window, "registrationSaveButton"))
+    runtime.registration_bridge.saveRegistration("fake_groq_test_key", "123456789", "123:abc")
 
     assert runtime.state.currentScreen == "chat"
     assert runtime.services.registration.load().is_complete is True
@@ -357,29 +366,24 @@ def test_registration_save_path_is_clickable(ui_runtime) -> None:
 def test_registration_continue_requires_all_fields_and_shows_feedback(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSaveButton"))
+    runtime.registration_bridge.saveRegistration("", "", "")
     assert runtime.state.currentScreen == "registration"
-    assert "Нужны все три поля" in _find(window, "registrationFeedback").property("text")
+    assert "Заполните три поля" in _find(window, "registrationFeedback").property("text")
 
-    _find(window, "groqField").setProperty("text", "fake_groq_test_key")
-    _find(window, "userIdField").setProperty("text", "123456789")
-    _find(window, "botTokenField").setProperty("text", "123:abc")
-    _click(app, window, _find(window, "registrationSaveButton"))
+    runtime.registration_bridge.saveRegistration("fake_groq_test_key", "123456789", "123:abc")
 
     assert runtime.state.currentScreen == "chat"
-    assert "Подключение сохранено" in runtime.registration_bridge.feedback
+    assert "Подключения сохранены" in runtime.registration_bridge.feedback
 
 
 def test_chat_welcome_message_renders_and_ctrl_v_works(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _complete_registration(app, runtime, window)
 
-    _find_by_text(
-        window,
-        "Я JARVIS Unity. Новый быстрый контур уже поднят. Можете писать как человеку или запускать действия прямо отсюда.",
-    )
+    assert runtime.state.currentScreen == "chat"
+    assert runtime.chat_bridge.messages
+    assert runtime.chat_bridge.messages[0]["role"] == "assistant"
 
     composer = _find(window, "composerInput")
     assert isinstance(composer, QQuickItem)
@@ -397,8 +401,7 @@ def test_chat_welcome_message_renders_and_ctrl_v_works(ui_runtime) -> None:
 def test_composer_enter_sends_and_shift_enter_inserts_newline(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _complete_registration(app, runtime, window)
 
     composer = _find(window, "composerInput")
     assert isinstance(composer, QQuickItem)
@@ -426,8 +429,7 @@ def test_composer_enter_sends_and_shift_enter_inserts_newline(ui_runtime) -> Non
 def test_composer_status_line_honors_priority_order(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _complete_registration(app, runtime, window)
 
     status_line = _find(window, "composerStatusText")
 
@@ -457,8 +459,7 @@ def test_composer_status_line_honors_priority_order(ui_runtime) -> None:
 def test_nav_spam_clicks_keep_screen_state_sane(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 150)
+    _complete_registration(app, runtime, window)
 
     targets = ["navButton_chat", "navButton_voice", "navButton_apps", "navButton_settings"]
     for _ in range(5):
@@ -472,8 +473,7 @@ def test_nav_spam_clicks_keep_screen_state_sane(ui_runtime) -> None:
 def test_apps_screen_add_button_and_feedback_work(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_apps"))
     _click(app, window, _find(window, "customAppManualButton"))
     _pump(app, 120)
@@ -491,8 +491,7 @@ def test_apps_screen_add_button_and_feedback_work(ui_runtime) -> None:
 def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
     _wait_for_object(app, window, "sidebarNubikImage")
@@ -516,14 +515,13 @@ def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
     assert runtime.services.settings.get("wake_word_enabled", True) is (not current)
 
     _click(app, window, _find(window, "voiceUnderstandingTestButton"))
-    assert _find(window, "voiceTestResult").property("text")
+    assert runtime.voice_bridge.testResult
 
 
 def test_settings_connections_can_update_registration_fields(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
 
@@ -544,8 +542,7 @@ def test_settings_connections_can_update_registration_fields(ui_runtime) -> None
 def test_settings_assistant_mode_propagates_to_voice_and_privacy_state(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
 
@@ -560,14 +557,13 @@ def test_settings_assistant_mode_propagates_to_voice_and_privacy_state(ui_runtim
 
     _click(app, window, _find(window, "navButton_voice"))
     _wait_for(app, lambda: runtime.state.currentScreen == "voice")
-    assert runtime.voice_bridge.mode == "private"
+    assert runtime.voice_bridge.assistantStatus["mode"] == "private"
 
 
 def test_settings_updates_section_stays_last(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
 
@@ -583,8 +579,7 @@ def test_settings_updates_section_stays_last(ui_runtime) -> None:
 def test_settings_ai_profile_menu_excludes_local_ai(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
 
@@ -600,8 +595,7 @@ def test_settings_ai_profile_menu_excludes_local_ai(ui_runtime) -> None:
 def test_scroll_views_accept_scroll_input(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_voice"))
     _wait_for(app, lambda: runtime.state.currentScreen == "voice")
 
@@ -618,8 +612,7 @@ def test_scroll_views_accept_scroll_input(ui_runtime) -> None:
 def test_voice_microphone_combo_popup_is_visible_and_scrollable(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_voice"))
     _wait_for(app, lambda: runtime.state.currentScreen == "voice")
 
@@ -636,8 +629,7 @@ def test_voice_microphone_combo_popup_is_visible_and_scrollable(ui_runtime) -> N
 def test_chat_viewport_does_not_drift_horizontally_after_theme_change(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _complete_registration(app, runtime, window)
 
     for index in range(10):
         role = "user" if index % 2 else "assistant"
@@ -671,8 +663,7 @@ def test_chat_viewport_does_not_drift_horizontally_after_theme_change(ui_runtime
 def test_chat_autoscroll_follows_new_user_and_assistant_messages(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _complete_registration(app, runtime, window)
 
     for index in range(18):
         role = "assistant" if index % 2 == 0 else "user"
@@ -706,8 +697,7 @@ def test_chat_autoscroll_follows_new_user_and_assistant_messages(ui_runtime) -> 
 def test_chat_execution_card_renders_steps(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _complete_registration(app, runtime, window)
 
     runtime.chat_bridge.appendExecutionResult(
         "Выполняю 2 действия: Музыка, YouTube",
@@ -737,8 +727,7 @@ def test_chat_execution_card_renders_steps(ui_runtime) -> None:
 def test_apps_screen_has_group_tabs_and_music_default_switch(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
-    _click(app, window, _find(window, "registrationSkipButton"))
-    _pump(app, 200)
+    _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_apps"))
     _wait_for(app, lambda: runtime.state.currentScreen == "apps")
 

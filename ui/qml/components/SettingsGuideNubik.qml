@@ -28,7 +28,7 @@ Rectangle {
         }
 
         Text {
-            text: "Я остался только как навигатор настроек. Могу быстро провести к голосу, приложениям и подключениям."
+            text: "Я помогу быстро открыть Голос, Приложения или Подключения. Если не знаешь, с чего начать, нажми Подключения."
             color: Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily
             font.pixelSize: Theme.Typography.small

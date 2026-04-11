@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import "../theme" as Theme
@@ -15,49 +15,14 @@ Rectangle {
         return settingsBridge.connectionFeedback || ""
     }
 
-    function telegramFeedbackText() {
-        var feedback = settingsBridge.connectionFeedback || ""
-        if (feedback.indexOf("Тест") === 0 || feedback.indexOf("Telegram") === 0) {
-            return feedback
-        }
-        return ""
-    }
-
     function deleteAllDataHintText() {
-        return "Это действие необратимо и удаляет ключи, историю, Telegram-состояние и весь локальный профиль JARVIS из %LOCALAPPDATA%."
-    }
-
-    function telegramStatusText() {
-        if (settingsBridge.telegramStatus.lastError && settingsBridge.telegramStatus.lastError.length > 0) {
-            return "Ошибка Telegram"
-        }
-        if (settingsBridge.telegramStatus.connected) {
-            return "Бот на связи"
-        }
-        if (settingsBridge.telegramBotTokenSet || settingsBridge.telegramUserId.length > 0) {
-            return "Данные есть, ждём первый ответ Telegram"
-        }
-        return "Telegram не настроен"
-    }
-
-    function telegramDetailsText() {
-        var status = settingsBridge.telegramStatus
-        if (status.lastError && status.lastError.length > 0) {
-            return "Telegram сейчас отвечает с ошибкой. Проверьте токен, Telegram ID и сеть."
-        }
-        if (status.lastCommand && status.lastCommand.length > 0) {
-            var reply = status.lastReply && status.lastReply.length > 0 ? status.lastReply : "ответа ещё нет"
-            return "Последняя команда: " + status.lastCommand + "\nПоследний ответ: " + reply
-        }
-        return settingsBridge.telegramConfigured
-               ? "Команд ещё не было. Нажмите тест, чтобы проверить пуш."
-               : "Добавьте Telegram bot token и Telegram ID в подключениях выше."
+        return "Это действие необратимо и удаляет ключи, историю, Telegram-состояние и локальный профиль JARVIS."
     }
 
     function updatePillText() {
         var status = settingsBridge.updateStatus
         if (settingsBridge.updateCheckBusy) {
-            return "Идёт операция"
+            return "Идёт проверка"
         }
         if (status.last_error && status.last_error.length > 0) {
             return "Ошибка проверки"
@@ -69,6 +34,20 @@ Rectangle {
             return "Есть обновление"
         }
         return "Актуально"
+    }
+
+    function assistantModeTitle(modeKey) {
+        if (modeKey === "fast") return "Быстрый"
+        if (modeKey === "smart") return "Умный"
+        if (modeKey === "private") return "Приватный"
+        return "Стандартный"
+    }
+
+    function assistantModeDescription(modeKey) {
+        if (modeKey === "fast") return "Максимум скорости."
+        if (modeKey === "smart") return "Лучшее качество ответа."
+        if (modeKey === "private") return "Только локальная работа."
+        return "Баланс скорости и качества."
     }
 
     ScrollView {
@@ -87,19 +66,34 @@ Rectangle {
             width: settingsScroll.availableWidth
             spacing: 14
 
+            Text {
+                Layout.fillWidth: true
+                text: "Настройки"
+                color: Theme.Colors.text
+                font.family: Theme.Typography.displayFamily
+                font.pixelSize: 28
+                font.bold: true
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Короткие настройки без технической свалки. Вверху только то, что нужно обычному пользователю."
+                color: Theme.Colors.textSoft
+                font.family: Theme.Typography.bodyFamily
+                font.pixelSize: Theme.Typography.body
+                wrapMode: Text.WordWrap
+            }
+
             SettingsSection {
                 Layout.fillWidth: true
                 title: "Подключения"
-                description: "AI-ключи и Telegram для чата, уведомлений и первого запуска."
-                expanded: false
+                description: "Для старта нужны Groq и Telegram. Дополнительные ключи спрятаны ниже."
+                expanded: true
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Groq"
                     description: "Ключ для быстрых облачных ответов."
-                    helpText: "Если ключ есть, JARVIS может отвечать быстрее и точнее. Локальные команды работают и без него."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -131,10 +125,7 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Telegram bot token"
-                    description: "Токен нужен для команд и пушей в Telegram."
-                    helpText: "Бот должен быть создан в @BotFather. Этот токен хранится локально и не должен светиться в интерфейсе."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
+                    description: "Токен нужен для команд и уведомлений в Telegram."
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -167,9 +158,6 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Telegram ID"
                     description: "Куда JARVIS будет отправлять ответы и напоминания."
-                    helpText: "Это ваш личный Telegram ID. Он нужен, чтобы бот знал, куда писать."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -186,111 +174,6 @@ Rectangle {
 
                         Text {
                             text: 'Узнать свой Telegram ID можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://t.me/userinfobot">@userinfobot</a>'
-                            textFormat: Text.RichText
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                        }
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Gemini"
-                    description: "Ключ для Google Gemini, если нужен упор на качество."
-                    helpText: "Используется для облачных ответов через совместимый OpenAI-интерфейс Gemini. Можно оставить пустым, если этот провайдер вам не нужен."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        InputField {
-                            id: geminiConnectionField
-                            objectName: "settingsGeminiField"
-                            Layout.fillWidth: true
-                            label: "Ключ Gemini"
-                            text: settingsBridge.geminiApiKey
-                            placeholderText: "Вставьте ключ Gemini"
-                            secret: true
-                        }
-
-                        Text {
-                            text: 'Документация и выпуск ключа: <a style="color:#68f0d1;text-decoration:none" href="https://ai.google.dev/gemini-api/docs/api-key">https://ai.google.dev/gemini-api/docs/api-key</a>'
-                            textFormat: Text.RichText
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                        }
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Cerebras"
-                    description: "Ключ для быстрого ответа через Cerebras."
-                    helpText: "Это ещё один облачный провайдер с низкой задержкой. Поле можно не заполнять, если вы не используете Cerebras."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        InputField {
-                            id: cerebrasConnectionField
-                            objectName: "settingsCerebrasField"
-                            Layout.fillWidth: true
-                            label: "Ключ Cerebras"
-                            text: settingsBridge.cerebrasApiKey
-                            placeholderText: "Вставьте ключ Cerebras"
-                            secret: true
-                        }
-
-                        Text {
-                            text: 'Документация Cerebras Inference: <a style="color:#68f0d1;text-decoration:none" href="https://inference-docs.cerebras.ai/">https://inference-docs.cerebras.ai/</a>'
-                            textFormat: Text.RichText
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                        }
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "OpenRouter"
-                    description: "Ключ для резервного маршрута и бесплатных моделей OpenRouter."
-                    helpText: "Удобен как запасной провайдер, если основной ключ недоступен или вы хотите использовать free-маршруты."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        InputField {
-                            id: openrouterConnectionField
-                            objectName: "settingsOpenRouterField"
-                            Layout.fillWidth: true
-                            label: "Ключ OpenRouter"
-                            text: settingsBridge.openrouterApiKey
-                            placeholderText: "Вставьте ключ OpenRouter"
-                            secret: true
-                        }
-
-                        Text {
-                            text: 'Быстрый старт OpenRouter: <a style="color:#68f0d1;text-decoration:none" href="https://openrouter.ai/docs/quickstart">https://openrouter.ai/docs/quickstart</a>'
                             textFormat: Text.RichText
                             color: Theme.Colors.textSoft
                             font.family: Theme.Typography.bodyFamily
@@ -330,8 +213,8 @@ Rectangle {
 
                 Text {
                     objectName: "settingsConnectionsFeedback"
-                    visible: settingsRoot.connectionFeedbackText().length > 0
-                    text: settingsRoot.connectionFeedbackText()
+                    visible: connectionFeedbackText().length > 0
+                    text: connectionFeedbackText()
                     color: Theme.Colors.accent
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
@@ -342,75 +225,14 @@ Rectangle {
 
             SettingsSection {
                 Layout.fillWidth: true
-                title: "Telegram"
-                description: "Статус подключения, последняя реакция и тестовый пуш."
-                expanded: false
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Статус"
-                    description: telegramStatusText()
-                    helpText: "Здесь видно, жив ли Telegram-канал, какая команда была последней и была ли ошибка."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        StatusPill {
-                            text: telegramStatusText()
-                        }
-
-                        Text {
-                            text: telegramDetailsText()
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            SecondaryButton {
-                                text: settingsBridge.telegramTestBusy ? "Отправляю..." : "Отправить тест"
-                                enabled: settingsBridge.telegramConfigured && !settingsBridge.telegramTestBusy
-                                onClicked: settingsBridge.sendTelegramTest()
-                            }
-
-                            Text {
-                                text: settingsBridge.telegramTestBusy
-                                      ? "Отправляю тестовое сообщение в Telegram..."
-                                      : settingsRoot.telegramFeedbackText().length > 0
-                                      ? settingsRoot.telegramFeedbackText()
-                                      : "Тест отправит короткое сообщение в ваш Telegram."
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.micro
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsSection {
-                Layout.fillWidth: true
                 title: "Режим ассистента"
-                description: "Один главный выбор: быстрый, стандарт, умный или приватный. Wake word всегда локальный."
-                expanded: false
+                description: "Один главный выбор: быстрый, стандартный, умный или приватный."
+                expanded: true
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Режим"
-                    description: "Wake word остаётся локальным. Разница между режимами начинается после «Джарвис»."
-                    helpText: "Быстрый и умный могут раньше уходить в облако, стандартный сначала старается использовать локальные backend'ы, приватный никогда не включает скрытый cloud fallback."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
+                    description: assistantModeDescription(settingsBridge.assistantMode)
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -427,7 +249,7 @@ Rectangle {
                         }
 
                         Text {
-                            text: settingsBridge.assistantModeSummary
+                            text: assistantModeTitle(settingsBridge.assistantMode) + " — " + assistantModeDescription(settingsBridge.assistantMode)
                             color: Theme.Colors.textSoft
                             font.family: Theme.Typography.bodyFamily
                             font.pixelSize: Theme.Typography.small
@@ -435,264 +257,19 @@ Rectangle {
                             Layout.fillWidth: true
                         }
 
-                        Text {
-                            text: settingsBridge.assistantModeDetails
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
+                        StatusPill {
+                            text: settingsBridge.assistantUserStatus
                         }
 
                         Text {
-                            text: "Текстовый маршрут: " + settingsBridge.effectiveTextRoute
+                            text: settingsBridge.assistantModeSummary
                             color: Theme.Colors.textSoft
                             font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
+                            font.pixelSize: Theme.Typography.small
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
-
-                        Text {
-                            text: "Распознавание речи: " + settingsBridge.effectiveSttRoute
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            text: "Политика приватности: " + settingsBridge.privacyGuarantee
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            text: settingsBridge.localReadiness
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        GridLayout {
-                            Layout.fillWidth: true
-                            columns: width > 760 ? 3 : 1
-                            rowSpacing: 10
-                            columnSpacing: 10
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                color: Qt.rgba(0.07, 0.12, 0.19, 0.92)
-                                radius: 18
-                                border.color: Theme.Colors.borderSoft
-                                border.width: 1
-                                implicitHeight: localCardColumn.implicitHeight + 20
-
-                                ColumnLayout {
-                                    id: localCardColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 6
-
-                                    Text {
-                                        text: "Р§С‚Рѕ Р»РѕРєР°Р»СЊРЅРѕ"
-                                        color: Theme.Colors.text
-                                        font.family: Theme.Typography.displayFamily
-                                        font.pixelSize: Theme.Typography.small
-                                        font.bold: true
-                                    }
-
-                                    Text {
-                                        text: settingsBridge.assistantStatus.local
-                                        color: Theme.Colors.textSoft
-                                        font.family: Theme.Typography.bodyFamily
-                                        font.pixelSize: Theme.Typography.micro
-                                        wrapMode: Text.WordWrap
-                                        Layout.fillWidth: true
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                color: Qt.rgba(0.07, 0.12, 0.19, 0.92)
-                                radius: 18
-                                border.color: Theme.Colors.borderSoft
-                                border.width: 1
-                                implicitHeight: outsideCardColumn.implicitHeight + 20
-
-                                ColumnLayout {
-                                    id: outsideCardColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 6
-
-                                    Text {
-                                        text: "Р§С‚Рѕ СѓР№РґС‘С‚ РЅР°СЂСѓР¶Сѓ"
-                                        color: Theme.Colors.text
-                                        font.family: Theme.Typography.displayFamily
-                                        font.pixelSize: Theme.Typography.small
-                                        font.bold: true
-                                    }
-
-                                    Text {
-                                        text: settingsBridge.assistantStatus.outside
-                                        color: Theme.Colors.textSoft
-                                        font.family: Theme.Typography.bodyFamily
-                                        font.pixelSize: Theme.Typography.micro
-                                        wrapMode: Text.WordWrap
-                                        Layout.fillWidth: true
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                color: Qt.rgba(0.07, 0.12, 0.19, 0.92)
-                                radius: 18
-                                border.color: Theme.Colors.borderSoft
-                                border.width: 1
-                                implicitHeight: readinessCardColumn.implicitHeight + 20
-
-                                ColumnLayout {
-                                    id: readinessCardColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 6
-
-                                    Text {
-                                        text: "РЎРµР№С‡Р°СЃ РіРѕС‚РѕРІРѕ"
-                                        color: Theme.Colors.text
-                                        font.family: Theme.Typography.displayFamily
-                                        font.pixelSize: Theme.Typography.small
-                                        font.bold: true
-                                    }
-
-                                    Text {
-                                        text: settingsBridge.assistantStatus.readiness
-                                        color: Theme.Colors.textSoft
-                                        font.family: Theme.Typography.bodyFamily
-                                        font.pixelSize: Theme.Typography.micro
-                                        wrapMode: Text.WordWrap
-                                        Layout.fillWidth: true
-                                    }
-                                }
-                            }
-                        }
                     }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Advanced routing"
-                    description: "Р СѓС‡РЅРѕР№ override РґР»СЏ text/STT Рё РІС‹Р±РѕСЂР° Р»РѕРєР°Р»СЊРЅРѕРіРѕ backend."
-                    helpText: "РќРѕСЂРјР°Р»СЊРЅРѕРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РІС‹Р±СЂР°С‚СЊ СЂРµР¶РёРј РІС‹С€Рµ. Р­С‚Рё РїРµСЂРµРєР»СЋС‡Р°С‚РµР»Рё РЅСѓР¶РЅС‹ С‚РѕР»СЊРєРѕ РµСЃР»Рё С…РѕС‚РёС‚Рµ Р¶С‘СЃС‚РєРѕ Р·Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ backend."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        AppComboBox {
-                            id: localLlmBackendCombo
-                            objectName: "localLlmBackendCombo"
-                            Layout.preferredWidth: 280
-                            model: settingsBridge.localLlmBackendOptions
-                            textRole: "title"
-                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.localLlmBackend))
-                            onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
-                        }
-
-                        AppComboBox {
-                            id: textBackendOverrideCombo
-                            objectName: "textBackendOverrideCombo"
-                            Layout.preferredWidth: 320
-                            model: settingsBridge.textBackendOverrideOptions
-                            textRole: "title"
-                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.textBackendOverride))
-                            onActivated: (index) => settingsBridge.textBackendOverride = model[index].key
-                        }
-
-                        AppComboBox {
-                            id: sttBackendOverrideCombo
-                            objectName: "sttBackendOverrideCombo"
-                            Layout.preferredWidth: 320
-                            model: settingsBridge.sttBackendOverrideOptions
-                            textRole: "title"
-                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.sttBackendOverride))
-                            onActivated: (index) => settingsBridge.sttBackendOverride = model[index].key
-                        }
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Cloud model id"
-                    description: "Точный идентификатор облачной модели, если нужен ручной override."
-                    helpText: "Обычно это поле не нужно. Достаточно выбрать режим и, при желании, ручной маршрут выше."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    InputField {
-                        id: aiModelField
-                        objectName: "aiModelField"
-                        Layout.fillWidth: true
-                        label: "Облачная модель"
-                        text: settingsBridge.aiModel
-                        placeholderText: "openai/gpt-oss-20b"
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Локальная Llama"
-                    description: settingsBridge.localLlmBackend === "ollama"
-                                 ? "Имя модели Ollama для standard/private text AI."
-                                 : "Путь к `.gguf`-модели для standard/private text AI."
-                    helpText: settingsBridge.localLlmBackend === "ollama"
-                              ? "Если выбран Ollama, укажите имя модели в формате `llama3.1:8b` или другой локальный tag."
-                              : "Если хотите настоящий приватный text AI, укажите путь к локальной GGUF-модели для llama.cpp. Без неё private честно останется без текстового ответа."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    Text {
-                        text: settingsBridge.localLlmBackend === "ollama"
-                              ? "Для Ollama здесь нужно имя модели, а не путь к файлу."
-                              : "Для llama.cpp здесь нужен путь к локальной GGUF-модели."
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    InputField {
-                        id: localLlmModelField
-                        objectName: "localLlmModelField"
-                        Layout.fillWidth: true
-                        label: settingsBridge.localLlmBackend === "ollama" ? "Модель Ollama" : "Путь к GGUF"
-                        text: settingsBridge.localLlmModel
-                        placeholderText: settingsBridge.localLlmBackend === "ollama"
-                                         ? "llama3.1:8b"
-                                         : "C:/models/llama-3.1-8b-instruct-q4_k_m.gguf"
-                        onTextChanged: settingsBridge.localLlmModel = text
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: settingsBridge.assistantConnectionHint
-                    color: Theme.Colors.textSoft
-                    font.family: Theme.Typography.bodyFamily
-                    font.pixelSize: Theme.Typography.small
-                    wrapMode: Text.WordWrap
                 }
             }
 
@@ -705,10 +282,7 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Голос"
-                    description: voiceBridge.summary
-                    helpText: "Микрофон, вывод, wake и озвучка управляются на отдельной вкладке Голос."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
+                    description: "Микрофон, активация и озвучка на отдельной вкладке."
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -727,13 +301,8 @@ Rectangle {
                                 onClicked: settingsBridge.openScreen("voice")
                             }
 
-                            SecondaryButton {
-                                text: "Проверка \"JARVIS меня слышит\""
-                                onClicked: settingsBridge.openScreen("voice")
-                            }
-
                             Text {
-                                text: "Откроет вкладку голоса, где JARVIS покажет: что услышал, что понял и какое действие выбрал."
+                                text: "На вкладке Голос можно быстро проверить микрофон, активацию и озвучку."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
                                 font.pixelSize: Theme.Typography.micro
@@ -748,9 +317,6 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Автозапуск"
                     description: "JARVIS стартует вместе с Windows."
-                    helpText: "Автозапуск нужен, если ассистент должен быть всегда под рукой. При отключении запуск только вручную."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
@@ -766,9 +332,6 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Свернутый режим"
                     description: "JARVIS может стартовать уже свернутым и не мешать на рабочем столе."
-                    helpText: "Этот режим помогает не захламлять экран при запуске. Приложение сразу уходит в компактный вид."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
@@ -784,9 +347,6 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Сворачивать в трей"
                     description: "При закрытии окно может не исчезать, а уходить в значок рядом с часами."
-                    helpText: "Если режим включён, закрытие окна не завершает JARVIS. Он остаётся в трее."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
@@ -801,17 +361,14 @@ Rectangle {
 
             SettingsSection {
                 Layout.fillWidth: true
-                title: "История, команды и данные"
-                description: "Очистка чата, избранные действия и сброс локального профиля."
+                title: "История и данные"
+                description: "Очистка чата и сброс локального профиля."
                 expanded: false
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "История чата"
                     description: "Можно очистить чат сразу или позже выключить сохранение истории."
-                    helpText: "Кнопка очистит текущую переписку. Если выключить сохранение, новые сообщения не будут записываться в историю."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -849,41 +406,8 @@ Rectangle {
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Избранные команды"
-                    description: "Закрепите 5–7 самых частых действий в быстрых командах чата."
-                    helpText: "Закрепленные команды показываются первыми в чате. Управлять ими удобнее из списка приложений."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text {
-                            text: settingsBridge.pinnedCommands.length > 0
-                                  ? "Закреплено: " + settingsBridge.pinnedCommands.map(item => item.title).join(", ")
-                                  : "Пока ничего не закреплено. Откройте приложения и закрепите нужные команды."
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        SecondaryButton {
-                            text: "Открыть приложения"
-                            onClicked: settingsBridge.openScreen("apps")
-                        }
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
                     title: "Удалить все данные"
                     description: "Сбросить локальный профиль, историю и сохранения в %LOCALAPPDATA%."
-                    helpText: "Удаляет локальные настройки, ключи, историю и состояние JARVIS из %LOCALAPPDATA%\\JarvisAi_Unity. После этого нужна повторная регистрация."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -903,18 +427,6 @@ Rectangle {
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
-
-                        Text {
-                            visible: false
-                            text: settingsBridge.connectionFeedback.length > 0
-                                  ? settingsBridge.connectionFeedback
-                                  : "Действие необратимое. Используйте, если хотите полностью сбросить локальный профиль."
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
                     }
                 }
             }
@@ -929,9 +441,6 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Тема"
                     description: "Меняет весь интерфейс сразу, без разрозненных цветов в отдельных блоках."
-                    helpText: "Тема влияет сразу на всю оболочку. Она не должна мешать подключению и голосу в верхней части экрана."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
@@ -960,9 +469,6 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Статус"
                     description: settingsBridge.updateSummary
-                    helpText: "JARVIS проверяет GitHub Releases, при наличии installer-релиза скачивает установщик и запускает его поверх текущей версии. Если сеть рвётся или installer недоступен, останется ручной переход на страницу релиза."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -983,13 +489,6 @@ Rectangle {
                             }
 
                             SecondaryButton {
-                                text: "Установить обновление"
-                                visible: settingsBridge.updateStatus.update_available && settingsBridge.updateStatus.can_apply
-                                enabled: !settingsBridge.updateCheckBusy
-                                onClicked: settingsBridge.applyUpdate()
-                            }
-
-                            SecondaryButton {
                                 text: "Открыть релиз"
                                 visible: settingsBridge.updateStatus.release_url && settingsBridge.updateStatus.release_url.length > 0
                                 onClicked: Qt.openUrlExternally(settingsBridge.updateStatus.release_url)
@@ -997,13 +496,11 @@ Rectangle {
 
                             Text {
                                 text: settingsBridge.updateCheckBusy
-                                      ? "Идёт проверка обновлений или запуск установщика..."
+                                      ? "Идёт проверка обновлений..."
                                       : settingsBridge.updateStatus.last_error && settingsBridge.updateStatus.last_error.length > 0
-                                      ? "Проверка обновлений не удалась. Проверьте сеть или VPN и попробуйте ещё раз."
-                                      : settingsBridge.updateStatus.last_apply_message && settingsBridge.updateStatus.last_apply_message.length > 0
-                                      ? settingsBridge.updateStatus.last_apply_message
-                                      : settingsBridge.updateStatus.apply_hint && settingsBridge.updateStatus.apply_hint.length > 0
-                                      ? settingsBridge.updateStatus.apply_hint
+                                      ? "Проверка обновлений не удалась."
+                                      : settingsBridge.updateStatus.update_available
+                                      ? "Доступно обновление."
                                       : "Проверка обновлений доступна вручную."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
@@ -1011,6 +508,134 @@ Rectangle {
                                 wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
                             }
+                        }
+                    }
+                }
+            }
+
+            SettingsSection {
+                Layout.fillWidth: true
+                title: "Для опытных"
+                description: "Дополнительные провайдеры и локальная модель. Открывайте только если это действительно нужно."
+                expanded: false
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Gemini"
+                    description: "Дополнительный ключ для более качественных ответов."
+
+                    InputField {
+                        id: geminiConnectionField
+                        objectName: "settingsGeminiField"
+                        Layout.fillWidth: true
+                        label: "Ключ Gemini"
+                        text: settingsBridge.geminiApiKey
+                        placeholderText: "Вставьте ключ Gemini"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Cerebras"
+                    description: "Дополнительный быстрый ключ."
+
+                    InputField {
+                        id: cerebrasConnectionField
+                        objectName: "settingsCerebrasField"
+                        Layout.fillWidth: true
+                        label: "Ключ Cerebras"
+                        text: settingsBridge.cerebrasApiKey
+                        placeholderText: "Вставьте ключ Cerebras"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "OpenRouter"
+                    description: "Резервный провайдер для дополнительных моделей."
+
+                    InputField {
+                        id: openrouterConnectionField
+                        objectName: "settingsOpenRouterField"
+                        Layout.fillWidth: true
+                        label: "Ключ OpenRouter"
+                        text: settingsBridge.openrouterApiKey
+                        placeholderText: "Вставьте ключ OpenRouter"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Локальная модель"
+                    description: "Если хотите приватный локальный текстовый режим."
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        AppComboBox {
+                            id: localLlmBackendCombo
+                            objectName: "localLlmBackendCombo"
+                            Layout.preferredWidth: 280
+                            model: settingsBridge.localLlmBackendOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.localLlmBackend))
+                            onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
+                        }
+
+                        InputField {
+                            id: localLlmModelField
+                            objectName: "localLlmModelField"
+                            Layout.fillWidth: true
+                            label: settingsBridge.localLlmBackend === "ollama" ? "Модель Ollama" : "Путь к GGUF"
+                            text: settingsBridge.localLlmModel
+                            placeholderText: settingsBridge.localLlmBackend === "ollama"
+                                             ? "llama3.1:8b"
+                                             : "C:/models/llama-3.1-8b-instruct-q4_k_m.gguf"
+                            onTextChanged: settingsBridge.localLlmModel = text
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: settingsBridge.localReadiness
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Ручные маршруты"
+                    description: "Только если вам действительно нужен ручной выбор backend."
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        AppComboBox {
+                            id: textBackendOverrideCombo
+                            objectName: "textBackendOverrideCombo"
+                            Layout.preferredWidth: 320
+                            model: settingsBridge.textBackendOverrideOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.textBackendOverride))
+                            onActivated: (index) => settingsBridge.textBackendOverride = model[index].key
+                        }
+
+                        AppComboBox {
+                            id: sttBackendOverrideCombo
+                            objectName: "sttBackendOverrideCombo"
+                            Layout.preferredWidth: 320
+                            model: settingsBridge.sttBackendOverrideOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.sttBackendOverride))
+                            onActivated: (index) => settingsBridge.sttBackendOverride = model[index].key
                         }
                     }
                 }

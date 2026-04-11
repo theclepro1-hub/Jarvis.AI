@@ -15,6 +15,15 @@ Rectangle {
         repeat: false
     }
 
+    function modeOptions() {
+        return [
+            { key: "fast", title: "Быстрый" },
+            { key: "standard", title: "Стандартный" },
+            { key: "smart", title: "Умный" },
+            { key: "private", title: "Приватный" }
+        ]
+    }
+
     ScrollView {
         id: voiceScroll
         objectName: "voiceScroll"
@@ -33,10 +42,19 @@ Rectangle {
 
             Text {
                 Layout.fillWidth: true
-                text: "Режим: " + voiceBridge.assistantMode + " · " + voiceBridge.assistantStatus["privacy"] + " · Text AI: " + voiceBridge.assistantStatus["text"] + " · STT: " + voiceBridge.assistantStatus["stt"] + " · Wake local"
+                text: "Голос"
+                color: Theme.Colors.text
+                font.family: Theme.Typography.displayFamily
+                font.pixelSize: 28
+                font.bold: true
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Настройте микрофон, слово активации и озвучку. Основной выбор делается одним режимом, а остальное подбирается автоматически."
                 color: Theme.Colors.textSoft
                 font.family: Theme.Typography.bodyFamily
-                font.pixelSize: Theme.Typography.small
+                font.pixelSize: Theme.Typography.body
                 wrapMode: Text.WordWrap
             }
 
@@ -46,16 +64,16 @@ Rectangle {
                 radius: 22
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
-                implicitHeight: assistantStatusColumn.implicitHeight + 24
+                implicitHeight: modeColumn.implicitHeight + 24
 
                 ColumnLayout {
-                    id: assistantStatusColumn
+                    id: modeColumn
                     anchors.fill: parent
                     anchors.margins: 14
                     spacing: 8
 
                     Text {
-                        text: "Режим ассистента"
+                        text: "Режим AI"
                         color: Theme.Colors.text
                         font.family: Theme.Typography.displayFamily
                         font.pixelSize: Theme.Typography.small
@@ -63,57 +81,26 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Wake: local"
+                        text: "Быстрый — быстрее, Стандартный — баланс, Умный — лучшее качество, Приватный — только локально."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
+                        font.pixelSize: Theme.Typography.small
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
 
-                    Text {
-                        text: "STT route: " + voiceBridge.assistantStatus["stt"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
+                    AppComboBox {
+                        id: voiceModeCombo
+                        objectName: "voiceModeCombo"
+                        Layout.preferredWidth: 260
+                        model: modeOptions()
+                        textRole: "title"
+                        currentIndex: Math.max(0, model.findIndex(item => item.key === voiceBridge.mode))
+                        onActivated: (index) => voiceBridge.setMode(model[index].key)
                     }
 
-                    Text {
-                        text: "Text route: " + voiceBridge.assistantStatus["text"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Что локально: " + voiceBridge.assistantStatus["local"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Что уйдёт наружу: " + voiceBridge.assistantStatus["outside"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Готовность: " + voiceBridge.assistantStatus["readiness"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.micro
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
+                    StatusPill {
+                        text: voiceBridge.assistantStatus["userStatus"]
                     }
                 }
             }
@@ -121,7 +108,7 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Слово активации"
-                description: "JARVIS слушает «Джарвис» локально и не должен засорять чат служебными статусами."
+                description: "JARVIS слушает «Джарвис» локально и не должен засорять интерфейс служебными статусами."
 
                 Item { Layout.fillWidth: true }
 
@@ -196,7 +183,7 @@ Rectangle {
                     spacing: 8
 
                     Text {
-                        text: "JARVIS меня слышит"
+                        text: "Проверка"
                         color: Theme.Colors.text
                         font.family: Theme.Typography.displayFamily
                         font.pixelSize: Theme.Typography.small
@@ -240,13 +227,23 @@ Rectangle {
 
                         Item { Layout.fillWidth: true }
                     }
+
+                    Text {
+                        objectName: "voiceTestResult"
+                        Layout.fillWidth: true
+                        text: voiceBridge.testResult
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
 
             SettingRow {
                 Layout.fillWidth: true
                 title: "Голос JARVIS"
-                description: "Озвучка ответов, движок голоса и выбор голоса. Если что-то недоступно, JARVIS так и пишет."
+                description: "Озвучка ответов и выбор голоса. Если что-то недоступно, JARVIS так и пишет."
 
                 AppSwitch {
                     id: voiceResponseSwitch
@@ -270,20 +267,33 @@ Rectangle {
                 }
             }
 
-            SettingRow {
+            Rectangle {
                 Layout.fillWidth: true
-                title: "Статус"
-                description: "Короткая сводка по wake-слову, распознаванию и озвучке."
+                color: Theme.Colors.card
+                radius: 22
+                border.color: Theme.Colors.borderSoft
+                border.width: 1
+                implicitHeight: statusColumn.implicitHeight + 24
 
                 ColumnLayout {
-                    Layout.fillWidth: true
+                    id: statusColumn
+                    anchors.fill: parent
+                    anchors.margins: 14
                     spacing: 6
 
                     Text {
-                        text: "Слово активации: " + voiceBridge.runtimeStatus["wakeWord"]
+                        text: "Статус"
                         color: Theme.Colors.text
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: Theme.Typography.small
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "Слово активации: " + voiceBridge.runtimeStatus["wakeWord"]
+                        color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.body
+                        font.pixelSize: Theme.Typography.small
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -305,67 +315,6 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
-
-                    Text {
-                        text: "Модуль активации: " + voiceBridge.runtimeStatus["wakeModel"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Готовность движка: " + voiceBridge.runtimeStatus["model"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        visible: voiceBridge.voiceTimingsSummary.length > 0
-                        text: "Последний wake-сценарий: " + voiceBridge.voiceTimingsSummary
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        visible: voiceBridge.voiceTimings["transcript"] && String(voiceBridge.voiceTimings["transcript"]).length > 0
-                        text: "Что услышал: " + voiceBridge.voiceTimings["transcript"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                }
-            }
-
-            SettingRow {
-                Layout.fillWidth: true
-                title: "Распознавание речи"
-                description: "Быстрый чаще опирается на облако, стандартный держит локальный приоритет, умный тянется к лучшему качеству, приватный работает только локально."
-
-                Item { Layout.fillWidth: true }
-
-                AppComboBox {
-                    id: voiceModeCombo
-                    objectName: "voiceModeCombo"
-                    Layout.preferredWidth: 240
-                    model: [
-                        { key: "fast", title: "Быстрый" },
-                        { key: "standard", title: "Стандартный" },
-                        { key: "smart", title: "Умный" },
-                        { key: "private", title: "Приватный" }
-                    ]
-                    textRole: "title"
-                    currentIndex: Math.max(0, model.findIndex(item => item.key === voiceBridge.mode))
-                    onActivated: (index) => voiceBridge.setMode(model[index].key)
                 }
             }
 
@@ -423,77 +372,6 @@ Rectangle {
                     textRole: "title"
                     currentIndex: Math.max(0, model.findIndex(item => item.key === voiceBridge.ttsVolume))
                     onActivated: (index) => voiceBridge.setTtsVolume(model[index].key)
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                color: Theme.Colors.card
-                radius: 22
-                border.color: Theme.Colors.borderSoft
-                border.width: 1
-                implicitHeight: testColumn.implicitHeight + 24
-
-                ColumnLayout {
-                    id: testColumn
-                    anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 8
-
-                    Text {
-                        text: "Результат проверки"
-                        color: Theme.Colors.accent
-                        font.family: Theme.Typography.displayFamily
-                        font.pixelSize: Theme.Typography.small
-                        font.bold: true
-                    }
-
-                    Text {
-                        objectName: "voiceTestResult"
-                        text: voiceBridge.testResult
-                        color: Theme.Colors.textSoft
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.body
-                    }
-
-                    ColumnLayout {
-                        visible: voiceBridge.voiceTest.stage !== "idle"
-                        Layout.fillWidth: true
-                        spacing: 6
-
-                        Text {
-                            text: voiceBridge.voiceTest.heardText.length > 0
-                                  ? "Услышал: " + voiceBridge.voiceTest.heardText
-                                  : "Слушаю..."
-                            color: Theme.Colors.text
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                        }
-
-                        Text {
-                            visible: voiceBridge.voiceTest.recognizedText.length > 0
-                            text: "После очистки: " + voiceBridge.voiceTest.recognizedText
-                            color: Theme.Colors.textSoft
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                        }
-
-                        Text {
-                            visible: voiceBridge.voiceTest.summary.length > 0
-                            text: "Что сделаю: " + voiceBridge.voiceTest.summary
-                            color: Theme.Colors.accent
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                        }
-                    }
                 }
             }
         }

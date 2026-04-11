@@ -92,58 +92,77 @@ class VoiceBridge(QObject):
 
     def _privacy_text(self, guarantee: str) -> str:
         mapping = {
-            "cloud_first": "cloud-first",
-            "local_first_with_fallback": "local-first with fallback",
-            "quality_first": "quality-first",
-            "no_cloud_ever": "no cloud ever",
+            "cloud_first": "Облако в приоритете",
+            "local_first_with_fallback": "Сначала локально, потом облако",
+            "quality_first": "Качество в приоритете",
+            "no_cloud_ever": "Только локально",
         }
-        return mapping.get(str(guarantee or "").strip(), "mixed")
+        return mapping.get(str(guarantee or "").strip(), "Смешанный режим")
 
     def _outside_text(self, policy) -> str:  # noqa: ANN202
         if policy.mode == "private":
-            return "РќРёС‡РµРіРѕ: private РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚ text/STT РІ РѕР±Р»Р°РєРѕ."
-        if policy.text_cloud_allowed and policy.stt_cloud_allowed:
-            return "РўРµРєСЃС‚ Рё STT РјРѕРіСѓС‚ СѓС…РѕРґРёС‚СЊ РІ РѕР±Р»Р°РєРѕ РїРѕ СЂРµР¶РёРјСѓ Рё fallback-Р»РѕРіРёРєРµ."
-        if policy.text_cloud_allowed:
-            return "Р’ РѕР±Р»Р°РєРѕ РјРѕР¶РµС‚ СѓР№С‚Рё С‚РѕР»СЊРєРѕ text AI."
-        if policy.stt_cloud_allowed:
-            return "Р’ РѕР±Р»Р°РєРѕ РјРѕР¶РµС‚ СѓР№С‚Рё С‚РѕР»СЊРєРѕ STT РїРѕСЃР»Рµ wake-СЃР»РѕРІР°."
-        return "РћР±Р»Р°С‡РЅС‹Рµ fallback-РјР°СЂС€СЂСѓС‚С‹ РѕС‚РєР»СЋС‡РµРЅС‹."
+            return "Ничего не уходит наружу."
+        if policy.mode == "standard":
+            if policy.text_cloud_allowed and policy.stt_cloud_allowed:
+                return "При нехватке локальных моделей часть обработки может временно идти через облако."
+            if policy.text_cloud_allowed:
+                return "Текст может временно уходить в облако."
+            if policy.stt_cloud_allowed:
+                return "Распознавание речи может временно уходить в облако после wake."
+            return "Облачный fallback отключён."
+        if policy.mode == "fast":
+            return "Приоритет у быстрых облачных маршрутов."
+        if policy.mode == "smart":
+            return "Приоритет у качества ответа."
+        return "Режим автоматически подбирает маршрут."
 
     def _local_text(self, policy) -> str:  # noqa: ANN202
-        return (
-            "wake word РІСЃРµРіРґР° Р»РѕРєР°Р»СЊРЅС‹Р№; "
-            f"text: {self._format_route(policy.text_route)}; "
-            f"stt: {self._format_route(policy.stt_route)}"
-        )
+        if policy.mode == "private":
+            return "Wake word, STT и текст работают локально."
+        return "Wake word всегда локальный. Остальное подбирается автоматически."
+
+    def _assistant_user_status_text(self, policy) -> str:  # noqa: ANN202
+        issues = set(policy.readiness_issues)
+        has_cloud = bool(policy.text_cloud_allowed or policy.stt_cloud_allowed)
+        if policy.mode == "private":
+            return "Нужна локальная модель" if issues else "Готово: всё локально"
+        if policy.mode == "standard":
+            if issues:
+                return "Сейчас работает через облако" if has_cloud else "Нужна локальная модель"
+            return "Готово"
+        return "Готово"
 
     def _assistant_status_snapshot(self) -> dict[str, object]:
         policy = self._assistant_policy()
-        text_route = self._format_route(policy.text_route)
-        stt_route = self._format_route(policy.stt_route)
         privacy = self._privacy_text(policy.privacy_guarantee)
+        user_status = self._assistant_user_status_text(policy)
         if not policy.readiness_issues:
-            readiness = "Локальные backend'ы готовы."
+            readiness = "Локальные модули готовы."
         else:
             labels = {
-                "local_llama_missing": "local Llama",
+                "local_llama_missing": "локальная модель",
                 "local_faster_whisper_missing": "local faster-whisper",
                 "local_vosk_missing": "local Vosk",
             }
             missing = ", ".join(labels[item] for item in sorted(policy.readiness_issues) if item in labels)
             readiness = f"Не хватает: {missing}."
-            if policy.mode == "private":
-                readiness += " Cloud fallback отключён."
+        mode_label = {
+            "fast": "Быстрый",
+            "standard": "Стандартный",
+            "smart": "Умный",
+            "private": "Приватный",
+        }.get(policy.mode, "Режим")
         return {
             "mode": policy.mode,
-            "wake": "local",
-            "text": text_route,
-            "stt": stt_route,
+            "wake": "Локально",
+            "text": "Автоматически",
+            "stt": "Автоматически",
             "privacy": privacy,
             "readiness": readiness,
             "outside": self._outside_text(policy),
             "local": self._local_text(policy),
-            "summary": f"wake local · text {text_route} · stt {stt_route} · privacy {privacy}",
+            "summary": f"Режим: {mode_label}. {user_status}",
+            "userStatus": user_status,
         }
 
     @staticmethod
@@ -155,7 +174,7 @@ class VoiceBridge(QObject):
             return "smart"
         return normalized if normalized in {"fast", "standard", "smart", "private"} else "standard"
 
-    def _assistant_mode_payload(self, mode: str) -> dict[str, object]:
+    def _apply_assistant_mode(self, mode: str) -> None:
         ai_mode = "auto"
         voice_mode = "standard"
         privacy_mode = "balance"
@@ -175,7 +194,8 @@ class VoiceBridge(QObject):
             save_history_enabled = False
             allow_text_cloud_fallback = False
             allow_stt_cloud_fallback = False
-        return {
+
+        payload = {
             "assistant_mode": mode,
             "ai_mode": ai_mode,
             "ai_provider": "auto",
@@ -185,9 +205,6 @@ class VoiceBridge(QObject):
             "allow_text_cloud_fallback": allow_text_cloud_fallback,
             "allow_stt_cloud_fallback": allow_stt_cloud_fallback,
         }
-
-    def _apply_assistant_mode(self, mode: str) -> None:
-        payload = self._assistant_mode_payload(mode)
         bulk_update = getattr(self.services.settings, "bulk_update", None)
         if callable(bulk_update):
             bulk_update(payload)
@@ -243,7 +260,10 @@ class VoiceBridge(QObject):
 
     @Property(bool, notify=voiceResponseEnabledChanged)
     def voiceResponseEnabled(self) -> bool:
-        return self.services.voice.voice_response_enabled()
+        getter = getattr(self.services.voice, "voice_response_enabled", None)
+        if callable(getter):
+            return bool(getter())
+        return bool(self.services.settings.get("voice_response_enabled", False))
 
     @voiceResponseEnabled.setter
     def voiceResponseEnabled(self, value: bool) -> None:
@@ -356,15 +376,17 @@ class VoiceBridge(QObject):
     @Property("QVariantMap", notify=statusChanged)
     def runtimeStatus(self) -> dict[str, str]:
         status = dict(self.services.voice.runtime_status())
-        status["wakeWord"] = self.services.wake.status()
+        status["wakeWord"] = "Выключено" if not self.wakeWordEnabled else self.services.wake.status()
         status["wakeModel"] = self.services.wake.model_status()
         assistant = self.assistantStatus
         status["assistantMode"] = str(assistant.get("mode", "") or "")
         status["assistantWake"] = str(assistant.get("wake", "") or "")
-        status["assistantTextRoute"] = str(assistant.get("text", "") or "")
-        status["assistantSttRoute"] = str(assistant.get("stt", "") or "")
+        status["assistantTextRoute"] = str(assistant.get("text", "") or "Автоматически")
+        status["assistantSttRoute"] = str(assistant.get("stt", "") or "Автоматически")
         status["assistantPrivacy"] = str(assistant.get("privacy", "") or "")
         status["assistantReadiness"] = str(assistant.get("readiness", "") or "")
+        status["command"] = str(assistant.get("userStatus", "") or "Готово")
+        status["tts"] = "Озвучка включена" if self.voiceResponseEnabled else "Озвучка выключена"
         status["ai"] = str(assistant.get("summary", "") or status.get("ai", ""))
         return status
 

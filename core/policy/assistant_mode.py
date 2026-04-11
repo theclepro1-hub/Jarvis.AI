@@ -119,7 +119,7 @@ def resolve_assistant_policy(
         "private": "no_cloud_ever",
     }[mode]
 
-    summary = _summary_for_mode(mode, readiness_issues, text_cloud_allowed, stt_cloud_allowed)
+    summary = _summary_for_mode(mode, readiness_issues)
     return ResolvedAssistantPolicy(
         mode=mode,
         text_route=text_route,
@@ -133,25 +133,20 @@ def resolve_assistant_policy(
     )
 
 
-def _summary_for_mode(
-    mode: str,
-    readiness_issues: list[str],
-    text_cloud_allowed: bool,
-    stt_cloud_allowed: bool,
-) -> str:
+def _summary_for_mode(mode: str, readiness_issues: list[str]) -> str:
     if mode == "private":
         if readiness_issues:
-            return "Приватный режим включён, но локальные модели ещё не готовы."
-        return "Приватный режим: wake и распознавание локально, текст наружу не уходит."
-    if mode == "standard" and readiness_issues:
-        return "Стандартный режим: сначала локально, при нехватке моделей временно с cloud fallback."
+            return "Приватный режим включён, но локальная модель ещё не готова."
+        return "Приватный режим: всё работает локально."
+    if mode == "standard":
+        if readiness_issues:
+            return "Стандартный режим: сначала локально, при нехватке моделей временно использует облако."
+        return "Стандартный режим: баланс локальной работы и облачного fallback."
     if mode == "fast":
-        return "Быстрый режим: приоритет скорости, облачные маршруты используются первыми."
+        return "Быстрый режим: приоритет скорости."
     if mode == "smart":
-        return "Умный режим: приоритет качества, облачные quality-маршруты используются первыми."
-    if text_cloud_allowed or stt_cloud_allowed:
-        return "Режим ассистента активен."
-    return "Режим ассистента активен без cloud fallback."
+        return "Умный режим: приоритет качества ответа."
+    return "Режим ассистента включён."
 
 
 def _cloud_fallback_allowed(settings: Any, *, key: str, mode: str) -> bool:

@@ -90,6 +90,7 @@ Rectangle {
                 text: "Очистить чат"
                 compact: true
                 Layout.preferredWidth: 150
+                visible: chatBridge.messages.length > 1
                 enabled: !chatBridge.thinking
                 onClicked: chatBridge.clearHistory()
             }

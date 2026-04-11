@@ -51,6 +51,19 @@ def test_llama_cpp_status_reports_not_ready_when_model_is_missing(monkeypatch: p
     assert "model file was not found" in status.detail
 
 
+def test_llama_cpp_status_requires_gguf_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("core.ai.local_llm_service.importlib.util.find_spec", lambda _name: SimpleNamespace())
+    model_path = tmp_path / "model.txt"
+    model_path.write_text("placeholder", encoding="utf-8")
+
+    service = LocalLLMService(FakeSettings({"local_llm_backend": "llama_cpp", "local_llm_model": str(model_path)}))
+    status = service.status()
+
+    assert status.ready is False
+    assert status.backend == "llama_cpp"
+    assert ".gguf file" in status.detail
+
+
 def test_ollama_status_reports_missing_model_when_daemon_is_up(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
 

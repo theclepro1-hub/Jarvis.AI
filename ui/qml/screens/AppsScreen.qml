@@ -13,6 +13,32 @@ Rectangle {
     property bool manualFormOpen: false
     property bool scanCoolingDown: false
 
+    function firstNonEmptyCategory() {
+        const tabs = categoryTabs()
+        for (let i = 0; i < tabs.length; i++) {
+            if (categoryCount(tabs[i].id) > 0) {
+                return tabs[i].id
+            }
+        }
+        return "music"
+    }
+
+    function totalCatalogCount() {
+        const source = appsBridge.catalog || []
+        return source.length
+    }
+
+    function syncSelectedCategory() {
+        if (categoryCount(root.selectedCategory) > 0) {
+            return
+        }
+        if (totalCatalogCount() === 0) {
+            root.selectedCategory = "music"
+            return
+        }
+        root.selectedCategory = firstNonEmptyCategory()
+    }
+
     Timer {
         id: scanCooldownTimer
         interval: 1400
@@ -218,6 +244,16 @@ Rectangle {
         ColumnLayout {
             width: appsScroll.availableWidth
             spacing: 14
+
+            Component.onCompleted: root.syncSelectedCategory()
+
+            Connections {
+                target: appsBridge
+
+                function onCatalogChanged() {
+                    root.syncSelectedCategory()
+                }
+            }
 
             Rectangle {
                 Layout.fillWidth: true
@@ -638,7 +674,9 @@ Rectangle {
                     Text {
                         visible: filteredCatalog().length === 0
                         Layout.fillWidth: true
-                        text: "В этой категории пока ничего нет. Добавьте приложение вручную или найдите автоматически."
+                        text: totalCatalogCount() > 0
+                              ? "В этой категории пока пусто. Выберите раздел с цифрой больше нуля или добавьте новое приложение."
+                              : "Пока ничего не добавлено. Нажмите «Найти автоматически» или «Выбрать файл»."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small

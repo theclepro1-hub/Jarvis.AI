@@ -283,13 +283,13 @@ def test_voice_bridge_runtime_status_keeps_command_backend_and_exposes_wake_mode
     assert status["wakeWord"] == "Жду «Джарвис»"
     assert status["wakeModel"] == "загружена"
     assert status["model"] == "загружена"
-    assert status["command"] == "готово"
+    assert "облако" in status["command"].casefold()
     assert status["assistantMode"] == "standard"
-    assert status["assistantWake"] == "local"
-    assert "assistantTextRoute" in status
-    assert "assistantSttRoute" in status
-    assert "assistantPrivacy" in status
-    assert "assistantReadiness" in status
+    assert status["assistantWake"] == "Локально"
+    assert status["assistantTextRoute"] == "Автоматически"
+    assert status["assistantSttRoute"] == "Автоматически"
+    assert status["assistantPrivacy"] == "Сначала локально, потом облако"
+    assert status["assistantReadiness"].startswith("Не хватает")
 
 
 def test_voice_bridge_failed_warmup_can_retry_on_next_start():

@@ -13,7 +13,7 @@ Rectangle {
     property string hoverHelpText: ""
     signal navigate(string screen)
 
-    readonly property string defaultHelpText: "Наведи на раздел или настройку, и я коротко объясню, зачем она нужна."
+    readonly property string defaultHelpText: "Наведи на раздел, и я коротко объясню, что он делает."
     readonly property string visibleHelpText: hoverHelpText.length > 0
                                            ? hoverHelpText
                                            : (contextHelpText.length > 0 ? contextHelpText : defaultHelpText)
@@ -57,7 +57,7 @@ Rectangle {
                 }
 
                 Text {
-                    text: "рабочее пространство Unity"
+                    text: "Рабочее пространство Unity"
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.micro
@@ -92,13 +92,13 @@ Rectangle {
                         return
                     }
                     if (modelData.id === "chat") {
-                        root.hoverHelpText = "Чат — главное место для команд, вопросов и быстрых действий."
+                        root.hoverHelpText = "Чат — для обычных вопросов и быстрых действий."
                     } else if (modelData.id === "voice") {
-                        root.hoverHelpText = "Голос — микрофон, слово активации и голосовые ответы JARVIS."
+                        root.hoverHelpText = "Голос — для микрофона, активации и озвучки."
                     } else if (modelData.id === "apps") {
-                        root.hoverHelpText = "Приложения — игры, музыка и другие быстрые запускатели."
+                        root.hoverHelpText = "Приложения — быстрые запуски и закреплённые действия."
                     } else if (modelData.id === "settings") {
-                        root.hoverHelpText = "Настройки — подключение, внешний вид, автозапуск и обновления."
+                        root.hoverHelpText = "Настройки — подключения, режимы, голос и внешний вид."
                     }
                 }
             }

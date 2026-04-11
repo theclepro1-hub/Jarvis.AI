@@ -114,7 +114,14 @@ class LocalLLMService:
                 detail="Local Llama model is not configured.",
             )
         resolved = Path(model_ref).expanduser()
-        if not resolved.exists():
+        if resolved.suffix.casefold() != ".gguf":
+            return LocalLLMStatus(
+                ready=False,
+                backend=backend,
+                model_path=str(resolved),
+                detail="Local Llama model must be a .gguf file.",
+            )
+        if not resolved.is_file():
             return LocalLLMStatus(
                 ready=False,
                 backend=backend,

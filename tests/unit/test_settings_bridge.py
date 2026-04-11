@@ -167,9 +167,11 @@ def test_settings_bridge_exposes_assistant_status_and_advanced_options() -> None
     assert bridge.textBackendOverride == "local_llama"
     assert bridge.sttBackendOverride == "local_vosk"
     assert status["mode"] == "private"
-    assert status["wake"] == "local"
-    assert "outside" in status
-    assert "local" in status
+    assert status["wake"] == "Локально"
+    assert status["text"] == "Автоматически"
+    assert status["stt"] == "Автоматически"
+    assert status["privacy"] == "Только локально"
+    assert status["summary"].startswith("Режим: Приватный")
     assert bridge.localLlmBackendOptions == [
         {"key": "llama_cpp", "title": "llama.cpp"},
         {"key": "ollama", "title": "Ollama"},
