@@ -7,6 +7,7 @@ import types
 
 from core.settings.settings_service import SettingsService
 from core.voice.faster_whisper_runtime import clear_faster_whisper_model_cache, load_faster_whisper_model
+from core.voice.model_paths import MODEL_DIR_NAME
 from core.voice.speech_capture_service import SpeechCaptureService
 from core.voice.stt_service import STTService
 from core.voice.tts_service import TTSService
@@ -42,6 +43,14 @@ class FakeStore:
 
     def save(self, payload):
         self.payload = payload
+
+
+def make_ready_vosk_model(model_path):
+    model_path.mkdir(parents=True, exist_ok=True)
+    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
+        target = model_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test")
 
 
 def test_speech_capture_reports_mic_open_failed(monkeypatch):
@@ -84,7 +93,7 @@ def test_stt_service_local_chain_falls_back_to_vosk(tmp_path):
     settings.set("stt_engine", "local")
     settings.set("stt_local_model", str(tmp_path / "fw-model"))
     model_path = tmp_path / "vosk-model"
-    model_path.mkdir(parents=True)
+    make_ready_vosk_model(model_path)
     (tmp_path / "fw-model").mkdir(parents=True)
     (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
     service = STTService(settings, local_model_path=model_path)
@@ -118,7 +127,7 @@ def test_stt_service_warmup_skips_remote_faster_whisper_and_uses_vosk(monkeypatc
     settings.set("stt_engine", "local")
     settings.set("stt_local_model", "small")
     model_path = tmp_path / "vosk-model"
-    model_path.mkdir(parents=True)
+    make_ready_vosk_model(model_path)
     service = STTService(settings, local_model_path=model_path)
     service.faster_whisper_download_root = tmp_path / "fw-cache"
     service._faster_whisper_available = lambda: True  # noqa: SLF001
@@ -142,7 +151,7 @@ def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(mo
     settings.set("stt_engine", "local")
     settings.set("stt_local_model", "small")
     model_path = tmp_path / "vosk-model"
-    model_path.mkdir(parents=True)
+    make_ready_vosk_model(model_path)
     service = STTService(settings, local_model_path=model_path)
     service.faster_whisper_download_root = tmp_path / "fw-cache"
     service._faster_whisper_available = lambda: True  # noqa: SLF001
@@ -174,7 +183,7 @@ def test_stt_service_balance_mode_prefers_vosk_before_heavier_whisper(tmp_path):
     settings.set("voice_mode", "balance")
     settings.set("stt_local_model", str(tmp_path / "fw-model"))
     model_path = tmp_path / "vosk-model"
-    model_path.mkdir(parents=True)
+    make_ready_vosk_model(model_path)
     (tmp_path / "fw-model").mkdir(parents=True)
     (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
     service = STTService(settings, local_model_path=model_path)
@@ -316,3 +325,21 @@ def test_tts_engine_selection_hides_unready_online_voice(monkeypatch):
 
     assert service.tts_engine() == "system"
     assert [engine.key for engine in service.available_engines()] == ["system"]
+
+
+def test_stt_service_prefers_repo_vosk_cache_before_appdata(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    cached_model = repo_root / "build" / "model_cache" / MODEL_DIR_NAME
+    cached_model.mkdir(parents=True)
+    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
+        target = cached_model / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test")
+    monkeypatch.setattr("core.voice.model_paths._repo_root", lambda: repo_root)
+    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+
+    settings = SettingsService(FakeStore())
+    service = STTService(settings)
+
+    assert service.local_model_path == cached_model

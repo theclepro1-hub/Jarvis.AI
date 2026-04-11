@@ -9,11 +9,7 @@ from pathlib import Path
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
-from core.version import DEFAULT_VERSION
-
-WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"
-WINDOWS_APP_DISPLAY_NAME = "JARVIS Unity"
-WINDOWS_APP_VERSION = DEFAULT_VERSION
+from core.app_identity import WINDOWS_APP_DISPLAY_NAME, WINDOWS_APP_USER_MODEL_ID, WINDOWS_APP_VERSION
 
 
 def _boot_log(message: str) -> None:

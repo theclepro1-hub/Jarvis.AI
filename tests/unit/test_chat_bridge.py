@@ -405,3 +405,19 @@ def test_chat_bridge_keeps_thinking_true_until_last_pending_reply_finishes(monke
 
     assert bridge.thinking is False
     assert bridge.thinkingLabel == ""
+
+
+def test_chat_bridge_normalizes_legacy_local_ai_mode_in_stage_and_hint() -> None:
+    route = SimpleNamespace(kind="ai", commands=[], assistant_lines=[], queue_items=[], execution_result=None)
+    bridge, services = _bridge_for(route)
+    services.settings = SimpleNamespace(
+        get=lambda key, default=None: {"ai_mode": "local", "ai_provider": "auto"}.get(key, default)
+    )
+
+    assert bridge._initial_ai_stage_label(None) == "Готовлю ответ ИИ…"
+
+    hint = bridge._format_ai_response_hint(
+        SimpleNamespace(mode="local", provider_label="Groq", elapsed_ms=150, fallback_used=False)
+    )
+
+    assert hint == "Авто: Groq · 0.1 с"

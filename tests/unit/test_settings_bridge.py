@@ -96,3 +96,29 @@ def test_settings_bridge_update_properties_do_not_force_lazy_update_service() ->
     assert bridge.updateSummary == f"Версия {DEFAULT_VERSION} · канал стабильный"
     assert bridge.updateStatus["current_version"] == DEFAULT_VERSION
     assert bridge.updateStatus["status_code"] == "idle"
+
+
+def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    settings.set("ai_mode", "local")
+    settings.set("ai_provider", "auto")
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    assert bridge.aiMode == "auto"
+    assert bridge.aiProfile == "auto"
+    assert bridge.aiProfiles == [
+        "auto",
+        "groq_fast",
+        "cerebras_fast",
+        "gemini_quality",
+        "openrouter_free",
+    ]
+
+    bridge.aiMode = "local"
+    assert settings.get("ai_mode") == "auto"
+
+    bridge.aiProfile = "local"
+    assert settings.get("ai_mode") == "auto"
+    assert settings.get("ai_provider") == "auto"

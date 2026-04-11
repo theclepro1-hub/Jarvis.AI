@@ -16,6 +16,7 @@ from core.pc_control.service import PcControlService
 from core.routing.batch_router import BatchRouter
 from core.routing.command_router import CommandRouter
 from core.registration.registration_service import RegistrationService
+from core.version import DEFAULT_VERSION
 from core.settings.settings_service import SettingsService
 from core.settings.settings_store import SettingsStore
 from core.settings.startup_manager import StartupManager
@@ -156,10 +157,10 @@ class _TestWakeService:
 
 
 class _TestUpdatesService:
-    current_version = "22.2.0"
+    current_version = DEFAULT_VERSION
 
     def summary(self) -> str:
-        return "Версия 22.2.0 • канал стабильный"
+        return f"Версия {DEFAULT_VERSION} • канал стабильный"
 
 
 def _pump(app: QGuiApplication, ms: int = 80) -> None:
@@ -555,6 +556,23 @@ def test_settings_updates_section_stays_last(ui_runtime) -> None:
     updates_index = source.index('title: "Обновления"')
 
     assert updates_index > appearance_index
+
+
+def test_settings_ai_profile_menu_excludes_local_ai(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 200)
+    _click(app, window, _find(window, "navButton_settings"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+
+    settings_screen = Path(__file__).resolve().parents[2] / "ui" / "qml" / "screens" / "SettingsScreen.qml"
+    source = settings_screen.read_text(encoding="utf-8")
+
+    assert 'case "local"' not in source
+    assert 'key: "local"' not in source
+    assert 'title: "Локально"' not in source
+    assert 'локальный ИИ подключён' not in source
 
 
 def test_scroll_views_accept_scroll_input(ui_runtime) -> None:

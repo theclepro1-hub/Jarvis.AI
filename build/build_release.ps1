@@ -388,70 +388,19 @@ if (Test-Path $innoCompiler) {
     Remove-Item -LiteralPath $installerDir -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
     $installerScript = Join-Path $installerDir "JarvisAi_Unity.iss"
-    $installerScriptContent = @"
-[Setup]
-AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}}
-AppName=JARVIS Unity
-AppVersion=$version
-AppVerName=JARVIS Unity $version
-AppPublisher=theclepro1-hub
-AppPublisherURL=https://github.com/theclepro1-hub/Jarvis.AI
-AppSupportURL=https://github.com/theclepro1-hub/Jarvis.AI/issues
-AppUpdatesURL=https://github.com/theclepro1-hub/Jarvis.AI/releases
-DefaultDirName={autopf}\JARVIS Unity
-DefaultGroupName=JARVIS Unity
-DisableProgramGroupPage=yes
-UninstallDisplayIcon={app}\JarvisAi_Unity.exe
-UninstallDisplayName=JARVIS Unity
-AppMutex=JarvisAi_Unity_22_instance_mutex
-SetupMutex=JarvisAi_Unity_22_setup_mutex
-CloseApplications=yes
-CloseApplicationsFilter=JarvisAi_Unity.exe
-RestartApplications=yes
-VersionInfoCompany=theclepro1-hub
-VersionInfoDescription=JARVIS Unity desktop assistant
-VersionInfoProductName=JARVIS Unity
-VersionInfoProductVersion=$version
-VersionInfoVersion=$version.0
-VersionInfoTextVersion=$version
-OutputDir=$releaseDir
-OutputBaseFilename=JarvisAi_Unity_$version`_windows_installer
-SetupIconFile=$iconPath
-Compression=lzma2
-SolidCompression=yes
-WizardStyle=modern
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
-UsePreviousAppDir=yes
-UsePreviousLanguage=yes
-
-[Languages]
-Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-
-[Files]
-Source: "$portableDistPath\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[UninstallDelete]
-Type: filesandordirs; Name: "{app}"
-
-[Icons]
-Name: "{group}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; AppUserModelID: "theclepro1.JarvisAiUnity"
-Name: "{group}\Uninstall JARVIS Unity"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\JARVIS Unity"; Filename: "{app}\JarvisAi_Unity.exe"; Tasks: desktopicon; AppUserModelID: "theclepro1.JarvisAiUnity"
-
-[Run]
-Filename: "{app}\JarvisAi_Unity.exe"; Description: "{cm:LaunchProgram,JARVIS Unity}"; Flags: nowait postinstall skipifsilent
-"@
+    & $venvPython "$root\\tools\\release_metadata.py" `
+        --version $version `
+        --release-dir $releaseDir `
+        --icon-path $iconPath `
+        --portable-dist-path $portableDistPath `
+        --output $installerScript
+    Assert-NativeSuccess -Step "Installer metadata render"
+    $installerScriptContent = Get-Content -LiteralPath $installerScript -Raw -Encoding UTF8
     Assert-TextContains -Text $installerScriptContent -Needle 'AppUserModelID: "theclepro1.JarvisAiUnity"' -Label "Installer shortcut identity"
     Assert-TextContains -Text $installerScriptContent -Needle "SetupMutex=JarvisAi_Unity_22_setup_mutex" -Label "Installer mutex"
     Assert-TextContains -Text $installerScriptContent -Needle "CloseApplicationsFilter=JarvisAi_Unity.exe" -Label "Installer close filter"
     Assert-TextContains -Text $installerScriptContent -Needle "VersionInfoTextVersion=$version" -Label "Installer version text"
     Assert-TextContains -Text $installerScriptContent -Needle 'Type: filesandordirs; Name: "{app}"' -Label "Installer uninstall cleanup"
-    Set-Content -LiteralPath $installerScript -Value $installerScriptContent -Encoding UTF8
     & $innoCompiler /Qp $installerScript
     Assert-NativeSuccess -Step "Inno Setup installer"
     if (!(Test-Path $installerRelease)) {

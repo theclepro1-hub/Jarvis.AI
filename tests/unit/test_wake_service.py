@@ -5,6 +5,7 @@ import queue
 import sys
 
 from core.settings.settings_service import SettingsService
+from core.voice.model_paths import MODEL_DIR_NAME
 from core.voice.voice_service import VoiceService
 from core.voice.wake_service import WakeService
 from core.voice.vosk_runtime import clear_vosk_model_cache
@@ -75,6 +76,8 @@ def test_wake_service_ignores_non_matching_payload():
 
 def test_wake_service_reports_missing_model_without_network(tmp_path, monkeypatch):
     monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("core.voice.model_paths._repo_root", lambda: tmp_path / "repo")
+    monkeypatch.setattr("core.voice.wake_service.is_vosk_model_ready", lambda _path: False)
 
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
@@ -90,6 +93,10 @@ def test_wake_service_reports_missing_model_without_network(tmp_path, monkeypatc
 def test_wake_service_prefers_bundled_model_path(tmp_path, monkeypatch):
     bundled_model = tmp_path / "assets" / "models" / "vosk-model-small-ru-0.22"
     bundled_model.mkdir(parents=True)
+    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
+        target = bundled_model / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test")
     monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
 
     settings = SettingsService(FakeStore())
@@ -97,6 +104,26 @@ def test_wake_service_prefers_bundled_model_path(tmp_path, monkeypatch):
     wake = WakeService(settings, voice)
 
     assert wake.model_path == bundled_model
+
+
+def test_wake_service_prefers_repo_model_cache_before_user_fallback(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    cached_model = repo_root / "build" / "model_cache" / MODEL_DIR_NAME
+    cached_model.mkdir(parents=True)
+    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
+        target = cached_model / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test")
+    monkeypatch.setattr("core.voice.model_paths._repo_root", lambda: repo_root)
+    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    assert wake.model_path == cached_model
 
 
 def test_wake_service_uses_local_appdata_for_user_model_path(monkeypatch, tmp_path):

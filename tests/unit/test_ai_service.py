@@ -185,16 +185,31 @@ def test_retryable_error_can_retry_same_provider_when_attempts_enabled() -> None
     assert [call["base_url"] for call in calls].count("https://api.groq.com/openai/v1") == 2
 
 
-def test_local_mode_does_not_call_cloud_provider() -> None:
+def test_legacy_local_mode_is_normalized_to_auto_without_cloud_calls(monkeypatch) -> None:
+    for key in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
     def fail_factory(**_kwargs):
-        raise AssertionError("cloud provider must not be called in local mode")
+        raise AssertionError("cloud provider must not be called for a legacy local mode value")
 
     service = AIService(
-        FakeSettings({"ai_mode": "local"}),
+        FakeSettings(
+            {"ai_mode": "local"},
+            registration={
+                "groq_api_key": "",
+                "cerebras_api_key": "",
+                "gemini_api_key": "",
+                "openrouter_api_key": "",
+            },
+        ),
         client_factory=fail_factory,
     )
 
-    assert "Локальный ИИ пока не подключён" in service.generate_reply("привет")
+    result = service.generate_reply_result("привет")
+
+    assert result.mode == "auto"
+    assert result.error == ""
+    assert "local" not in result.text.lower()
 
 
 def test_missing_provider_keys_uses_fallback(monkeypatch) -> None:
@@ -273,3 +288,5 @@ def test_every_public_cloud_mode_has_a_provider_plan(mode: str) -> None:
     service = AIService(FakeSettings({"ai_mode": mode}))
 
     assert service.provider_plan()
+
+

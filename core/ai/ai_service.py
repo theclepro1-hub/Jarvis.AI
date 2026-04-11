@@ -18,7 +18,10 @@ SYSTEM_PROMPT = """
 """.strip()
 
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
-AI_MODES = {"auto", "fast", "quality", "local"}
+SUPPORTED_AI_MODES = ("auto", "fast", "quality")
+SUPPORTED_AI_MODE_SET = frozenset(SUPPORTED_AI_MODES)
+SUPPORTED_AI_PROFILES = ("auto", "groq_fast", "cerebras_fast", "gemini_quality", "openrouter_free")
+AI_MODES = SUPPORTED_AI_MODE_SET
 DEFAULT_NO_PROXY = "localhost,127.0.0.1,::1"
 AI_MODE_BUDGET_SECONDS: dict[str, float] = {
     "auto": 5.0,
@@ -123,7 +126,6 @@ PROVIDER_PLANS: dict[str, tuple[str, ...]] = {
     "auto": ("groq", "cerebras", "gemini", "openrouter"),
     "fast": ("groq", "cerebras"),
     "quality": ("gemini", "groq", "cerebras", "openrouter"),
-    "local": (),
 }
 
 
@@ -151,17 +153,6 @@ class AIService:
     ) -> AIReplyResult:
         ai_mode = self._ai_mode()
         started_at = time.perf_counter()
-        if ai_mode == "local":
-            reply = self._local_unavailable_reply()
-            return AIReplyResult(
-                text=reply,
-                mode=ai_mode,
-                provider="local",
-                provider_label="Локально",
-                elapsed_ms=self._elapsed_ms(started_at),
-                error="local_unavailable",
-            )
-
         messages = self._build_messages(user_text, history or [])
         attempts = self.provider_plan(ai_mode)
         if not attempts:
@@ -233,8 +224,6 @@ class AIService:
     def provider_plan(self, ai_mode: str | None = None) -> list[ProviderAttempt]:
         mode = self._normalize_mode(ai_mode or self._ai_mode())
         configured_provider = str(self.settings.get("ai_provider", "auto")).strip().lower()
-        if mode == "local":
-            return []
         if configured_provider in PROVIDERS:
             provider_keys = (configured_provider,)
         else:
@@ -390,7 +379,6 @@ class AIService:
             "fast": "Быстрый режим",
             "quality": "Качество",
             "auto": "Авто-режим",
-            "local": "Локально",
         }.get(ai_mode, "ИИ")
         if attempts_total <= 1:
             return f"{mode_label}: {spec.label}…"
@@ -413,6 +401,12 @@ class AIService:
         if value in AI_MODES:
             return value
         return "auto"
+
+    def available_modes(self) -> tuple[str, ...]:
+        return SUPPORTED_AI_MODES
+
+    def available_profiles(self) -> tuple[str, ...]:
+        return SUPPORTED_AI_PROFILES
 
     def _build_messages(self, user_text: str, history: list[dict[str, str]]) -> list[dict[str, str]]:
         messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -470,8 +464,4 @@ class AIService:
             "но локальные команды продолжают работать."
         )
 
-    def _local_unavailable_reply(self) -> str:
-        return (
-            "Локальный ИИ пока не подключён в этой сборке. Переключите режим ИИ на "
-            "«Авто», «Быстро» или «Качество»."
-        )
+

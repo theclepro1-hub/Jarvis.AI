@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
+from core.app_identity import (
+    WINDOWS_APP_DISPLAY_NAME,
+    WINDOWS_APP_USER_MODEL_ID,
+    WINDOWS_EXECUTABLE_NAME,
+    WINDOWS_INSTANCE_MUTEX,
+    WINDOWS_SETUP_MUTEX,
+)
 from core.updates.update_service import UpdateService
+from core.version import DEFAULT_VERSION
+from tools.release_metadata import render_installer_script
 
 
 def test_gitignore_covers_release_and_runtime_temp_artifacts() -> None:
@@ -38,9 +48,18 @@ def test_release_docs_exist() -> None:
         Path("docs/SECURITY.md"),
         Path("docs/AI_NETWORK.md"),
         Path("docs/RELEASE_READINESS.md"),
-        Path("docs/RELEASE_22.4.2.md"),
+        Path(f"docs/RELEASE_{DEFAULT_VERSION}.md"),
     ]:
         assert relpath.exists()
+
+
+def test_project_version_is_sourced_from_core_version() -> None:
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+
+    assert DEFAULT_VERSION == UpdateService().current_version
+    assert project.get("dynamic", []) == ["version"]
+    assert pyproject["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "core.version.DEFAULT_VERSION"
 
 
 def test_build_script_keeps_expected_release_inputs() -> None:
@@ -56,6 +75,8 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert "Assert-ChecksumFile" in build_script
     assert "Get-FileHash" in build_script
     assert r"assets\\models\\$modelName" in build_script
+    assert "release_metadata.py" in build_script
+    assert 'Assert-NativeSuccess -Step "Installer metadata render"' in build_script
     assert "am\\final.mdl" in build_script
     assert "conf\\model.conf" in build_script
     assert "graph\\Gr.fst" in build_script
@@ -65,33 +86,29 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert '--icon $iconPath' in build_script
     assert '--version-file $versionInfoFile' in build_script
     assert "RELEASE_VERSION $version" in build_script
-    assert 'AppUserModelID: "theclepro1.JarvisAiUnity"' in build_script
-    assert "UninstallDisplayIcon={app}\\JarvisAi_Unity.exe" in build_script
-    assert "UninstallDisplayName=JARVIS Unity" in build_script
-    assert "CloseApplications=yes" in build_script
-    assert "CloseApplicationsFilter=JarvisAi_Unity.exe" in build_script
-    assert "SetupMutex=JarvisAi_Unity_22_setup_mutex" in build_script
-    assert "VersionInfoTextVersion=$version" in build_script
-    assert 'Type: filesandordirs; Name: "{app}"' in build_script
 
 
 def test_installer_metadata_matches_runtime_identity() -> None:
-    installer_script = Path("build/installer/JarvisAi_Unity.iss").read_text(encoding="utf-8")
     bootstrap = Path("app/bootstrap.py").read_text(encoding="utf-8")
     current_version = UpdateService().current_version
 
+    installer_script = render_installer_script(
+        version=current_version,
+        release_dir=r"C:\JarvisAi_Unity\build\release",
+        icon_path=r"C:\JarvisAi_Unity\assets\icons\jarvis_unity.ico",
+        portable_dist_path=r"C:\JarvisAi_Unity\dist\JarvisAi_Unity",
+    )
+
+    assert current_version == DEFAULT_VERSION
     assert f"AppVersion={current_version}" in installer_script
-    assert f"AppVerName=JARVIS Unity {current_version}" in installer_script
+    assert f"AppVerName={WINDOWS_APP_DISPLAY_NAME} {current_version}" in installer_script
     assert f"VersionInfoProductVersion={current_version}" in installer_script
     assert f"VersionInfoTextVersion={current_version}" in installer_script
-    assert "UninstallDisplayName=JARVIS Unity" in installer_script
-    assert "AppId={{5E8E34A2-7D82-4B23-8B6A-2D12F795C2A9}}" in installer_script
-    assert 'AppUserModelID: "theclepro1.JarvisAiUnity"' in installer_script
-    assert "AppMutex=JarvisAi_Unity_22_instance_mutex" in installer_script
-    assert "SetupMutex=JarvisAi_Unity_22_setup_mutex" in installer_script
-    assert "CloseApplicationsFilter=JarvisAi_Unity.exe" in installer_script
+    assert f"UninstallDisplayName={WINDOWS_APP_DISPLAY_NAME}" in installer_script
+    assert f'AppUserModelID: "{WINDOWS_APP_USER_MODEL_ID}"' in installer_script
+    assert f"AppMutex={WINDOWS_INSTANCE_MUTEX}" in installer_script
+    assert f"SetupMutex={WINDOWS_SETUP_MUTEX}" in installer_script
+    assert f"CloseApplicationsFilter={WINDOWS_EXECUTABLE_NAME}" in installer_script
     assert 'Type: filesandordirs; Name: "{app}"' in installer_script
-    assert "AppUserModelID" in installer_script
-    assert 'WINDOWS_APP_USER_MODEL_ID = "theclepro1.JarvisAiUnity"' in bootstrap
-    assert 'WINDOWS_APP_DISPLAY_NAME = "JARVIS Unity"' in bootstrap
+    assert "from core.app_identity import WINDOWS_APP_DISPLAY_NAME, WINDOWS_APP_USER_MODEL_ID, WINDOWS_APP_VERSION" in bootstrap
     assert "QGuiApplication.setApplicationVersion(WINDOWS_APP_VERSION)" in bootstrap

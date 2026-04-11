@@ -46,6 +46,10 @@ def test_wake_service_warm_up_model_loads_shared_vosk_cache(tmp_path, monkeypatc
     wake = WakeService(settings, voice)
     wake.model_path = tmp_path / "vosk-model-small-ru-0.22"
     wake.model_path.mkdir(parents=True)
+    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
+        target = wake.model_path / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test")
 
     calls: list[object] = []
 

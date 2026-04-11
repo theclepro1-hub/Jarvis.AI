@@ -13,11 +13,9 @@ from pathlib import Path
 
 from core.routing.text_rules import normalize_text
 from core.voice.faster_whisper_runtime import load_faster_whisper_model, resolve_local_faster_whisper_model
+from core.voice.model_paths import is_vosk_model_ready, resolve_vosk_model_path
 from core.voice.voice_models import TranscriptionResult
 from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
-
-
-MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
 FASTER_WHISPER_CACHE_DIR = "faster-whisper"
 DEFAULT_FASTER_WHISPER_MODEL = os.environ.get("JARVIS_UNITY_FASTER_WHISPER_MODEL", "small").strip() or "small"
 COMMAND_PROMPT = (
@@ -30,7 +28,8 @@ COMMAND_PROMPT = (
 class STTService:
     def __init__(self, settings_service, local_model_path: Path | None = None) -> None:
         self.settings = settings_service
-        self.local_model_path = local_model_path or self._find_local_model_path()
+        self._local_model_path_overridden = local_model_path is not None
+        self.local_model_path = local_model_path or resolve_vosk_model_path()
         self.faster_whisper_download_root = self._find_faster_whisper_download_root()
         self._http_client = None
         self._http_client_signature: tuple[str, str, float] | None = None
@@ -450,7 +449,9 @@ class STTService:
         return importlib.util.find_spec("faster_whisper") is not None
 
     def _local_vosk_available(self) -> bool:
-        return self.local_model_path.exists()
+        if not self._local_model_path_overridden:
+            self.local_model_path = resolve_vosk_model_path()
+        return is_vosk_model_ready(self.local_model_path)
 
     def _local_faster_whisper_ready(self) -> bool:
         return self._faster_whisper_available() and self._resolve_local_faster_whisper_source() is not None
@@ -599,20 +600,3 @@ class STTService:
             wav_file.setframerate(16_000)
             wav_file.writeframes(raw_bytes)
         return path
-
-    def _find_local_model_path(self) -> Path:
-        candidates = []
-        env_dir = os.environ.get("JARVIS_UNITY_DATA_DIR")
-        if env_dir:
-            candidates.append(Path(env_dir) / "models" / MODEL_DIR_NAME)
-        frozen_root = getattr(sys, "_MEIPASS", None)
-        if frozen_root:
-            candidates.append(Path(frozen_root) / "assets" / "models" / MODEL_DIR_NAME)
-        candidates.append(Path(__file__).resolve().parents[2] / "assets" / "models" / MODEL_DIR_NAME)
-        local_root = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
-        candidates.append(local_root / "JarvisAi_Unity" / "models" / MODEL_DIR_NAME)
-
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        return candidates[-1]

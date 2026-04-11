@@ -1,4 +1,4 @@
 from __future__ import annotations
 
 
-DEFAULT_VERSION = "22.4.2"
+DEFAULT_VERSION = "22.4.5"

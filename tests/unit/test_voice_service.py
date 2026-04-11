@@ -47,6 +47,7 @@ def test_voice_runtime_without_key_reports_not_connected():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     voice.stt_service._faster_whisper_available = lambda: False  # noqa: SLF001
+    voice.stt_service._local_vosk_available = lambda: False  # noqa: SLF001
 
     status = voice.runtime_status()
 

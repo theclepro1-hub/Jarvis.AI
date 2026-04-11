@@ -8,6 +8,8 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
+from core.ai.ai_service import SUPPORTED_AI_MODES
+
 
 class ChatBridge(QObject):
     messagesChanged = Signal()
@@ -427,6 +429,12 @@ class ChatBridge(QObject):
             return
         voice_bridge.clearWakeHint()
 
+    def _normalize_ai_mode(self, value: str) -> str:
+        mode = str(value or "").strip().lower()
+        if mode in SUPPORTED_AI_MODES:
+            return mode
+        return "auto"
+
     def _start_ai_resolution(
         self,
         original_text: str,
@@ -465,7 +473,7 @@ class ChatBridge(QObject):
         mode = "auto"
         provider = "auto"
         if settings is not None and hasattr(settings, "get"):
-            mode = str(settings.get("ai_mode", "auto") or "auto").strip().lower()
+            mode = self._normalize_ai_mode(settings.get("ai_mode", "auto"))
             provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
         if route is not None and getattr(route, "execution_result", None) is not None:
             return "Локально не хватило уверенности, подключаю ИИ…"
@@ -473,21 +481,18 @@ class ChatBridge(QObject):
             return "Быстрый режим: готовлю ответ…"
         if mode == "quality" or provider == "gemini":
             return "Режим качества: готовлю ответ…"
-        if mode == "local":
-            return "Локальный режим: готовлю ответ…"
         return "Готовлю ответ ИИ…"
 
     def _format_ai_response_hint(self, result) -> str:  # noqa: ANN001
         provider_label = str(getattr(result, "provider_label", "") or "").strip()
         elapsed_ms = int(getattr(result, "elapsed_ms", 0) or 0)
-        mode = str(getattr(result, "mode", "") or "").strip().lower()
+        mode = self._normalize_ai_mode(getattr(result, "mode", ""))
         if not provider_label or elapsed_ms <= 0:
             return ""
         mode_label = {
             "fast": "Быстро",
             "quality": "Качество",
             "auto": "Авто",
-            "local": "Локально",
         }.get(mode, "ИИ")
         hint = f"{mode_label}: {provider_label} · {elapsed_ms / 1000.0:.1f} с"
         if bool(getattr(result, "fallback_used", False)):

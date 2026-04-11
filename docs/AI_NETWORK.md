@@ -5,19 +5,18 @@ JarvisAi Unity keeps the user-facing AI control small:
 - `Авто`
 - `Быстро`
 - `Качество`
-- `Локально`
 
 The UI should not show a long provider/model list by default. The backend maps those modes to
 provider plans and falls back when a provider hits rate limits, timeouts, or temporary server errors.
+The current build does not expose a user-facing local AI mode.
 
 ## Provider plan
 
 | Mode | Order |
 | --- | --- |
 | `auto` | Groq, Cerebras, Gemini, OpenRouter |
-| `fast` | Groq, Cerebras, Gemini, OpenRouter |
-| `quality` | Gemini, Cerebras, Groq, OpenRouter |
-| `local` | No cloud call; local backend must be wired separately |
+| `fast` | Groq, Cerebras |
+| `quality` | Gemini, Groq, Cerebras, OpenRouter |
 
 OpenRouter is a last-resort aggregator because free model availability and limits are dynamic.
 

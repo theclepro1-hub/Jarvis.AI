@@ -28,20 +28,28 @@ Rectangle {
     }
 
     function aiModeLabel() {
-        switch (settingsBridge.aiProfile) {
+        return aiProfileMeta(settingsBridge.aiProfile).title
+    }
+
+    function aiProfileMeta(profileKey) {
+        switch (profileKey) {
         case "groq_fast":
-            return "Быстрый Groq"
+            return { key: "groq_fast", title: "Быстрый Groq", note: "Минимальная задержка, если Groq-ключ доступен." }
         case "gemini_quality":
-            return "Умный Gemini"
+            return { key: "gemini_quality", title: "Умный Gemini", note: "Более качественные ответы, если Gemini-ключ доступен." }
         case "cerebras_fast":
-            return "Быстрый Cerebras"
+            return { key: "cerebras_fast", title: "Быстрый Cerebras", note: "Ещё один быстрый облачный вариант при наличии ключа." }
         case "openrouter_free":
-            return "Резервный OpenRouter"
-        case "local":
-            return "Локально"
+            return { key: "openrouter_free", title: "Резервный OpenRouter", note: "Запасной бесплатный вариант с лимитами." }
         default:
-            return "Авто"
+            return { key: "auto", title: "Авто", note: "Сам выбирает доступный быстрый профиль." }
         }
+    }
+
+    function aiProfileOptions() {
+        return settingsBridge.aiProfiles.map(function(profileKey) {
+            return aiProfileMeta(profileKey)
+        })
     }
 
     function telegramStatusText() {
@@ -316,8 +324,8 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Профиль"
-                    description: "Выбирайте по смыслу: быстрее, умнее или локально."
-                    helpText: "Авто выбирает доступный профиль. Groq дает минимальную задержку, Gemini обычно качественнее, локальный режим не использует облако."
+                    description: "Выбирайте по смыслу: быстрее или умнее."
+                    helpText: "Авто выбирает доступный профиль. Groq дает минимальную задержку, Gemini обычно качественнее, Cerebras тоже быстрый, OpenRouter остается резервным вариантом."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
@@ -325,14 +333,7 @@ Rectangle {
                         id: aiProfileCombo
                         objectName: "aiProfileCombo"
                         Layout.preferredWidth: 340
-                        model: [
-                            { key: "auto", title: "Авто", note: "Сам выбирает доступный быстрый профиль." },
-                            { key: "groq_fast", title: "Быстрый Groq", note: "Минимальная задержка, если Groq-ключ доступен." },
-                            { key: "gemini_quality", title: "Умный Gemini", note: "Более качественные ответы, если Gemini-ключ доступен." },
-                            { key: "cerebras_fast", title: "Быстрый Cerebras", note: "Ещё один быстрый облачный вариант при наличии ключа." },
-                            { key: "openrouter_free", title: "Резервный OpenRouter", note: "Запасной бесплатный вариант с лимитами." },
-                            { key: "local", title: "Локально", note: "Без облака, если локальный ИИ подключён." }
-                        ]
+                        model: settingsRoot.aiProfileOptions()
                         textRole: "title"
                         currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.aiProfile))
                         onActivated: (index) => settingsBridge.aiProfile = model[index].key

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from core.ai.ai_service import SUPPORTED_AI_MODES, SUPPORTED_AI_PROFILES
 from core.version import DEFAULT_VERSION
 
 
@@ -66,6 +67,19 @@ class SettingsBridge(QObject):
         if hasattr(self.services, "__dict__") and "actions" in vars(self.services):
             return vars(self.services).get("actions")
         return None
+
+    def _ai_service_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_ai"):
+            return getattr(self.services, "_ai")
+        if hasattr(self.services, "__dict__") and "ai" in vars(self.services):
+            return vars(self.services).get("ai")
+        return None
+
+    def _normalize_ai_mode(self, value: str) -> str:
+        mode = str(value or "").strip().lower()
+        if mode in SUPPORTED_AI_MODES:
+            return mode
+        return "auto"
 
     def _default_update_summary(self) -> str:
         return f"Версия {DEFAULT_VERSION} · канал стабильный"
@@ -153,12 +167,11 @@ class SettingsBridge(QObject):
 
     @Property(str, notify=aiModeChanged)
     def aiMode(self) -> str:
-        return self.services.settings.get("ai_mode", "auto")
+        return self._normalize_ai_mode(self.services.settings.get("ai_mode", "auto"))
 
     @aiMode.setter
     def aiMode(self, value: str) -> None:
-        if value not in {"auto", "fast", "quality", "local"}:
-            value = "auto"
+        value = self._normalize_ai_mode(value)
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("ai_mode", value)
         self.aiModeChanged.emit()
@@ -181,8 +194,6 @@ class SettingsBridge(QObject):
     def aiProfile(self) -> str:
         mode = self.aiMode
         provider = self.aiProvider
-        if mode == "local":
-            return "local"
         if provider == "groq" and mode == "fast":
             return "groq_fast"
         if provider == "gemini" and mode == "quality":
@@ -193,6 +204,13 @@ class SettingsBridge(QObject):
             return "openrouter_free"
         return "auto"
 
+    @Property("QVariantList", notify=aiProfileChanged)
+    def aiProfiles(self) -> list[str]:
+        ai_service = self._ai_service_if_ready()
+        if ai_service is not None and hasattr(ai_service, "available_profiles"):
+            return list(ai_service.available_profiles())
+        return list(SUPPORTED_AI_PROFILES)
+
     @aiProfile.setter
     def aiProfile(self, value: str) -> None:
         profile_map = {
@@ -201,7 +219,6 @@ class SettingsBridge(QObject):
             "gemini_quality": ("quality", "gemini"),
             "cerebras_fast": ("fast", "cerebras"),
             "openrouter_free": ("auto", "openrouter"),
-            "local": ("local", "auto"),
         }
         mode, provider = profile_map.get(value, profile_map["auto"])
         with _SETTINGS_WRITE_LOCK:

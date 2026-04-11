@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import json
-import os
 import queue
 import threading
 import time
 from collections import deque
-from pathlib import Path
-import sys
 
 import sounddevice as sd
 
 from core.routing.text_rules import STRICT_WAKE_ALIASES, normalize_text, strip_leading_wake_prefix
+from core.voice.model_paths import (
+    resolve_vosk_bundled_model_path,
+    resolve_vosk_model_path,
+    resolve_vosk_runtime_model_path,
+    is_vosk_model_ready,
+)
 from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
-
-
-MODEL_DIR_NAME = "vosk-model-small-ru-0.22"
 
 
 class WakeService:
@@ -29,16 +29,11 @@ class WakeService:
     def __init__(self, settings_service, voice_service) -> None:
         self.settings = settings_service
         self.voice = voice_service
-        data_dir = os.environ.get("JARVIS_UNITY_DATA_DIR")
-        if data_dir:
-            self.base_dir = Path(data_dir) / "models"
-        else:
-            base_root = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
-            self.base_dir = base_root / "JarvisAi_Unity" / "models"
+        self.base_dir = resolve_vosk_runtime_model_path().parent
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.user_model_path = self.base_dir / MODEL_DIR_NAME
-        self.bundled_model_path = self._find_bundled_model_path()
-        self.model_path = self.bundled_model_path if self.bundled_model_path.exists() else self.user_model_path
+        self.user_model_path = resolve_vosk_runtime_model_path()
+        self.bundled_model_path = resolve_vosk_bundled_model_path()
+        self.model_path = resolve_vosk_model_path()
         self._callback = None
         self._status_callback = None
         self._stop_event = threading.Event()
@@ -68,7 +63,8 @@ class WakeService:
         self._status_callback = on_status
         if self._thread and self._thread.is_alive():
             return self.status()
-        if not self.model_path.exists():
+        self._refresh_model_path()
+        if not is_vosk_model_ready(self.model_path):
             self._set_phase("error", "Локальная модель слова активации не загружена", ready=False)
             return self.status()
 
@@ -92,10 +88,12 @@ class WakeService:
         return self._detail
 
     def model_status(self) -> str:
-        return "загружена" if self.model_path.exists() else "не загружена"
+        self._refresh_model_path()
+        return "загружена" if is_vosk_model_ready(self.model_path) else "не загружена"
 
     def warm_up_model(self) -> bool:
-        if not self.model_path.exists():
+        self._refresh_model_path()
+        if not is_vosk_model_ready(self.model_path):
             return False
         try:
             load_vosk_model(self.model_path)
@@ -156,20 +154,13 @@ class WakeService:
             if not self._phase_in_handoff() and self._phase != "error" and not self._stop_event.is_set():
                 self._set_phase("idle", "Слово активации не запущено", ready=False)
 
-    def _find_bundled_model_path(self) -> Path:
-        candidates = []
-        frozen_root = getattr(sys, "_MEIPASS", None)
-        if frozen_root:
-            candidates.append(Path(frozen_root) / "assets" / "models" / MODEL_DIR_NAME)
-        candidates.append(Path(__file__).resolve().parents[2] / "assets" / "models" / MODEL_DIR_NAME)
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-        return candidates[-1]
-
     def _new_recognizer(self):
         grammar = [*STRICT_WAKE_ALIASES, "[unk]"]
         return new_vosk_recognizer(self.model_path, self.SAMPLE_RATE, grammar=grammar)
+
+    def _refresh_model_path(self) -> None:
+        self.bundled_model_path = resolve_vosk_bundled_model_path()
+        self.model_path = resolve_vosk_model_path()
 
     def _contains_wake(self, payload: str, partial: bool = False) -> bool:
         try:
