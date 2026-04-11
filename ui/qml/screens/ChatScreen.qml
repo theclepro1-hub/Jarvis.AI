@@ -8,6 +8,17 @@ import "../components"
 Rectangle {
     color: "transparent"
 
+    signal helpRequested(string text)
+    signal helpCleared()
+
+    function showHelp(text) {
+        helpRequested(text)
+    }
+
+    function clearHelp() {
+        helpCleared()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 14
@@ -77,6 +88,10 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 10
 
+            HoverHandler {
+                onHoveredChanged: hovered ? root.showHelp("Быстрые действия сверху запускают частые команды без лишнего ввода.") : root.clearHelp()
+            }
+
             QuickActionStrip {
                 Layout.fillWidth: true
                 model: chatBridge.quickActions
@@ -104,6 +119,29 @@ Rectangle {
             border.color: Theme.Colors.borderSoft
             border.width: 1
             clip: true
+
+            ColumnLayout {
+                visible: chatBridge.messages.length <= 1 && !chatBridge.thinking
+                z: 2
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 72, 560)
+                spacing: 10
+
+                StatusPill {
+                    text: "Готов к команде"
+                    Layout.alignment: Qt.AlignHCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "Можно писать обычным текстом, нажать микрофон или выбрать быстрый сценарий сверху."
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.body
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
 
             ListView {
                 id: listView
@@ -317,6 +355,9 @@ Rectangle {
             idleHint: chatBridge.lastResponseHint
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint
+            HoverHandler {
+                onHoveredChanged: hovered ? root.showHelp("Поле ввода и микрофон — это главный путь для обычного чата.") : root.clearHelp()
+            }
             onSubmit: (text) => chatBridge.sendMessage(text)
             onMicPressed: () => voiceBridge.toggleManualCapture()
         }

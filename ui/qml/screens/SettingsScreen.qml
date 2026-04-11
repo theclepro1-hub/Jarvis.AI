@@ -36,13 +36,6 @@ Rectangle {
         return "Актуально"
     }
 
-    function assistantModeTitle(modeKey) {
-        if (modeKey === "fast") return "Быстрый"
-        if (modeKey === "smart") return "Умный"
-        if (modeKey === "private") return "Приватный"
-        return "Стандартный"
-    }
-
     function assistantModeDescription(modeKey) {
         if (modeKey === "fast") return "Максимум скорости."
         if (modeKey === "smart") return "Лучшее качество ответа."
@@ -77,7 +70,7 @@ Rectangle {
 
             Text {
                 Layout.fillWidth: true
-                text: "Короткие настройки без технической свалки. Вверху только то, что нужно обычному пользователю."
+                text: "Сверху только важное для обычного пользователя. Редкие настройки спрятаны ниже."
                 color: Theme.Colors.textSoft
                 font.family: Theme.Typography.bodyFamily
                 font.pixelSize: Theme.Typography.body
@@ -88,12 +81,19 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Подключения"
                 description: "Для старта нужны Groq и Telegram. Дополнительные ключи спрятаны ниже."
-                expanded: true
+                expanded: false
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("Подключения — ключи для старта. Открывайте только если нужно подключить Groq или Telegram.") : settingsRoot.helpCleared()
+                }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Groq"
                     description: "Ключ для быстрых облачных ответов."
+                    helpText: "Ключ Groq нужен для быстрых облачных ответов."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -126,6 +126,9 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Telegram bot token"
                     description: "Токен нужен для команд и уведомлений в Telegram."
+                    helpText: "Токен Telegram-бота нужен для команд и уведомлений."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -158,6 +161,9 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Telegram ID"
                     description: "Куда JARVIS будет отправлять ответы и напоминания."
+                    helpText: "Telegram ID нужен, чтобы JARVIS знал, куда отправлять ответы и напоминания."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -227,12 +233,19 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Режим ассистента"
                 description: "Один главный выбор: быстрый, стандартный, умный или приватный."
-                expanded: true
+                expanded: false
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("Режим ассистента — один главный выбор. Всё остальное подстроится автоматически.") : settingsRoot.helpCleared()
+                }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Режим"
                     description: assistantModeDescription(settingsBridge.assistantMode)
+                    helpText: "Выберите только смысл режима. Техническая настройка подбирается автоматически."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -246,15 +259,6 @@ Rectangle {
                             textRole: "title"
                             currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.assistantMode))
                             onActivated: (index) => settingsBridge.assistantMode = model[index].key
-                        }
-
-                        Text {
-                            text: assistantModeTitle(settingsBridge.assistantMode) + " — " + assistantModeDescription(settingsBridge.assistantMode)
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
                         }
 
                         StatusPill {
@@ -279,10 +283,17 @@ Rectangle {
                 description: "Голос JARVIS, автозапуск, старт свернутым и трей."
                 expanded: false
 
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("Голос и система — микрофон, озвучка, автозапуск и трей. Открывайте только если хотите изменить поведение приложения.") : settingsRoot.helpCleared()
+                }
+
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Голос"
                     description: "Микрофон, активация и озвучка на отдельной вкладке."
+                    helpText: "Открывает вкладку Голос, где настраиваются микрофон, активация и озвучка."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -317,6 +328,9 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Автозапуск"
                     description: "JARVIS стартует вместе с Windows."
+                    helpText: "Включает запуск JARVIS вместе с Windows."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     Item { Layout.fillWidth: true }
 
@@ -332,6 +346,9 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Свернутый режим"
                     description: "JARVIS может стартовать уже свернутым и не мешать на рабочем столе."
+                    helpText: "Если включить, JARVIS будет стартовать уже свернутым."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     Item { Layout.fillWidth: true }
 
@@ -347,6 +364,9 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Сворачивать в трей"
                     description: "При закрытии окно может не исчезать, а уходить в значок рядом с часами."
+                    helpText: "Если включить, окно будет уходить в трей вместо полного закрытия."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     Item { Layout.fillWidth: true }
 
@@ -365,10 +385,17 @@ Rectangle {
                 description: "Очистка чата и сброс локального профиля."
                 expanded: false
 
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("История и данные — очистка чата, сохранения и локального профиля. Открывайте только если нужно что-то удалить.") : settingsRoot.helpCleared()
+                }
+
                 SettingRow {
                     Layout.fillWidth: true
                     title: "История чата"
                     description: "Можно очистить чат сразу или позже выключить сохранение истории."
+                    helpText: "Позволяет очистить чат и включать или выключать сохранение истории."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -408,6 +435,9 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Удалить все данные"
                     description: "Сбросить локальный профиль, историю и сохранения в %LOCALAPPDATA%."
+                    helpText: "Полный сброс локального профиля, истории и сохранений."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -437,10 +467,17 @@ Rectangle {
                 description: "Тема интерфейса должна быть ниже полезных настроек."
                 expanded: false
 
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("Внешний вид — только тема интерфейса. Это самый нижний приоритет.") : settingsRoot.helpCleared()
+                }
+
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Тема"
                     description: "Меняет весь интерфейс сразу, без разрозненных цветов в отдельных блоках."
+                    helpText: "Меняет тему интерфейса целиком."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     Item { Layout.fillWidth: true }
 
@@ -461,14 +498,193 @@ Rectangle {
 
             SettingsSection {
                 Layout.fillWidth: true
+                title: "Для опытных"
+                description: "Редкие настройки и локальная модель. Открывайте только если это действительно нужно."
+                expanded: false
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("Для опытных — редкие настройки и локальная модель. Спрятано глубже, чтобы не перегружать основной экран.") : settingsRoot.helpCleared()
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Gemini"
+                    description: "Дополнительный ключ для более качественных ответов."
+                    helpText: "Дополнительный ключ Gemini для более качественных ответов."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
+
+                    InputField {
+                        id: geminiConnectionField
+                        objectName: "settingsGeminiField"
+                        Layout.fillWidth: true
+                        label: "Ключ Gemini"
+                        text: settingsBridge.geminiApiKey
+                        placeholderText: "Вставьте ключ Gemini"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Cerebras"
+                    description: "Дополнительный быстрый ключ."
+                    helpText: "Дополнительный ключ Cerebras для быстрых ответов."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
+
+                    InputField {
+                        id: cerebrasConnectionField
+                        objectName: "settingsCerebrasField"
+                        Layout.fillWidth: true
+                        label: "Ключ Cerebras"
+                        text: settingsBridge.cerebrasApiKey
+                        placeholderText: "Вставьте ключ Cerebras"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "OpenRouter"
+                    description: "Резервный провайдер для дополнительных моделей."
+                    helpText: "Резервный провайдер OpenRouter для дополнительных моделей."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
+
+                    InputField {
+                        id: openrouterConnectionField
+                        objectName: "settingsOpenRouterField"
+                        Layout.fillWidth: true
+                        label: "Ключ OpenRouter"
+                        text: settingsBridge.openrouterApiKey
+                        placeholderText: "Вставьте ключ OpenRouter"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Локальная модель"
+                    description: "Если хотите приватный локальный текстовый режим."
+                    helpText: "Выберите локальный движок и путь к модели, если нужен приватный режим."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        AppComboBox {
+                            id: localLlmBackendCombo
+                            objectName: "localLlmBackendCombo"
+                            Layout.preferredWidth: 280
+                            model: settingsBridge.localLlmBackendOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.localLlmBackend))
+                            onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
+                        }
+
+                        InputField {
+                            id: localLlmModelField
+                            objectName: "localLlmModelField"
+                            Layout.fillWidth: true
+                            label: settingsBridge.localLlmBackend === "ollama" ? "Модель Ollama" : "Путь к GGUF"
+                            text: settingsBridge.localLlmModel
+                            placeholderText: settingsBridge.localLlmBackend === "ollama"
+                                             ? "llama3.2:1b"
+                                             : "C:/models/llama-3.1-8b-instruct-q4_k_m.gguf"
+                            onTextChanged: settingsBridge.localLlmModel = text
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: settingsBridge.localReadiness
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                            wrapMode: Text.WordWrap
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            SecondaryButton {
+                                text: settingsBridge.localLlmBackend === "ollama" ? "Открыть Ollama" : "Открыть llama.cpp"
+                                onClicked: Qt.openUrlExternally(
+                                               settingsBridge.localLlmBackend === "ollama"
+                                               ? "https://docs.ollama.com/"
+                                               : "https://github.com/abetlen/llama-cpp-python"
+                                           )
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: settingsBridge.localLlmBackend === "ollama"
+                                      ? "Установите Ollama, скачайте модель и укажите её имя."
+                                      : "Установите llama-cpp-python, скачайте .gguf и укажите путь к файлу."
+                                color: Theme.Colors.textSoft
+                                font.family: Theme.Typography.bodyFamily
+                                font.pixelSize: Theme.Typography.micro
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Ручные маршруты"
+                    description: "Только если вам действительно нужен ручной выбор."
+                    helpText: "Ручной выбор нужен только опытным пользователям."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        AppComboBox {
+                            id: textBackendOverrideCombo
+                            objectName: "textBackendOverrideCombo"
+                            Layout.preferredWidth: 320
+                            model: settingsBridge.textBackendOverrideOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.textBackendOverride))
+                            onActivated: (index) => settingsBridge.textBackendOverride = model[index].key
+                        }
+
+                        AppComboBox {
+                            id: sttBackendOverrideCombo
+                            objectName: "sttBackendOverrideCombo"
+                            Layout.preferredWidth: 320
+                            model: settingsBridge.sttBackendOverrideOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.sttBackendOverride))
+                            onActivated: (index) => settingsBridge.sttBackendOverride = model[index].key
+                        }
+                    }
+                }
+            }
+
+            SettingsSection {
+                Layout.fillWidth: true
                 title: "Обновления"
                 description: "Версия, канал и проверка релиза на GitHub."
                 expanded: false
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? settingsRoot.helpRequested("Обновления — проверка версии и открытие релиза. Это самый нижний раздел, когда всё остальное уже настроено.") : settingsRoot.helpCleared()
+                }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Статус"
                     description: settingsBridge.updateSummary
+                    helpText: "Показывает текущую версию и позволяет проверить обновление."
+                    onHelpRequested: function(helpText) { settingsRoot.helpRequested(helpText) }
+                    onHelpCleared: function() { settingsRoot.helpCleared() }
 
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -508,134 +724,6 @@ Rectangle {
                                 wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
                             }
-                        }
-                    }
-                }
-            }
-
-            SettingsSection {
-                Layout.fillWidth: true
-                title: "Для опытных"
-                description: "Дополнительные провайдеры и локальная модель. Открывайте только если это действительно нужно."
-                expanded: false
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Gemini"
-                    description: "Дополнительный ключ для более качественных ответов."
-
-                    InputField {
-                        id: geminiConnectionField
-                        objectName: "settingsGeminiField"
-                        Layout.fillWidth: true
-                        label: "Ключ Gemini"
-                        text: settingsBridge.geminiApiKey
-                        placeholderText: "Вставьте ключ Gemini"
-                        secret: true
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Cerebras"
-                    description: "Дополнительный быстрый ключ."
-
-                    InputField {
-                        id: cerebrasConnectionField
-                        objectName: "settingsCerebrasField"
-                        Layout.fillWidth: true
-                        label: "Ключ Cerebras"
-                        text: settingsBridge.cerebrasApiKey
-                        placeholderText: "Вставьте ключ Cerebras"
-                        secret: true
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "OpenRouter"
-                    description: "Резервный провайдер для дополнительных моделей."
-
-                    InputField {
-                        id: openrouterConnectionField
-                        objectName: "settingsOpenRouterField"
-                        Layout.fillWidth: true
-                        label: "Ключ OpenRouter"
-                        text: settingsBridge.openrouterApiKey
-                        placeholderText: "Вставьте ключ OpenRouter"
-                        secret: true
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Локальная модель"
-                    description: "Если хотите приватный локальный текстовый режим."
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        AppComboBox {
-                            id: localLlmBackendCombo
-                            objectName: "localLlmBackendCombo"
-                            Layout.preferredWidth: 280
-                            model: settingsBridge.localLlmBackendOptions
-                            textRole: "title"
-                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.localLlmBackend))
-                            onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
-                        }
-
-                        InputField {
-                            id: localLlmModelField
-                            objectName: "localLlmModelField"
-                            Layout.fillWidth: true
-                            label: settingsBridge.localLlmBackend === "ollama" ? "Модель Ollama" : "Путь к GGUF"
-                            text: settingsBridge.localLlmModel
-                            placeholderText: settingsBridge.localLlmBackend === "ollama"
-                                             ? "llama3.1:8b"
-                                             : "C:/models/llama-3.1-8b-instruct-q4_k_m.gguf"
-                            onTextChanged: settingsBridge.localLlmModel = text
-                        }
-
-                        Text {
-                            Layout.fillWidth: true
-                            text: settingsBridge.localReadiness
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WordWrap
-                        }
-                    }
-                }
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Ручные маршруты"
-                    description: "Только если вам действительно нужен ручной выбор backend."
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        AppComboBox {
-                            id: textBackendOverrideCombo
-                            objectName: "textBackendOverrideCombo"
-                            Layout.preferredWidth: 320
-                            model: settingsBridge.textBackendOverrideOptions
-                            textRole: "title"
-                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.textBackendOverride))
-                            onActivated: (index) => settingsBridge.textBackendOverride = model[index].key
-                        }
-
-                        AppComboBox {
-                            id: sttBackendOverrideCombo
-                            objectName: "sttBackendOverrideCombo"
-                            Layout.preferredWidth: 320
-                            model: settingsBridge.sttBackendOverrideOptions
-                            textRole: "title"
-                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.sttBackendOverride))
-                            onActivated: (index) => settingsBridge.sttBackendOverride = model[index].key
                         }
                     }
                 }

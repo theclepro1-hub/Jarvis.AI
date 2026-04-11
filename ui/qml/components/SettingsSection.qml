@@ -7,16 +7,38 @@ Rectangle {
 
     property string title: ""
     property string description: ""
+    property string helpText: description
     property bool expanded: false
     default property alias content: contentColumn.data
 
     signal toggled(bool expanded)
+    signal helpRequested(string text)
+    signal helpCleared()
 
     color: Theme.Colors.card
     radius: 24
     border.color: Theme.Colors.borderSoft
     border.width: 1
     implicitHeight: wrapper.implicitHeight + 28
+
+    HoverHandler {
+        onHoveredChanged: {
+            if (hovered && root.helpText.length > 0) {
+                root.helpRequested(root.helpText)
+            } else {
+                root.helpCleared()
+            }
+        }
+    }
+
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: {
+            if (root.helpText.length > 0) {
+                root.helpRequested(root.helpText)
+            }
+        }
+    }
 
     ColumnLayout {
         id: wrapper
@@ -35,6 +57,9 @@ Rectangle {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
+                    if (root.helpText.length > 0) {
+                        root.helpRequested(root.helpText)
+                    }
                     root.expanded = !root.expanded
                     root.toggled(root.expanded)
                 }
@@ -74,7 +99,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: root.expanded ? "▾" : "▸"
+                        text: root.expanded ? "v" : ">"
                         color: Theme.Colors.accent
                         font.family: Theme.Typography.displayFamily
                         font.pixelSize: 22

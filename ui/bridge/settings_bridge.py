@@ -166,22 +166,10 @@ class SettingsBridge(QObject):
     def _local_readiness_text(self) -> str:
         from core.ai.local_llm_service import LocalLLMService
 
-        status = LocalLLMService(self.services.settings).status()
-        if status.ready:
-            return "Локальная модель готова."
-        if status.backend == "ollama":
-            if not status.model_path:
-                return "Укажите модель Ollama, чтобы включить локальный режим."
-            if "not installed" in status.detail.casefold():
-                return "Модель Ollama ещё не скачана на этот компьютер."
-            return "Ollama сейчас недоступен."
-        if not status.model_path:
-            return "Добавьте .gguf-модель, чтобы включить приватный режим."
-        if "not found" in status.detail.casefold():
-            return "Файл .gguf не найден."
-        if "llama_cpp is not installed" in status.detail:
-            return "Нужен пакет llama-cpp-python и .gguf-модель."
-        return "Локальная модель пока не готова."
+        diagnostics = LocalLLMService(self.services.settings).diagnostics()
+        if diagnostics.status.ready:
+            return diagnostics.summary
+        return f"{diagnostics.summary} {diagnostics.next_step}".strip()
 
     def _outside_text(self, policy) -> str:  # noqa: ANN202
         if policy.mode == "private":
@@ -509,6 +497,7 @@ class SettingsBridge(QObject):
     @Property("QVariantList", notify=assistantStatusChanged)
     def localLlmBackendOptions(self) -> list[dict[str, str]]:
         return [
+            {"key": "auto", "title": "Авто"},
             {"key": "llama_cpp", "title": "llama.cpp"},
             {"key": "ollama", "title": "Ollama"},
         ]
@@ -552,14 +541,14 @@ class SettingsBridge(QObject):
     @Property(str, notify=assistantStatusChanged)
     def localLlmBackend(self) -> str:
         backend = str(self.services.settings.get("local_llm_backend", DEFAULT_LOCAL_LLM_BACKEND) or "").strip().casefold()
-        if backend not in {"llama_cpp", "ollama"}:
+        if backend not in {"auto", "llama_cpp", "ollama"}:
             return DEFAULT_LOCAL_LLM_BACKEND
         return backend
 
     @localLlmBackend.setter
     def localLlmBackend(self, value: str) -> None:
         backend = str(value or "").strip().casefold()
-        if backend not in {"llama_cpp", "ollama"}:
+        if backend not in {"auto", "llama_cpp", "ollama"}:
             backend = DEFAULT_LOCAL_LLM_BACKEND
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("local_llm_backend", backend)

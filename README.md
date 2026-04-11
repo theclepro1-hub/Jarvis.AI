@@ -61,6 +61,7 @@ If you omit `-InstallerOnly`, the build script still produces the local `onefile
 
 ## Release Notes
 
+- [Release 22.5.5](docs/RELEASE_22.5.5.md)
 - [Release 22.5.0](docs/RELEASE_22.5.0.md)
 - [Release 22.4.5](docs/RELEASE_22.4.5.md)
 - [Release 22.2.0](docs/RELEASE_22.2.0.md)

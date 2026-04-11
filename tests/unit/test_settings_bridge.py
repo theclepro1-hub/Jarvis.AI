@@ -173,6 +173,7 @@ def test_settings_bridge_exposes_assistant_status_and_advanced_options() -> None
     assert status["privacy"] == "Только локально"
     assert status["summary"].startswith("Режим: Приватный")
     assert bridge.localLlmBackendOptions == [
+        {"key": "auto", "title": "Авто"},
         {"key": "llama_cpp", "title": "llama.cpp"},
         {"key": "ollama", "title": "Ollama"},
     ]
@@ -190,3 +191,30 @@ def test_settings_bridge_private_mode_rejects_cloud_overrides() -> None:
 
     assert bridge.textBackendOverride == "local_llama"
     assert bridge.sttBackendOverride == "auto"
+
+
+def test_settings_bridge_guides_ollama_setup_with_real_model_example() -> None:
+    class FakeDiagnostics:
+        def __init__(self, summary: str, next_step: str, ready: bool = False) -> None:
+            self.summary = summary
+            self.next_step = next_step
+            self.status = SimpleNamespace(ready=ready)
+
+    def fake_diagnostics(_self):  # noqa: ANN001
+        return FakeDiagnostics("Ollama не настроена.", "Укажите модель, например llama3.2:1b.")
+
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    from core.ai import local_llm_service as llm_module
+
+    original_diagnostics = llm_module.LocalLLMService.diagnostics
+    llm_module.LocalLLMService.diagnostics = fake_diagnostics
+    try:
+        bridge.localLlmBackend = "ollama"
+
+        assert bridge.localReadiness == "Ollama не настроена. Укажите модель, например llama3.2:1b."
+    finally:
+        llm_module.LocalLLMService.diagnostics = original_diagnostics

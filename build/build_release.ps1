@@ -164,6 +164,12 @@ if ($InstallerOnly) {
     Write-Host "RELEASE_MODE installer-only"
 }
 
+$releaseNotesPath = Join-Path $root ("docs\\RELEASE_{0}.md" -f $version)
+if (!(Test-Path $releaseNotesPath)) {
+    throw "Release notes missing for $version: $releaseNotesPath"
+}
+Write-Host "RELEASE_NOTES_OK $releaseNotesPath"
+
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionInfoFile) | Out-Null
 $versionInfoContent = @"
 # UTF-8

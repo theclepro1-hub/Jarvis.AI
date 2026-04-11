@@ -5,7 +5,11 @@ import "../theme" as Theme
 import "../components"
 
 Rectangle {
+    id: root
     color: "transparent"
+
+    signal helpRequested(string text)
+    signal helpCleared()
 
     Flickable {
         id: registrationScroll
@@ -36,6 +40,10 @@ Rectangle {
                 border.width: 1
                 implicitHeight: form.implicitHeight + 48
 
+                HoverHandler {
+                    onHoveredChanged: hovered ? root.helpRequested("Сначала заполните Groq и Telegram, а режим AI выберите в самом конце формы.") : root.helpCleared()
+                }
+
                 ColumnLayout {
                     id: form
                     anchors.fill: parent
@@ -63,46 +71,6 @@ Rectangle {
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Режим AI можно выбрать сразу и поменять позже в настройках одним кликом."
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Режим AI"
-                        color: Theme.Colors.text
-                        font.family: Theme.Typography.displayFamily
-                        font.pixelSize: Theme.Typography.small
-                        font.bold: true
-                    }
-
-                    AppComboBox {
-                        id: registrationAssistantModeCombo
-                        objectName: "registrationAssistantModeCombo"
-                        Layout.preferredWidth: 320
-                        model: settingsBridge.assistantModeOptions
-                        textRole: "title"
-                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.assistantMode))
-                        onActivated: (index) => settingsBridge.assistantMode = model[index].key
-                    }
-
-                    StatusPill {
-                        text: settingsBridge.assistantUserStatus
-                    }
-
-                    Text {
-                        text: settingsBridge.assistantModeSummary
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
@@ -167,6 +135,37 @@ Rectangle {
                         wrapMode: Text.WrapAnywhere
                         Layout.fillWidth: true
                         onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                    }
+
+                    Text {
+                        text: "Режим AI"
+                        color: Theme.Colors.text
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: Theme.Typography.small
+                        font.bold: true
+                    }
+
+                    AppComboBox {
+                        id: registrationAssistantModeCombo
+                        objectName: "registrationAssistantModeCombo"
+                        Layout.preferredWidth: 320
+                        model: settingsBridge.assistantModeOptions
+                        textRole: "title"
+                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.assistantMode))
+                        onActivated: (index) => settingsBridge.assistantMode = model[index].key
+                    }
+
+                    StatusPill {
+                        text: settingsBridge.assistantUserStatus
+                    }
+
+                    Text {
+                        text: settingsBridge.assistantModeSummary
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
 
                     RowLayout {

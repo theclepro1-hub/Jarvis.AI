@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -261,6 +262,24 @@ def _find_popup(root: QObject) -> QObject:
     raise AssertionError("Popup object not found")
 
 
+def _read_qml_screen(name: str) -> str:
+    return (Path(__file__).resolve().parents[2] / "ui" / "qml" / "screens" / name).read_text(encoding="utf-8")
+
+
+def _read_qml_file(*parts: str) -> str:
+    return (Path(__file__).resolve().parents[2] / "ui" / "qml" / Path(*parts)).read_text(encoding="utf-8")
+
+
+def _find_item_with_title(root: QObject, title: str) -> QObject:
+    for item in _walk_items(root):
+        try:
+            if item.property("title") == title:
+                return item
+        except RuntimeError:
+            pass
+    raise AssertionError(f"Item with title not found: {title}")
+
+
 def _complete_registration(app: QGuiApplication, runtime, window) -> None:
     if runtime.state.currentScreen != "registration":
         return
@@ -274,6 +293,14 @@ def _click(app: QGuiApplication, window, obj: QObject) -> None:
     position = QPoint(int(center.x()), int(center.y()))
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, position)
     _pump(app)
+
+
+def _hover(app: QGuiApplication, window, obj: QObject) -> None:
+    assert isinstance(obj, QQuickItem)
+    center = obj.mapToScene(obj.boundingRect().center())
+    position = QPoint(int(center.x()), int(center.y()))
+    QTest.mouseMove(window, position)
+    _pump(app, 120)
 
 
 def _wheel(app: QGuiApplication, window, obj: QObject, delta_y: int) -> None:
@@ -374,6 +401,21 @@ def test_registration_continue_requires_all_fields_and_shows_feedback(ui_runtime
 
     assert runtime.state.currentScreen == "chat"
     assert "Подключения сохранены" in runtime.registration_bridge.feedback
+
+
+def test_registration_mode_is_last_step_in_the_form() -> None:
+    source = _read_qml_screen("RegistrationScreen.qml")
+
+    mode_index = source.index('objectName: "registrationAssistantModeCombo"')
+    groq_index = source.index('objectName: "groqField"')
+    token_index = source.index('objectName: "botTokenField"')
+    user_id_index = source.index('objectName: "userIdField"')
+    save_index = source.index('objectName: "registrationSaveButton"')
+
+    assert mode_index > groq_index
+    assert mode_index > token_index
+    assert mode_index > user_id_index
+    assert mode_index < save_index
 
 
 def test_chat_welcome_message_renders_and_ctrl_v_works(ui_runtime) -> None:
@@ -494,7 +536,10 @@ def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
     _complete_registration(app, runtime, window)
     _click(app, window, _find(window, "navButton_settings"))
     _wait_for(app, lambda: runtime.state.currentScreen == "settings")
-    _wait_for_object(app, window, "sidebarNubikImage")
+    _wait_for_object(app, window, "sidebarRoot")
+    _wait_for_object(app, window, "nubik_voice")
+    _wait_for_object(app, window, "nubik_apps")
+    _wait_for_object(app, window, "nubik_connections")
 
     theme_combo = _wait_for_object(app, window, "themeCombo")
     assert theme_combo.property("count") >= 2
@@ -516,6 +561,92 @@ def test_settings_theme_and_sidebar_nubik_are_present(ui_runtime) -> None:
 
     _click(app, window, _find(window, "voiceUnderstandingTestButton"))
     assert runtime.voice_bridge.testResult
+
+
+def test_settings_help_surfaces_work_for_tabs_cards_and_rows(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _complete_registration(app, runtime, window)
+    _click(app, window, _find(window, "navButton_settings"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+
+    _wait_for_object(app, window, "sidebarRoot")
+    _wait_for_object(app, window, "nubik_voice")
+    _wait_for_object(app, window, "nubik_apps")
+    _wait_for_object(app, window, "nubik_connections")
+
+    sidebar_source = _read_qml_file("components", "Sidebar.qml")
+    source = _read_qml_screen("SettingsScreen.qml")
+
+    assert 'root.hoverHelpText = "????? ? ??? ?????????, ????????? ? ???????."' in sidebar_source
+    assert 'root.hoverHelpText = "????????? ? ???????????, ??????, ????? ? ??????? ???."' in sidebar_source
+    assert 'helpText: "???????? ?????? ????? ??????. ??????????? ????????? ??????????? ?????????????."' in source
+    assert 'helpText: "???? Groq ????? ??? ??????? ???????? ???????."' in source
+    assert 'helpText: "?????????? ??????? ?????? ? ????????? ????????? ??????????."' in source
+
+    sidebar_root = _find(window, "sidebarRoot")
+    _hover(app, window, _find(window, "navButton_voice"))
+    _wait_for(app, lambda: sidebar_root.property("visibleHelpText") == "????? ? ??? ?????????, ????????? ? ???????.")
+    assert sidebar_root.property("visibleHelpText") == "????? ? ??? ?????????, ????????? ? ???????."
+
+    assistant_section = _find_item_with_title(window, "????? ??????????")
+    assert assistant_section.property("helpText") == "???? ??????? ?????: ???????, ???????????, ????? ??? ?????????."
+    _hover(app, window, assistant_section)
+    _wait_for(
+        app,
+        lambda: window.property("contextHelpText") == "????? ?????????? ? ???? ??????? ?????. ??? ????????? ??????????? ?????????????.",
+    )
+    assert window.property("contextHelpText") == "????? ?????????? ? ???? ??????? ?????. ??? ????????? ??????????? ?????????????."
+
+    connections_section = _find_item_with_title(window, "???????????")
+    assert connections_section.property("helpText") == "??? ?????? ????? Groq ? Telegram. ?????????????? ????? ???????? ????."
+    _click(app, window, connections_section)
+    _wait_for(app, lambda: bool(connections_section.property("expanded")))
+
+    groq_row = _find_item_with_title(window, "Groq")
+    assert groq_row.property("helpText") == "???? Groq ????? ??? ??????? ???????? ???????."
+    _hover(app, window, groq_row)
+    _wait_for(app, lambda: window.property("contextHelpText") == "???? Groq ????? ??? ??????? ???????? ???????.")
+    assert window.property("contextHelpText") == "???? Groq ????? ??? ??????? ???????? ???????."
+
+
+def test_settings_sections_are_closed_by_default() -> None:
+    source = _read_qml_screen("SettingsScreen.qml")
+
+    assert "expanded: true" not in source
+    assert source.count("expanded: false") >= 7
+
+    section_titles = [
+        match.group(1)
+        for line in source.splitlines()
+        if (match := re.match(r'^ {16}title: "([^"]+)"$', line)) is not None
+    ]
+
+    assert section_titles[-2:] == ["Для опытных", "Обновления"]
+    assert section_titles.index("Для опытных") < section_titles.index("Обновления")
+
+
+def test_old_debug_strings_do_not_appear_in_ui_sources() -> None:
+    sources = [
+        _read_qml_screen("RegistrationScreen.qml"),
+        _read_qml_screen("SettingsScreen.qml"),
+        _read_qml_screen("VoiceScreen.qml"),
+    ]
+    banned_strings = [
+        "registrationSkipButton",
+        "skipForNow",
+        "Advanced routing",
+        "Cloud model id",
+        "wake local",
+        "STT route",
+        "Text route",
+        "local_llama ->",
+        "local-first with fallback",
+    ]
+
+    for source in sources:
+        for needle in banned_strings:
+            assert needle not in source
 
 
 def test_settings_connections_can_update_registration_fields(ui_runtime) -> None:
@@ -560,20 +691,20 @@ def test_settings_assistant_mode_propagates_to_voice_and_privacy_state(ui_runtim
     assert runtime.voice_bridge.assistantStatus["mode"] == "private"
 
 
-def test_settings_updates_section_stays_last(ui_runtime) -> None:
-    app, runtime, window = ui_runtime
+def test_settings_advanced_section_precedes_updates() -> None:
+    lines = _read_qml_screen("SettingsScreen.qml").splitlines()
 
-    _complete_registration(app, runtime, window)
-    _click(app, window, _find(window, "navButton_settings"))
-    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+    def line_for(title: str) -> int:
+        needle = f'title: "{title}"'
+        for index, line in enumerate(lines, 1):
+            if needle in line:
+                return index
+        raise AssertionError(f"Missing section title: {title}")
 
-    settings_screen = Path(__file__).resolve().parents[2] / "ui" / "qml" / "screens" / "SettingsScreen.qml"
-    source = settings_screen.read_text(encoding="utf-8")
+    updates_line = line_for("Обновления")
+    advanced_line = line_for("Дополнительно") if any('title: "Дополнительно"' in line for line in lines) else line_for("Для опытных")
 
-    appearance_index = source.index('title: "Внешний вид"')
-    updates_index = source.index('title: "Обновления"')
-
-    assert updates_index > appearance_index
+    assert advanced_line < updates_line
 
 
 def test_settings_ai_profile_menu_excludes_local_ai(ui_runtime) -> None:
@@ -716,12 +847,6 @@ def test_chat_execution_card_renders_steps(ui_runtime) -> None:
     _find_by_text(window, messages[-1]["text"])
     _find_by_text(window, messages[-1]["steps"][0]["title"])
     _find_by_text(window, messages[-1]["steps"][1]["title"])
-
-    _click(app, window, _find(window, "clearChatButton"))
-    _pump(app, 160)
-
-    assert len(runtime.chat_bridge.messages) == 1
-    assert runtime.chat_bridge.messages[0]["role"] == "assistant"
 
 
 def test_apps_screen_has_group_tabs_and_music_default_switch(ui_runtime) -> None:

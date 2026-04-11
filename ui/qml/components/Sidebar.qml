@@ -13,7 +13,7 @@ Rectangle {
     property string hoverHelpText: ""
     signal navigate(string screen)
 
-    readonly property string defaultHelpText: "Наведи на раздел, и я коротко объясню, что он делает."
+    readonly property string defaultHelpText: "Наведи на вкладку, плашку, секцию или кнопку, и я коротко объясню, что это делает."
     readonly property string visibleHelpText: hoverHelpText.length > 0
                                            ? hoverHelpText
                                            : (contextHelpText.length > 0 ? contextHelpText : defaultHelpText)
@@ -106,43 +106,12 @@ Rectangle {
 
         Item { Layout.fillHeight: true }
 
-        ColumnLayout {
+        SettingsGuideNubik {
             Layout.fillWidth: true
-            spacing: 10
-
-            Image {
-                objectName: "sidebarNubikImage"
-                source: "../../../assets/images/nubik.png"
-                Layout.alignment: Qt.AlignHCenter
-                Layout.preferredWidth: 118
-                Layout.preferredHeight: 118
-                sourceSize.width: 180
-                sourceSize.height: 180
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-                mipmap: true
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: Math.max(70, nubikHelp.implicitHeight + 24)
-                radius: Theme.Spacing.radiusSmall
-                color: Theme.Colors.cardAlt
-                border.color: Theme.Colors.borderSoft
-                border.width: 1
-
-                Text {
-                    id: nubikHelp
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    text: root.visibleHelpText
-                    color: Theme.Colors.textSoft
-                    font.family: Theme.Typography.bodyFamily
-                    font.pixelSize: Theme.Typography.micro
-                    wrapMode: Text.WordWrap
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
+            helperText: root.visibleHelpText
+            onOpenVoice: root.navigate("voice")
+            onOpenApps: root.navigate("apps")
+            onOpenConnections: root.navigate("settings")
         }
     }
 }

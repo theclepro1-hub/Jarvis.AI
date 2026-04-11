@@ -13,6 +13,19 @@ Run from `C:\JarvisAi_Unity`:
 powershell -ExecutionPolicy Bypass -File .\build\build_release.ps1
 ```
 
+## Fast Installer/App Smoke
+
+Use this before release if you want a short yes/no pass:
+
+1. Build the installer and confirm the release artifact is produced.
+2. Install or launch the packaged app from the fresh build output.
+3. Open the app and confirm the first screen is registration, not chat or settings.
+4. Verify the registration form is short, has no skip action, and the assistant mode choice sits at the end of the form.
+5. Complete registration with test credentials and confirm the app lands in chat.
+6. Open Settings and confirm the main sections are collapsed by default, with only the top-level sections visible first.
+7. Open Voice and confirm the wake/status text is short and does not expose route/debug jargon in the default view.
+8. Open Apps and confirm the screen is usable without layout overflow or duplicate junk entries.
+
 ## Smoke
 
 Portable smoke:

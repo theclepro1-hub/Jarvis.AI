@@ -29,6 +29,15 @@ Rectangle {
         }
     }
 
+    TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: {
+            if (root.helpText.length > 0) {
+                root.helpRequested(root.helpText)
+            }
+        }
+    }
+
     ColumnLayout {
         id: wrapper
         anchors.fill: parent

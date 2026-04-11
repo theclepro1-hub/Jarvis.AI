@@ -9,6 +9,9 @@ Rectangle {
     color: "transparent"
     property bool voiceActionBusy: voiceBridge.isRecording || voiceActionCooldown.running
 
+    signal helpRequested(string text)
+    signal helpCleared()
+
     Timer {
         id: voiceActionCooldown
         interval: 1200
@@ -66,6 +69,10 @@ Rectangle {
                 border.width: 1
                 implicitHeight: modeColumn.implicitHeight + 24
 
+                HoverHandler {
+                    onHoveredChanged: hovered ? voiceRoot.helpRequested("Режим голоса подбирает поведение автоматически: быстрый, стандартный, умный или приватный.") : voiceRoot.helpCleared()
+                }
+
                 ColumnLayout {
                     id: modeColumn
                     anchors.fill: parent
@@ -109,6 +116,9 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Слово активации"
                 description: "JARVIS слушает «Джарвис» локально и не должен засорять интерфейс служебными статусами."
+                helpText: "Включает или выключает локальное слово активации."
+                onHelpRequested: function(helpText) { voiceRoot.helpRequested(helpText) }
+                onHelpCleared: function() { voiceRoot.helpCleared() }
 
                 Item { Layout.fillWidth: true }
 
@@ -124,6 +134,9 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Микрофон"
                 description: "Выберите устройство, через которое JARVIS слушает ручной микрофон и слово активации."
+                helpText: "Выбирает микрофон для ручного ввода и слова активации."
+                onHelpRequested: function(helpText) { voiceRoot.helpRequested(helpText) }
+                onHelpCleared: function() { voiceRoot.helpCleared() }
 
                 Item { Layout.fillWidth: true }
 
@@ -142,6 +155,9 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Куда говорить"
                 description: "Выберите колонки или наушники для голоса JARVIS."
+                helpText: "Выбирает устройство для озвучки ответов."
+                onHelpRequested: function(helpText) { voiceRoot.helpRequested(helpText) }
+                onHelpCleared: function() { voiceRoot.helpCleared() }
 
                 Item { Layout.fillWidth: true }
 
@@ -175,6 +191,10 @@ Rectangle {
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
                 implicitHeight: checkColumn.implicitHeight + 24
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? voiceRoot.helpRequested("Проверка показывает, как JARVIS понял фразу, не выполняя действие.") : voiceRoot.helpCleared()
+                }
 
                 ColumnLayout {
                     id: checkColumn
@@ -244,6 +264,9 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Голос JARVIS"
                 description: "Озвучка ответов и выбор голоса. Если что-то недоступно, JARVIS так и пишет."
+                helpText: "Включает озвучку и выбор голоса JARVIS."
+                onHelpRequested: function(helpText) { voiceRoot.helpRequested(helpText) }
+                onHelpCleared: function() { voiceRoot.helpCleared() }
 
                 AppSwitch {
                     id: voiceResponseSwitch
@@ -274,6 +297,10 @@ Rectangle {
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
                 implicitHeight: statusColumn.implicitHeight + 24
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? voiceRoot.helpRequested("Короткий статус по слову активации, распознаванию и озвучке.") : voiceRoot.helpCleared()
+                }
 
                 ColumnLayout {
                     id: statusColumn
@@ -322,6 +349,9 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Сценарий команды"
                 description: "Основной режим: «Джарвис + команда» одной фразой. Два шага оставлены для шумной среды."
+                helpText: "Выбирает, одной фразой ли работает команда или в два шага."
+                onHelpRequested: function(helpText) { voiceRoot.helpRequested(helpText) }
+                onHelpCleared: function() { voiceRoot.helpCleared() }
 
                 Item { Layout.fillWidth: true }
 
@@ -343,6 +373,9 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Скорость и громкость"
                 description: "Три понятных пресета для голоса JARVIS без технических ручек."
+                helpText: "Быстрые пресеты для скорости и громкости голоса."
+                onHelpRequested: function(helpText) { voiceRoot.helpRequested(helpText) }
+                onHelpCleared: function() { voiceRoot.helpCleared() }
 
                 Item { Layout.fillWidth: true }
 

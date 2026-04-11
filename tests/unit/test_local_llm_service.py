@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.ai.local_llm_service import LocalLLMService, LocalLLMUnavailableError
+from core.ai.local_llm_service import LocalLLMService, LocalLLMStatus, LocalLLMUnavailableError
 
 
 class FakeSettings:
@@ -86,6 +86,29 @@ def test_ollama_status_reports_missing_model_when_daemon_is_up(monkeypatch: pyte
     assert calls == [("get", "/api/tags")]
 
 
+def test_ollama_diagnostics_suggests_pull_when_model_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+        def get(self, path: str, **_kwargs):
+            calls.append(("get", path))
+            return FakeResponse({"models": []})
+
+    monkeypatch.setattr("core.ai.local_llm_service.httpx.Client", FakeClient)
+
+    service = LocalLLMService(FakeSettings({"local_llm_backend": "ollama", "local_llm_model": "llama3.2:1b"}))
+    diagnostics = service.diagnostics()
+
+    assert diagnostics.status.ready is False
+    assert diagnostics.status.backend == "ollama"
+    assert diagnostics.summary == "Ollama запущена, но модели llama3.2:1b нет."
+    assert diagnostics.next_step == "Выполните `ollama pull llama3.2:1b`."
+    assert calls == [("get", "/api/tags")]
+
+
 def test_ollama_generate_uses_chat_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, dict[str, object] | None]] = []
 
@@ -120,8 +143,55 @@ def test_ollama_generate_uses_chat_endpoint(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls[1][1] == "/api/chat"
 
 
+def test_llama_cpp_configuration_falls_back_to_ollama_when_model_is_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, dict[str, object] | None]] = []
+    monkeypatch.setattr("core.ai.local_llm_service.importlib.util.find_spec", lambda _name: None)
+
+    class FakeClient:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+        def get(self, path: str, **_kwargs):
+            calls.append(("get", path, None))
+            return FakeResponse({"models": [{"name": "llama3.2:1b"}]})
+
+        def post(self, path: str, *, json: dict[str, object] | None = None, **_kwargs):
+            calls.append(("post", path, json))
+            return FakeResponse({"message": {"content": "fallback reply"}})
+
+    monkeypatch.setattr("core.ai.local_llm_service.httpx.Client", FakeClient)
+
+    service = LocalLLMService(FakeSettings({"local_llm_backend": "llama_cpp", "local_llm_model": ""}))
+    status = service.status()
+
+    assert status.ready is True
+    assert status.backend == "ollama"
+    assert status.model_path == "llama3.2:1b"
+    assert service.generate([{"role": "user", "content": "hello"}]) == "fallback reply"
+    assert calls[0] == ("get", "/api/tags", None)
+    assert any(call[0] == "post" and call[1] == "/api/chat" for call in calls)
+
+
 def test_generate_refuses_when_service_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     service = LocalLLMService(FakeSettings({"local_llm_backend": "ollama", "local_llm_model": ""}))
+    monkeypatch.setattr(
+        service,
+        "status",
+        lambda: LocalLLMStatus(ready=False, backend="ollama", model_path="", detail="Ollama model is not configured."),
+    )
 
     with pytest.raises(LocalLLMUnavailableError, match="not configured"):
         service.generate([{"role": "user", "content": "hello"}])
+
+
+def test_llama_cpp_diagnostics_suggests_gguf_when_model_is_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("core.ai.local_llm_service.importlib.util.find_spec", lambda _name: None)
+
+    diagnostics = LocalLLMService(
+        FakeSettings({"local_llm_backend": "llama_cpp", "local_llm_model": str(tmp_path / "missing.gguf")})
+    ).diagnostics()
+
+    assert diagnostics.status.ready is False
+    assert diagnostics.status.backend == "llama_cpp"
+    assert diagnostics.summary == "Файл .gguf не найден."
+    assert diagnostics.next_step == "Проверьте путь к модели или скопируйте GGUF-файл на диск."

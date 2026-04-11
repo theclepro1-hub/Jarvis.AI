@@ -25,6 +25,13 @@ class LocalLLMStatus:
     detail: str
 
 
+@dataclass(frozen=True, slots=True)
+class LocalLLMDiagnostics:
+    status: LocalLLMStatus
+    summary: str
+    next_step: str
+
+
 class LocalLLMService:
     def __init__(self, settings_service) -> None:
         self.settings = settings_service
@@ -61,85 +68,21 @@ class LocalLLMService:
         status = self.status()
         return status.ready
 
+    def diagnostics(self) -> LocalLLMDiagnostics:
+        status = self.status()
+        summary, next_step = self._diagnostic_messages(status)
+        return LocalLLMDiagnostics(status=status, summary=summary, next_step=next_step)
+
     def status(self) -> LocalLLMStatus:
-        backend = self.backend()
-        model_ref = self.model_path()
-        if backend != "llama_cpp":
-            if backend != "ollama":
-                return LocalLLMStatus(
-                    ready=False,
-                    backend=backend,
-                    model_path=model_ref,
-                    detail="Unsupported local LLM backend.",
-                )
-            if not model_ref:
-                return LocalLLMStatus(
-                    ready=False,
-                    backend=backend,
-                    model_path="",
-                    detail="Ollama model is not configured.",
-                )
-            try:
-                client = self._client_for(backend, model_ref)
-                response = client.get("/api/tags")
-                response.raise_for_status()
-                payload = response.json()
-                if not isinstance(payload, dict):
-                    raise LocalLLMUnavailableError("Ollama API returned an invalid payload.")
-                if not self._ollama_model_is_installed(payload, model_ref):
-                    return LocalLLMStatus(
-                        ready=False,
-                        backend=backend,
-                        model_path=model_ref,
-                        detail="Ollama model is not installed on this machine.",
-                    )
-            except Exception as exc:  # noqa: BLE001
-                return LocalLLMStatus(
-                    ready=False,
-                    backend=backend,
-                    model_path=model_ref,
-                    detail=f"Ollama backend is not reachable: {self._describe_error(exc)}",
-                )
-            return LocalLLMStatus(
-                ready=True,
-                backend=backend,
-                model_path=model_ref,
-                detail="Ollama backend ready.",
-            )
-        if not model_ref:
-            return LocalLLMStatus(
-                ready=False,
-                backend=backend,
-                model_path="",
-                detail="Local Llama model is not configured.",
-            )
-        resolved = Path(model_ref).expanduser()
-        if resolved.suffix.casefold() != ".gguf":
-            return LocalLLMStatus(
-                ready=False,
-                backend=backend,
-                model_path=str(resolved),
-                detail="Local Llama model must be a .gguf file.",
-            )
-        if not resolved.is_file():
-            return LocalLLMStatus(
-                ready=False,
-                backend=backend,
-                model_path=str(resolved),
-                detail="Local Llama model file was not found.",
-            )
-        if importlib.util.find_spec("llama_cpp") is None:
-            return LocalLLMStatus(
-                ready=False,
-                backend=backend,
-                model_path=str(resolved),
-                detail="llama_cpp is not installed.",
-            )
-        return LocalLLMStatus(
-            ready=True,
-            backend=backend,
-            model_path=str(resolved),
-            detail="Local Llama backend ready.",
+        candidates = self._candidate_statuses()
+        for candidate in candidates:
+            if candidate.ready:
+                return candidate
+        return candidates[0] if candidates else LocalLLMStatus(
+            ready=False,
+            backend=self.backend(),
+            model_path=self.model_path(),
+            detail="Local LLM backend is not configured.",
         )
 
     def generate(
@@ -181,6 +124,90 @@ class LocalLLMService:
         )
         self._client_signature = signature
         return self._client
+
+    def _candidate_statuses(self) -> list[LocalLLMStatus]:
+        backend = self.backend()
+        model_ref = self.model_path()
+        if backend == "ollama":
+            return [self._ollama_status(model_ref), self._llama_cpp_status(model_ref)]
+        if backend == "auto":
+            return [self._ollama_status(model_ref), self._llama_cpp_status(model_ref)]
+        return [self._llama_cpp_status(model_ref), self._ollama_status(model_ref)]
+
+    def _llama_cpp_status(self, model_ref: str) -> LocalLLMStatus:
+        if not model_ref:
+            return LocalLLMStatus(
+                ready=False,
+                backend="llama_cpp",
+                model_path="",
+                detail="Local Llama model is not configured.",
+            )
+        resolved = Path(model_ref).expanduser()
+        if resolved.suffix.casefold() != ".gguf":
+            return LocalLLMStatus(
+                ready=False,
+                backend="llama_cpp",
+                model_path=str(resolved),
+                detail="Local Llama model must be a .gguf file.",
+            )
+        if not resolved.is_file():
+            return LocalLLMStatus(
+                ready=False,
+                backend="llama_cpp",
+                model_path=str(resolved),
+                detail="Local Llama model file was not found.",
+            )
+        if importlib.util.find_spec("llama_cpp") is None:
+            return LocalLLMStatus(
+                ready=False,
+                backend="llama_cpp",
+                model_path=str(resolved),
+                detail="llama_cpp is not installed.",
+            )
+        return LocalLLMStatus(
+            ready=True,
+            backend="llama_cpp",
+            model_path=str(resolved),
+            detail="Local Llama backend ready.",
+        )
+
+    def _ollama_status(self, model_ref: str) -> LocalLLMStatus:
+        try:
+            client = self._client_for("ollama", model_ref)
+            response = client.get("/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise LocalLLMUnavailableError("Ollama API returned an invalid payload.")
+            installed_models = self._ollama_models(payload)
+            selected_model = self._resolve_ollama_model(model_ref, installed_models)
+            if not selected_model:
+                return LocalLLMStatus(
+                    ready=False,
+                    backend="ollama",
+                    model_path=model_ref,
+                    detail="Ollama model is not configured.",
+                )
+            if selected_model not in installed_models:
+                return LocalLLMStatus(
+                    ready=False,
+                    backend="ollama",
+                    model_path=selected_model,
+                    detail="Ollama model is not installed on this machine.",
+                )
+        except Exception as exc:  # noqa: BLE001
+            return LocalLLMStatus(
+                ready=False,
+                backend="ollama",
+                model_path=model_ref,
+                detail=f"Ollama backend is not reachable: {self._describe_error(exc)}",
+            )
+        return LocalLLMStatus(
+            ready=True,
+            backend="ollama",
+            model_path=selected_model,
+            detail="Ollama backend ready.",
+        )
 
     def _generate_with_llama_cpp(
         self,
@@ -270,23 +297,72 @@ class LocalLLMService:
             return exc.__class__.__name__
         return exc.__class__.__name__
 
+    def _diagnostic_messages(self, status: LocalLLMStatus) -> tuple[str, str]:
+        backend = status.backend
+        model_ref = status.model_path
+        detail = status.detail.casefold()
+        model_label = self._status_model_label(status)
+
+        if status.ready:
+            if backend == "ollama":
+                return f"Ollama готова: {model_label}.", "Можно включать приватный режим."
+            return f"Local Llama готова: {model_label}.", "Можно включать приватный режим."
+
+        if backend == "ollama":
+            if not model_ref:
+                return "Ollama не настроена.", "Укажите модель, например llama3.2:1b."
+            if "not installed" in detail:
+                return f"Ollama запущена, но модели {model_label} нет.", f"Выполните `ollama pull {model_ref}`."
+            if "not reachable" in detail:
+                return "Ollama сейчас недоступна.", "Запустите Ollama Desktop или `ollama serve`."
+            return "Ollama не готова.", "Проверьте `ollama list` и состояние daemon."
+
+        if backend == "llama_cpp":
+            if not model_ref:
+                return "Local Llama не настроена.", "Укажите путь к .gguf-модели."
+            if "must be a .gguf file" in detail:
+                return "Нужен файл .gguf.", "Выберите локальную GGUF-модель."
+            if "not found" in detail:
+                return "Файл .gguf не найден.", "Проверьте путь к модели или скопируйте GGUF-файл на диск."
+            if "llama_cpp is not installed" in detail:
+                return "llama-cpp-python не установлен.", "Установите пакет llama-cpp-python и укажите .gguf-модель."
+            return "Local Llama не готова.", "Проверьте путь к .gguf-модели и пакет llama-cpp-python."
+
+        return "Локальный LLM-бэкенд не готов.", "Выберите llama_cpp или ollama."
+
+    def _status_model_label(self, status: LocalLLMStatus) -> str:
+        model_ref = str(status.model_path or "").strip()
+        if not model_ref:
+            return self.backend_label()
+        if status.backend == "llama_cpp":
+            resolved = Path(model_ref).expanduser()
+            return resolved.name or str(resolved)
+        return model_ref
+
     def _ollama_model_is_installed(self, payload: dict[str, object], model_name: str) -> bool:
+        return self._normalize_ollama_model_name(model_name) in self._ollama_models(payload)
+
+    def _ollama_models(self, payload: dict[str, object]) -> list[str]:
         models = payload.get("models")
         if not isinstance(models, list):
-            return False
+            return []
 
-        target = self._normalize_ollama_model_name(model_name)
-        if not target:
-            return False
-
+        resolved: list[str] = []
         for item in models:
             if not isinstance(item, dict):
                 continue
             for key in ("name", "model", "model_name"):
                 candidate = self._normalize_ollama_model_name(item.get(key))
-                if candidate and candidate == target:
-                    return True
-        return False
+                if candidate:
+                    resolved.append(candidate)
+                    break
+        return resolved
+
+    def _resolve_ollama_model(self, model_ref: str, installed_models: list[str]) -> str:
+        target = self._normalize_ollama_model_name(model_ref)
+        if target:
+            return target
+        return installed_models[0] if installed_models else ""
 
     def _normalize_ollama_model_name(self, value: object) -> str:
         name = str(value or "").strip().casefold()

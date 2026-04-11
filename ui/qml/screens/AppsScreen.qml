@@ -13,6 +13,17 @@ Rectangle {
     property bool manualFormOpen: false
     property bool scanCoolingDown: false
 
+    signal helpRequested(string text)
+    signal helpCleared()
+
+    function showHelp(text) {
+        helpRequested(text)
+    }
+
+    function clearHelp() {
+        helpCleared()
+    }
+
     function firstNonEmptyCategory() {
         const tabs = categoryTabs()
         for (let i = 0; i < tabs.length; i++) {
@@ -263,6 +274,10 @@ Rectangle {
                 border.width: 1
                 implicitHeight: addColumn.implicitHeight + 24
 
+                HoverHandler {
+                    onHoveredChanged: hovered ? root.showHelp("Здесь можно найти приложения автоматически или добавить нужное вручную.") : root.clearHelp()
+                }
+
                 ColumnLayout {
                     id: addColumn
                     anchors.fill: parent
@@ -306,22 +321,23 @@ Rectangle {
                             }
                         }
 
-                    SecondaryButton {
-                        objectName: "customAppManualButton"
-                        text: root.manualFormOpen ? "Скрыть ручной ввод" : "Добавить вручную"
-                        onClicked: root.manualFormOpen = !root.manualFormOpen
-                    }
-
-                    SecondaryButton {
-                        objectName: "customAppChooseFileButton"
-                        text: "Выбрать файл..."
-                        onClicked: {
-                            root.manualFormOpen = true
-                            appFileDialog.open()
+                        SecondaryButton {
+                            objectName: "customAppManualButton"
+                            text: root.manualFormOpen ? "Скрыть ручной ввод" : "Добавить вручную"
+                            onClicked: root.manualFormOpen = !root.manualFormOpen
                         }
-                    }
 
-                }
+                        SecondaryButton {
+                            visible: root.manualFormOpen
+                            objectName: "customAppChooseFileButton"
+                            text: "Выбрать файл..."
+                            onClicked: {
+                                root.manualFormOpen = true
+                                appFileDialog.open()
+                            }
+                        }
+
+                    }
 
                     RowLayout {
                         visible: root.manualFormOpen
@@ -392,6 +408,57 @@ Rectangle {
             }
 
             Rectangle {
+                visible: totalCatalogCount() === 0 && appsBridge.discovered.length === 0
+                Layout.fillWidth: true
+                color: Theme.Colors.card
+                radius: 22
+                border.color: Theme.Colors.borderSoft
+                border.width: 1
+                implicitHeight: emptyStateColumn.implicitHeight + 28
+
+                ColumnLayout {
+                    id: emptyStateColumn
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 10
+
+                    Text {
+                        text: "Пока ничего не добавлено"
+                        color: Theme.Colors.text
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "Нажмите «Найти автоматически» или добавьте приложение вручную, если его нет в списке."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        SecondaryButton {
+                            text: "Найти автоматически"
+                            onClicked: appsBridge.scanApplications()
+                        }
+
+                        SecondaryButton {
+                            text: "Добавить вручную"
+                            onClicked: root.manualFormOpen = true
+                        }
+
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+            }
+
+            Rectangle {
                 visible: appsBridge.discovered.length > 0
                 Layout.fillWidth: true
                 color: Theme.Colors.card
@@ -399,6 +466,10 @@ Rectangle {
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
                 implicitHeight: discoveredColumn.implicitHeight + 28
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? root.showHelp("Здесь показаны найденные приложения. Их можно сразу добавить в список.") : root.clearHelp()
+                }
 
                 ColumnLayout {
                     id: discoveredColumn
@@ -476,12 +547,17 @@ Rectangle {
             }
 
             Rectangle {
+                visible: totalCatalogCount() > 0
                 Layout.fillWidth: true
                 color: Theme.Colors.card
                 radius: 22
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
                 implicitHeight: categoryColumn.implicitHeight + 28
+
+                HoverHandler {
+                    onHoveredChanged: hovered ? root.showHelp("Категории помогают быстро найти музыку, Steam, лаунчеры, сайты и другие приложения.") : root.clearHelp()
+                }
 
                 ColumnLayout {
                     id: categoryColumn
