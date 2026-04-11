@@ -37,6 +37,36 @@ ApplicationWindow {
         onActivated: palette.open()
     }
 
+    function screenTitle() {
+        switch (appBridge.currentScreen) {
+        case "registration":
+            return "Первый запуск"
+        case "voice":
+            return "Голос"
+        case "apps":
+            return "Приложения"
+        case "settings":
+            return "Настройки"
+        default:
+            return "Диалог"
+        }
+    }
+
+    function screenSubtitle() {
+        switch (appBridge.currentScreen) {
+        case "registration":
+            return "Сначала подключите Groq и Telegram. Режим AI выбирается в конце формы."
+        case "voice":
+            return "Настройте микрофон, слово активации и проверку понимания."
+        case "apps":
+            return "Быстрые запускатели, другие названия и пользовательские действия."
+        case "settings":
+            return "Короткие настройки без технической свалки."
+        default:
+            return "Диалог, быстрые действия и короткий статус без лишних панелей."
+        }
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.margins: 18
@@ -77,10 +107,7 @@ ApplicationWindow {
                         spacing: 4
 
                         Text {
-                            text: appBridge.currentScreen === "registration" ? "Подключения" :
-                                  appBridge.currentScreen === "voice" ? "Голос" :
-                                  appBridge.currentScreen === "apps" ? "Приложения" :
-                                  appBridge.currentScreen === "settings" ? "Настройки" : "Диалог"
+                            text: window.screenTitle()
                             color: Theme.Colors.text
                             font.family: Theme.Typography.displayFamily
                             font.pixelSize: 22
@@ -88,15 +115,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: appBridge.currentScreen === "registration"
-                                  ? "Ключи и подключения. Можно заполнить сразу или вернуться позже в обычные настройки."
-                                  : appBridge.currentScreen === "voice"
-                                    ? "Настройте микрофон, слово активации и способ распознавания."
-                                  : appBridge.currentScreen === "apps"
-                                    ? "Быстрые запускатели, другие названия и пользовательские действия."
-                                  : appBridge.currentScreen === "settings"
-                                    ? "Короткие настройки без технической свалки."
-                                  : "Диалог, быстрые действия и короткий статус без лишних панелей."
+                            text: window.screenSubtitle()
                             color: Theme.Colors.textSoft
                             font.family: Theme.Typography.bodyFamily
                             font.pixelSize: Theme.Typography.small
@@ -107,7 +126,7 @@ ApplicationWindow {
 
                     ColumnLayout {
                         Layout.alignment: Qt.AlignTop | Qt.AlignRight
-                        Layout.preferredWidth: 120
+                        Layout.preferredWidth: 140
                         Layout.minimumWidth: 0
                         spacing: 6
 

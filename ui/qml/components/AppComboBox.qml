@@ -85,7 +85,7 @@ ComboBox {
                 if (itemDelegate.modelData.kind !== undefined) {
                     const kind = String(itemDelegate.modelData.kind)
                     if (kind.length > 0) {
-                        parts.push(kind === "input" ? "вход" : kind === "output" ? "вывод" : kind)
+                        parts.push(kind === "input" ? "вход" : kind === "output" ? "выход" : kind)
                     }
                 }
                 if (itemDelegate.modelData.hostapi !== undefined && String(itemDelegate.modelData.hostapi).length > 0 && String(itemDelegate.modelData.hostapi) !== "system") {
@@ -101,7 +101,7 @@ ComboBox {
                     parts.push("недоступно")
                 }
                 if (parts.length > 0) {
-                    return parts.join(" • ")
+                    return parts.join(" | ")
                 }
             }
             return ""

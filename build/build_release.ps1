@@ -156,6 +156,11 @@ if (!(Test-Path $venvPython)) {
 
 $version = (& $venvPython -c "from core.version import DEFAULT_VERSION; print(DEFAULT_VERSION)").Trim()
 Write-Host "RELEASE_VERSION $version"
+$releaseNotesPath = Join-Path $root "docs\RELEASE_$version.md"
+if (!(Test-Path $releaseNotesPath)) {
+    throw "Release notes missing: $releaseNotesPath"
+}
+Write-Host "RELEASE_NOTES $releaseNotesPath"
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionInfoFile) | Out-Null
 $versionInfoContent = @"

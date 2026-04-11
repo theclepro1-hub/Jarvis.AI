@@ -41,11 +41,11 @@ class VoiceBridge(QObject):
         super().__init__()
         self.state = state
         self.services = services
+        self._chat_bridge = chat_bridge
         self._test_result = "Проверка ещё не запускалась."
         self._recording_hint = "Ручной микрофон готов."
         self._wake_hint = ""
         self._voice_test = self._empty_voice_test()
-        self._chat_bridge = chat_bridge
         self._warmup_lock = threading.Lock()
         self._warmup_started = False
         self.voiceTestTextReady.connect(self._handle_voice_test_text)
@@ -138,11 +138,12 @@ class VoiceBridge(QObject):
     @Property(str, notify=selectedTtsVoiceChanged)
     def selectedTtsVoice(self) -> str:
         selected = self.services.voice.tts_voice_name()
-        return selected if selected in self.services.voice.available_tts_voices() else "Голос по умолчанию"
+        voices = self.services.voice.available_tts_voices()
+        return selected if selected in voices else "Выбран системный голос"
 
     @selectedTtsVoice.setter
     def selectedTtsVoice(self, value: str) -> None:
-        self.services.settings.set("tts_voice_name", value or "Голос по умолчанию")
+        self.services.settings.set("tts_voice_name", value or "Выбран системный голос")
         self.selectedTtsVoiceChanged.emit()
 
     @Property(int, notify=ttsRateChanged)
@@ -367,7 +368,8 @@ class VoiceBridge(QObject):
         self.recordingHintChanged.emit()
         self.state.status = "Передаю команду в обработку"
         self.statusChanged.emit()
-        self.services.voice.mark_wake_route_handoff()
+        if hasattr(self.services.voice, "mark_wake_route_handoff"):
+            self.services.voice.mark_wake_route_handoff()
         self.voiceTimingsChanged.emit()
         if self._chat_bridge is not None:
             self._chat_bridge.submitTranscribedText(text)
@@ -376,25 +378,30 @@ class VoiceBridge(QObject):
         self._recording_hint = note
         self.recordingHintChanged.emit()
         lowered = note.casefold()
-        if "не расслыш" in lowered or "not heard" in lowered:
+        if "не расслыш" in lowered or "не услыш" in lowered or "not heard" in lowered:
             self.clearWakeHint()
             self.state.status = "Не расслышал"
-        elif "микрофон" in lowered or "mic" in lowered:
+        elif "микроф" in lowered or "mic" in lowered:
             self.clearWakeHint()
-            self.state.status = "Ошибка микрофона"
-        elif "ошиб" in lowered or "error" in lowered or "stt" in lowered or "ключ" in lowered:
+            self.state.status = "Проблема с микрофоном"
+        elif "ошиб" in lowered or "error" in lowered or "stt" in lowered:
             self.clearWakeHint()
             self.state.status = "Ошибка распознавания"
-        elif "останов" in lowered or "cancel" in lowered:
+        elif "отмен" in lowered or "cancel" in lowered:
             self.clearWakeHint()
-            self.state.status = "Запись остановлена"
+            self.state.status = "Запись отменена"
         else:
             self.state.status = "Готов"
         self.statusChanged.emit()
 
     def _finalize_capture(self) -> None:
         self.recordingChanged.emit()
-        if self.state.status not in {"Не расслышал", "Ошибка микрофона", "Ошибка распознавания", "Запись остановлена"}:
+        if self.state.status not in {
+            "Не расслышал",
+            "Проблема с микрофоном",
+            "Ошибка распознавания",
+            "Запись отменена",
+        }:
             self._recording_hint = "Ручной микрофон готов."
             self.recordingHintChanged.emit()
             self.state.status = "Готов"
@@ -411,14 +418,14 @@ class VoiceBridge(QObject):
     def _handle_wake_detected(self, pre_roll: bytes) -> None:
         if self.services.voice.is_recording:
             return
-        self._wake_hint = "Услышал «Джарвис». Подхватываю начало команды..."
+        self._wake_hint = "Джарвис услышан. Захватываю команду..."
         self.wakeHintChanged.emit()
-        self.state.status = "Услышал «Джарвис»"
+        self.state.status = "Слушаю команду"
         self.statusChanged.emit()
         self.services.voice.set_wake_runtime_status(
             "capturing_command",
             ready=False,
-            detail="Услышал «Джарвис». Подхватываю начало команды",
+            detail="Слово активации услышано. Захватываю команду",
         )
         thread = threading.Thread(target=self._finish_after_wake, args=(pre_roll,), daemon=True)
         thread.start()
@@ -448,9 +455,9 @@ class VoiceBridge(QObject):
             self.services.voice.set_wake_runtime_status(
                 "not_heard",
                 ready=False,
-                detail="Не расслышал команду после слова активации",
+                detail="Не удалось распознать фразу после слова активации",
             )
-            self.voiceNoteReady.emit("Не расслышал команду после слова активации.")
+            self.voiceNoteReady.emit("Не удалось распознать фразу после слова активации.")
         self.captureFinished.emit()
 
     def _emit_voice_status_change(self) -> None:
@@ -488,16 +495,16 @@ class VoiceBridge(QObject):
         status = str(getattr(result, "status", ""))
         detail = str(getattr(result, "detail", "") or "").strip()
         if status == "mic_open_failed":
-            return "Не удалось открыть микрофон. Проверьте выбранное устройство."
+            return "Не удалось открыть микрофон. Проверьте доступ и выбранное устройство."
         if status == "stt_key_missing":
-            return "Нужен ключ Groq для облачного распознавания."
+            return "Нужен ключ Groq для облачного распознавания речи."
         if status == "model_missing":
-            return "Нужен ключ Groq или локальная модель распознавания."
+            return "Нужна локальная или облачная модель распознавания речи."
         if status == "no_speech":
-            return "Не расслышал команду после слова активации."
+            return "Не удалось распознать фразу после слова активации."
         if detail:
             return detail
-        return "Не удалось разобрать команду после слова активации."
+        return "Не удалось распознать фразу после слова активации."
 
     def _empty_voice_test(self, stage: str = "idle") -> dict[str, object]:
         return {
@@ -562,11 +569,11 @@ class VoiceBridge(QObject):
         clean = note.strip()
         stage = "error_stt"
         lowered = clean.casefold()
-        if "микрофон" in lowered and ("не удалось" in lowered or "ошибка" in lowered):
+        if "микроф" in lowered or "mic" in lowered:
             stage = "error_mic"
-        elif "не удалось получить текст" in lowered or "не расслыш" in lowered:
+        elif "не услыш" in lowered or "не удалось распознать" in lowered or "not heard" in lowered:
             stage = "not_heard"
-        elif "groq" in lowered or "ключ" in lowered or "stt" in lowered or "модель" in lowered:
+        elif "groq" in lowered or "stt" in lowered or "ошиб" in lowered or "error" in lowered:
             stage = "error_stt"
 
         self._voice_test = {
@@ -586,10 +593,10 @@ class VoiceBridge(QObject):
             self._voice_test = {
                 **self._voice_test,
                 "stage": "not_heard",
-                "error": "Не расслышал фразу.",
-                "summary": "Не расслышал фразу.",
+                "error": "Не удалось понять фразу.",
+                "summary": "Не удалось понять фразу.",
             }
-            self._test_result = "Не расслышал фразу."
+            self._test_result = "Не удалось понять фразу."
             self.voiceTestChanged.emit()
             self.testResultChanged.emit()
         self.recordingChanged.emit()
@@ -607,16 +614,16 @@ class VoiceBridge(QObject):
         if heard:
             parts.append(f"Услышал: {heard}")
         if recognized and recognized != heard:
-            parts.append(f"После очистки: {recognized}")
+            parts.append(f"Распознал: {recognized}")
         intent = str(self._voice_test.get("intent", "")).strip()
         if intent:
-            parts.append(f"Тип команды: {intent}")
+            parts.append(f"Тип действия: {intent}")
         if command:
-            parts.append(f"Что сделаю: {command}")
+            parts.append(f"Итог: {command}")
         error = str(self._voice_test.get("error", "")).strip()
         if error and not parts:
             return error
-        return " | ".join(parts) if parts else "Проверка завершена."
+        return " | ".join(parts) if parts else "Проверка ещё не запускалась."
 
     def _strip_voice_test_wake_word(self, text: str) -> str:
         normalizer = getattr(self.services.voice, "strip_wake_word", None)

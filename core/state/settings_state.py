@@ -8,6 +8,7 @@ class SettingsSnapshot:
     theme_mode: str
     startup_enabled: bool
     privacy_mode: str
+    assistant_mode: str
     ai_mode: str
     ai_model: str
     voice_mode: str

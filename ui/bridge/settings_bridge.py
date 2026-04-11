@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from core.ai.ai_service import SUPPORTED_AI_MODES, SUPPORTED_AI_PROFILES
+from core.ai.local_llm_service import LocalLLMDiagnostics, LocalLLMService
+from core.policy.assistant_mode import ASSISTANT_MODES, STT_OVERRIDES, TEXT_OVERRIDES, resolve_assistant_mode
 from core.version import DEFAULT_VERSION
 
 
@@ -18,6 +20,18 @@ class SettingsBridge(QObject):
     minimizeToTrayEnabledChanged = Signal()
     startMinimizedEnabledChanged = Signal()
     saveHistoryEnabledChanged = Signal()
+    assistantModeChanged = Signal()
+    assistantModeOptionsChanged = Signal()
+    assistantModeSummaryChanged = Signal()
+    assistantUserStatusChanged = Signal()
+    localLlmBackendChanged = Signal()
+    localLlmBackendOptionsChanged = Signal()
+    localLlmModelChanged = Signal()
+    localReadinessChanged = Signal()
+    textBackendOverrideChanged = Signal()
+    textBackendOverrideOptionsChanged = Signal()
+    sttBackendOverrideChanged = Signal()
+    sttBackendOverrideOptionsChanged = Signal()
     aiModeChanged = Signal()
     aiProviderChanged = Signal()
     aiProfileChanged = Signal()
@@ -75,10 +89,42 @@ class SettingsBridge(QObject):
             return vars(self.services).get("ai")
         return None
 
+    def _local_llm_diagnostics(self) -> LocalLLMDiagnostics:
+        try:
+            return LocalLLMService(self.services.settings).diagnostics()
+        except Exception:  # noqa: BLE001
+            return LocalLLMDiagnostics(
+                ready=False,
+                backend="auto",
+                model_path="",
+                detail="Локальный runtime недоступен.",
+                user_status="Локальная модель не готова.",
+                action_label="",
+                action_url="",
+            )
+
     def _normalize_ai_mode(self, value: str) -> str:
         mode = str(value or "").strip().lower()
         if mode in SUPPORTED_AI_MODES:
             return mode
+        return "auto"
+
+    def _normalize_assistant_mode(self, value: str) -> str:
+        mode = str(value or "").strip().lower()
+        if mode in ASSISTANT_MODES:
+            return mode
+        return resolve_assistant_mode(self.services.settings)
+
+    def _normalize_local_backend(self, value: str) -> str:
+        backend = str(value or "").strip().lower()
+        if backend in {"auto", "ollama", "llama_cpp"}:
+            return backend
+        return "auto"
+
+    def _normalize_override(self, value: str, allowed: set[str]) -> str:
+        override = str(value or "").strip().lower()
+        if override in allowed:
+            return override
         return "auto"
 
     def _default_update_summary(self) -> str:
@@ -164,6 +210,127 @@ class SettingsBridge(QObject):
         self.saveHistoryEnabledChanged.emit()
         self.connectionsChanged.emit()
         self.dataSafetyChanged.emit()
+
+    @Property(str, notify=assistantModeChanged)
+    def assistantMode(self) -> str:
+        return self._normalize_assistant_mode(self.services.settings.get("assistant_mode", "standard"))
+
+    @assistantMode.setter
+    def assistantMode(self, value: str) -> None:
+        mode = self._normalize_assistant_mode(value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("assistant_mode", mode)
+        self.assistantModeChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
+        self.localReadinessChanged.emit()
+
+    @Property("QVariantList", notify=assistantModeOptionsChanged)
+    def assistantModeOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": "fast", "title": "Быстрый"},
+            {"key": "standard", "title": "Стандартный"},
+            {"key": "smart", "title": "Умный"},
+            {"key": "private", "title": "Приватный"},
+        ]
+
+    @Property(str, notify=assistantModeSummaryChanged)
+    def assistantModeSummary(self) -> str:
+        mode = self.assistantMode
+        diagnostics = self._local_llm_diagnostics()
+        if mode == "fast":
+            return "Самый быстрый путь ответа."
+        if mode == "smart":
+            return "Приоритет качеству ответа."
+        if mode == "private":
+            return "Только локальная работа." if diagnostics.ready else "Только локальная работа. Нужна локальная модель."
+        return "Сначала локально, потом облако."
+
+    @Property(str, notify=assistantUserStatusChanged)
+    def assistantUserStatus(self) -> str:
+        mode = self.assistantMode
+        diagnostics = self._local_llm_diagnostics()
+        if diagnostics.ready:
+            return "Локально готово"
+        if mode == "private":
+            return "Нужна локальная модель"
+        return "Работает через облако"
+
+    @Property(str, notify=localLlmBackendChanged)
+    def localLlmBackend(self) -> str:
+        return self._normalize_local_backend(self.services.settings.get("local_llm_backend", "auto"))
+
+    @localLlmBackend.setter
+    def localLlmBackend(self, value: str) -> None:
+        backend = self._normalize_local_backend(value)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("local_llm_backend", backend)
+        self.localLlmBackendChanged.emit()
+        self.localReadinessChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
+
+    @Property("QVariantList", notify=localLlmBackendOptionsChanged)
+    def localLlmBackendOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": "auto", "title": "Авто"},
+            {"key": "ollama", "title": "Ollama"},
+            {"key": "llama_cpp", "title": "llama.cpp"},
+        ]
+
+    @Property(str, notify=localLlmModelChanged)
+    def localLlmModel(self) -> str:
+        return str(self.services.settings.get("local_llm_model", "")).strip()
+
+    @localLlmModel.setter
+    def localLlmModel(self, value: str) -> None:
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("local_llm_model", str(value or "").strip())
+        self.localLlmModelChanged.emit()
+        self.localReadinessChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
+
+    @Property(str, notify=localReadinessChanged)
+    def localReadiness(self) -> str:
+        return self._local_llm_diagnostics().user_status
+
+    @Property(str, notify=textBackendOverrideChanged)
+    def textBackendOverride(self) -> str:
+        return self._normalize_override(self.services.settings.get("text_backend_override", "auto"), TEXT_OVERRIDES)
+
+    @textBackendOverride.setter
+    def textBackendOverride(self, value: str) -> None:
+        override = self._normalize_override(value, TEXT_OVERRIDES)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("text_backend_override", override)
+        self.textBackendOverrideChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
+
+    @Property("QVariantList", notify=textBackendOverrideOptionsChanged)
+    def textBackendOverrideOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": "auto", "title": "Авто"},
+            {"key": "local_llama", "title": "Локальная Llama"},
+            {"key": "groq", "title": "Groq"},
+            {"key": "cerebras", "title": "Cerebras"},
+            {"key": "gemini", "title": "Gemini"},
+            {"key": "openrouter", "title": "OpenRouter"},
+        ]
+
+    @Property(str, notify=sttBackendOverrideChanged)
+    def sttBackendOverride(self) -> str:
+        return self._normalize_override(self.services.settings.get("stt_backend_override", "auto"), STT_OVERRIDES)
+
+    @sttBackendOverride.setter
+    def sttBackendOverride(self, value: str) -> None:
+        override = self._normalize_override(value, STT_OVERRIDES)
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("stt_backend_override", override)
+        self.sttBackendOverrideChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
 
     @Property(str, notify=aiModeChanged)
     def aiMode(self) -> str:
@@ -251,6 +418,30 @@ class SettingsBridge(QObject):
         return bool(self.groqApiKey)
 
     @Property(str, notify=connectionsChanged)
+    def cerebrasApiKey(self) -> str:
+        return str(self._registration().get("cerebras_api_key", "")).strip()
+
+    @Property(bool, notify=connectionsChanged)
+    def cerebrasApiKeySet(self) -> bool:
+        return bool(self.cerebrasApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def geminiApiKey(self) -> str:
+        return str(self._registration().get("gemini_api_key", "")).strip()
+
+    @Property(bool, notify=connectionsChanged)
+    def geminiApiKeySet(self) -> bool:
+        return bool(self.geminiApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def openrouterApiKey(self) -> str:
+        return str(self._registration().get("openrouter_api_key", "")).strip()
+
+    @Property(bool, notify=connectionsChanged)
+    def openrouterApiKeySet(self) -> bool:
+        return bool(self.openrouterApiKey)
+
+    @Property(str, notify=connectionsChanged)
     def telegramBotToken(self) -> str:
         return str(self._registration().get("telegram_bot_token", "")).strip()
 
@@ -292,10 +483,8 @@ class SettingsBridge(QObject):
             "connected": False,
             "lastCommand": "",
             "lastReply": "",
-            "lastError": "telegram service unavailable",
+            "lastError": "Telegram-сервис недоступен.",
             "lastPollAt": "",
-            "lastUpdateId": 0,
-            "lastChatId": "",
         }
 
     @Property("QVariantMap", notify=connectionsChanged)
@@ -305,6 +494,15 @@ class SettingsBridge(QObject):
             "groqApiKey": self.groqApiKey,
             "groqApiKeyMasked": self.groqApiKeyMasked,
             "groqApiKeySet": self.groqApiKeySet,
+            "cerebrasApiKey": self.cerebrasApiKey,
+            "cerebrasApiKeyMasked": self._mask_secret(self.cerebrasApiKey),
+            "cerebrasApiKeySet": self.cerebrasApiKeySet,
+            "geminiApiKey": self.geminiApiKey,
+            "geminiApiKeyMasked": self._mask_secret(self.geminiApiKey),
+            "geminiApiKeySet": self.geminiApiKeySet,
+            "openrouterApiKey": self.openrouterApiKey,
+            "openrouterApiKeyMasked": self._mask_secret(self.openrouterApiKey),
+            "openrouterApiKeySet": self.openrouterApiKeySet,
             "telegramBotToken": self.telegramBotToken,
             "telegramBotTokenMasked": self.telegramBotTokenMasked,
             "telegramBotTokenSet": self.telegramBotTokenSet,
@@ -313,6 +511,9 @@ class SettingsBridge(QObject):
             "saveHistoryEnabled": self.saveHistoryEnabled,
             "skipped": bool(registration.get("skipped", False)),
             "groq_api_key": self.groqApiKey,
+            "cerebras_api_key": self.cerebrasApiKey,
+            "gemini_api_key": self.geminiApiKey,
+            "openrouter_api_key": self.openrouterApiKey,
             "telegram_bot_token": self.telegramBotToken,
             "telegram_user_id": self.telegramUserId,
         }
@@ -350,13 +551,33 @@ class SettingsBridge(QObject):
             return dict(updates.status_snapshot())
         return self._default_update_status()
 
-    @Slot(str, str, str, result=bool)
-    def saveConnections(self, groq_api_key: str, telegram_bot_token: str, telegram_user_id: str) -> bool:
+    @Slot(str, str, str, str, str, str, result=bool)
+    def saveConnections(
+        self,
+        groq_api_key: str,
+        cerebras_api_key: str,
+        gemini_api_key: str,
+        openrouter_api_key: str,
+        telegram_bot_token: str,
+        telegram_user_id: str,
+    ) -> bool:
         registration = self._registration()
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.save_registration(
                 {
                     "groq_api_key": self._resolve_secret_input(groq_api_key, str(registration.get("groq_api_key", ""))),
+                    "cerebras_api_key": self._resolve_secret_input(
+                        cerebras_api_key,
+                        str(registration.get("cerebras_api_key", "")),
+                    ),
+                    "gemini_api_key": self._resolve_secret_input(
+                        gemini_api_key,
+                        str(registration.get("gemini_api_key", "")),
+                    ),
+                    "openrouter_api_key": self._resolve_secret_input(
+                        openrouter_api_key,
+                        str(registration.get("openrouter_api_key", "")),
+                    ),
                     "telegram_bot_token": self._resolve_secret_input(
                         telegram_bot_token,
                         str(registration.get("telegram_bot_token", "")),
@@ -370,6 +591,48 @@ class SettingsBridge(QObject):
         self.connectionsChanged.emit()
         self.connectionFeedbackChanged.emit()
         self.telegramStatusChanged.emit()
+        return True
+
+    @Slot(str, str, str, str, str, result=bool)
+    def saveAdvancedConnections(
+        self,
+        gemini_api_key: str,
+        cerebras_api_key: str,
+        openrouter_api_key: str,
+        local_llm_backend: str,
+        local_llm_model: str,
+    ) -> bool:
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.save_registration(
+                {
+                    "groq_api_key": str(self.groqApiKey),
+                    "cerebras_api_key": self._resolve_secret_input(
+                        cerebras_api_key,
+                        str(self._registration().get("cerebras_api_key", "")),
+                    ),
+                    "gemini_api_key": self._resolve_secret_input(
+                        gemini_api_key,
+                        str(self._registration().get("gemini_api_key", "")),
+                    ),
+                    "openrouter_api_key": self._resolve_secret_input(
+                        openrouter_api_key,
+                        str(self._registration().get("openrouter_api_key", "")),
+                    ),
+                    "telegram_bot_token": str(self.telegramBotToken),
+                    "telegram_user_id": str(self.telegramUserId),
+                },
+                skipped=bool(self._registration().get("skipped", False)),
+            )
+            self.services.settings.set("local_llm_backend", self._normalize_local_backend(local_llm_backend))
+            self.services.settings.set("local_llm_model", str(local_llm_model or "").strip())
+        self._connection_feedback = "Дополнительные подключения сохранены."
+        self.localLlmBackendChanged.emit()
+        self.localLlmModelChanged.emit()
+        self.localReadinessChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
+        self.connectionsChanged.emit()
+        self.connectionFeedbackChanged.emit()
         return True
 
     @Slot()
@@ -526,6 +789,14 @@ class SettingsBridge(QObject):
         self.minimizeToTrayEnabledChanged.emit()
         self.startMinimizedEnabledChanged.emit()
         self.saveHistoryEnabledChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()
+        self.localLlmBackendChanged.emit()
+        self.localLlmModelChanged.emit()
+        self.localReadinessChanged.emit()
+        self.textBackendOverrideChanged.emit()
+        self.sttBackendOverrideChanged.emit()
         self.aiModeChanged.emit()
         self.aiProviderChanged.emit()
         self.aiProfileChanged.emit()

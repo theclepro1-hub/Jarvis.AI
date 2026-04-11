@@ -7,6 +7,8 @@ from typing import Any, Callable
 import httpx
 from openai import OpenAI
 
+from core.policy.assistant_mode import resolve_assistant_mode, resolve_assistant_policy
+
 
 SYSTEM_PROMPT = """
 Ты JARVIS Unity.
@@ -151,6 +153,9 @@ class AIService:
         *,
         status_callback: Callable[[str], None] | None = None,
     ) -> AIReplyResult:
+        if self._assistant_mode_enabled():
+            return self._generate_assistant_mode_reply(user_text, history or [], status_callback=status_callback)
+
         ai_mode = self._ai_mode()
         started_at = time.perf_counter()
         messages = self._build_messages(user_text, history or [])
@@ -218,6 +223,88 @@ class AIService:
             mode=ai_mode,
             elapsed_ms=self._elapsed_ms(started_at),
             fallback_used=len(attempts) > 1,
+            error=last_error or "",
+        )
+
+    def _generate_assistant_mode_reply(
+        self,
+        user_text: str,
+        history: list[dict[str, str]],
+        *,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> AIReplyResult:
+        mode = resolve_assistant_mode(self.settings)
+        policy = resolve_assistant_policy(self.settings)
+        started_at = time.perf_counter()
+        messages = self._build_messages(user_text, history)
+        budget_seconds = self._mode_budget_seconds(self._assistant_mode_request_mode(mode))
+        last_error: str | None = None
+
+        for index, backend in enumerate(policy.text_route):
+            elapsed = time.perf_counter() - started_at
+            remaining_budget = budget_seconds - elapsed
+            if remaining_budget <= 0:
+                last_error = f"latency budget exceeded ({mode})"
+                break
+
+            if backend == "local_llama":
+                self._report_stage(status_callback, self._assistant_stage_label(mode, "Локальная Llama", index, len(policy.text_route)))
+                reply, error = self._try_local_llama(messages)
+                if reply:
+                    return AIReplyResult(
+                        text=reply,
+                        mode=mode,
+                        provider="local_llama",
+                        provider_label="Local Llama",
+                        model=str(self.settings.get("local_llm_model", "")).strip(),
+                        elapsed_ms=self._elapsed_ms(started_at),
+                        fallback_used=index > 0,
+                    )
+                last_error = error or last_error
+                continue
+
+            spec = PROVIDERS.get(backend)
+            if spec is None:
+                continue
+            api_key = self._provider_api_key(spec)
+            if not api_key:
+                continue
+            model_mode = self._assistant_mode_request_mode(mode)
+            self._report_stage(status_callback, self._assistant_stage_label(mode, spec.label, index, len(policy.text_route)))
+            reply, error = self._try_provider(
+                spec,
+                spec.models[model_mode],
+                api_key,
+                messages,
+                ai_mode=model_mode,
+                budget_seconds=remaining_budget,
+            )
+            if reply:
+                return AIReplyResult(
+                    text=reply,
+                    mode=mode,
+                    provider=spec.key,
+                    provider_label=spec.label,
+                    model=spec.models[model_mode],
+                    elapsed_ms=self._elapsed_ms(started_at),
+                    fallback_used=index > 0,
+                )
+            last_error = error or last_error
+
+        if mode == "private" and not policy.text_cloud_allowed:
+            return AIReplyResult(
+                text="Нужна локальная модель Llama. Подключите Ollama или укажите .gguf в настройках для опытных.",
+                mode=mode,
+                elapsed_ms=self._elapsed_ms(started_at),
+                fallback_used=False,
+                error=last_error or "local_llama_missing",
+            )
+
+        return AIReplyResult(
+            text=self._fallback_reply(user_text, last_error),
+            mode=mode,
+            elapsed_ms=self._elapsed_ms(started_at),
+            fallback_used=len(policy.text_route) > 1,
             error=last_error or "",
         )
 
@@ -341,6 +428,36 @@ class AIService:
         import os
 
         return os.environ.get(spec.env_var, "").strip()
+
+    def _assistant_mode_enabled(self) -> bool:
+        return bool(str(self.settings.get("assistant_mode", "")).strip())
+
+    def _assistant_mode_request_mode(self, mode: str) -> str:
+        if mode == "fast":
+            return "fast"
+        if mode == "smart":
+            return "quality"
+        return "auto"
+
+    def _assistant_stage_label(self, mode: str, label: str, index: int, total: int) -> str:
+        mode_label = {
+            "fast": "Быстрый режим",
+            "standard": "Стандартный режим",
+            "smart": "Умный режим",
+            "private": "Приватный режим",
+        }.get(mode, "ИИ")
+        if total <= 1:
+            return f"{mode_label}: {label}…"
+        return f"{mode_label}: {label} ({index + 1}/{total})…"
+
+    def _try_local_llama(self, messages: list[dict[str, str]]) -> tuple[str | None, str | None]:
+        from core.ai.local_llm_service import LocalLLMService
+
+        service = LocalLLMService(self.settings)
+        try:
+            return service.generate(messages), None
+        except Exception as exc:  # noqa: BLE001
+            return None, f"Local Llama: {exc}"
 
     def _ai_mode(self) -> str:
         return self._normalize_mode(str(self.settings.get("ai_mode", "auto")).strip().lower())

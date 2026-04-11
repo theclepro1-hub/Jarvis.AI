@@ -5,7 +5,18 @@ import "../theme" as Theme
 import "../components"
 
 Rectangle {
+    id: registrationRoot
     color: "transparent"
+
+    function assistantModeIndex() {
+        const options = settingsBridge.assistantModeOptions || []
+        for (let index = 0; index < options.length; index += 1) {
+            if (options[index].key === settingsBridge.assistantMode) {
+                return index
+            }
+        }
+        return 0
+    }
 
     Flickable {
         id: registrationScroll
@@ -23,7 +34,7 @@ Rectangle {
 
         ColumnLayout {
             id: contentColumn
-            width: Math.min(registrationScroll.width - 32, 820)
+            width: Math.min(registrationScroll.width - 32, 760)
             x: Math.max(16, (registrationScroll.width - width) / 2)
             y: 28
             spacing: 14
@@ -43,6 +54,14 @@ Rectangle {
                     spacing: 12
 
                     Text {
+                        text: "Первый запуск"
+                        color: Theme.Colors.accent
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+
+                    Text {
                         text: "Подключите JARVIS"
                         color: Theme.Colors.text
                         font.family: Theme.Typography.displayFamily
@@ -51,7 +70,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Можно подключить Groq и Telegram сейчас или пропустить этот шаг. JARVIS всё равно откроет чат, а вернуться к настройке можно позже."
+                        text: "Для старта нужны только ключ Groq, Telegram bot token и Telegram ID. Режим можно выбрать сразу или позже в настройках."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
@@ -121,6 +140,63 @@ Rectangle {
                         onLinkActivated: function(link) { Qt.openUrlExternally(link) }
                     }
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        color: Theme.Colors.cardAlt
+                        radius: 22
+                        border.color: Theme.Colors.borderSoft
+                        border.width: 1
+                        implicitHeight: modeColumn.implicitHeight + 24
+
+                        ColumnLayout {
+                            id: modeColumn
+                            anchors.fill: parent
+                            anchors.margins: 14
+                            spacing: 8
+
+                            Text {
+                                text: "Режим"
+                                color: Theme.Colors.text
+                                font.family: Theme.Typography.displayFamily
+                                font.pixelSize: Theme.Typography.small
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Выберите сейчас или позже поменяйте в настройках."
+                                color: Theme.Colors.textSoft
+                                font.family: Theme.Typography.bodyFamily
+                                font.pixelSize: Theme.Typography.small
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+
+                            AppComboBox {
+                                id: assistantModeCombo
+                                objectName: "registrationAssistantModeCombo"
+                                Layout.fillWidth: true
+                                model: settingsBridge.assistantModeOptions
+                                textRole: "title"
+                                currentIndex: registrationRoot.assistantModeIndex()
+                                onActivated: (index) => settingsBridge.assistantMode = model[index].key
+                            }
+
+                            StatusPill {
+                                objectName: "registrationAssistantStatus"
+                                text: settingsBridge.assistantUserStatus
+                            }
+
+                            Text {
+                                text: settingsBridge.assistantModeSummary
+                                color: Theme.Colors.textSoft
+                                font.family: Theme.Typography.bodyFamily
+                                font.pixelSize: Theme.Typography.small
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 10
@@ -133,12 +209,6 @@ Rectangle {
                                            userIdField.text,
                                            botTokenField.text
                                        )
-                        }
-
-                        SecondaryButton {
-                            objectName: "registrationSkipButton"
-                            text: "Настроить позже"
-                            onClicked: registrationBridge.skipForNow()
                         }
 
                         Item { Layout.fillWidth: true }

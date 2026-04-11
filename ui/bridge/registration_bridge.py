@@ -21,7 +21,6 @@ class RegistrationBridge(QObject):
             "groq_api_key": record.groq_api_key,
             "telegram_user_id": record.telegram_user_id,
             "telegram_bot_token": record.telegram_bot_token,
-            "skipped": record.skipped,
         }
 
     @Property(str, notify=feedbackChanged)
@@ -32,18 +31,10 @@ class RegistrationBridge(QObject):
     def saveRegistration(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> None:
         record = self.services.registration.save(groq_api_key, telegram_user_id, telegram_bot_token)
         if record.is_complete:
-            self._feedback = "Подключение сохранено. Можно переходить в новый JARVIS."
+            self._feedback = "Подключение сохранено. Можно переходить в JARVIS."
             self.feedbackChanged.emit()
             self.registrationChanged.emit()
             self.app_bridge.finishRegistration()
             return
-        self._feedback = "Нужны все три поля: Groq API Key, Telegram User ID и Telegram Bot Token."
+        self._feedback = "Нужны все три поля: ключ Groq, Telegram ID и Telegram bot token."
         self.feedbackChanged.emit()
-
-    @Slot()
-    def skipForNow(self) -> None:
-        self.services.registration.skip()
-        self._feedback = "Регистрацию можно завершить позже в настройках."
-        self.feedbackChanged.emit()
-        self.registrationChanged.emit()
-        self.app_bridge.finishRegistration()

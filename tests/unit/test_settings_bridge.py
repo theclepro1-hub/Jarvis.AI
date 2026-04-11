@@ -52,16 +52,32 @@ def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> Non
     services = SimpleNamespace(settings=settings, telegram=telegram)
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
-    assert bridge.saveConnections("fake_groq_new", "bot_new", "987654321") is True
+    assert bridge.saveConnections(
+        "fake_groq_new",
+        "fake_cerebras_new",
+        "fake_gemini_new",
+        "fake_openrouter_new",
+        "bot_new",
+        "987654321",
+    ) is True
 
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_new"
+    assert registration["cerebras_api_key"] == "fake_cerebras_new"
+    assert registration["gemini_api_key"] == "fake_gemini_new"
+    assert registration["openrouter_api_key"] == "fake_openrouter_new"
     assert registration["telegram_bot_token"] == "bot_new"
     assert registration["telegram_user_id"] == "987654321"
     assert registration["skipped"] is False
     assert telegram.refreshes == 1
     assert bridge.connectionFeedback == "Подключения сохранены."
+    assert bridge.cerebrasApiKey == "fake_cerebras_new"
+    assert bridge.geminiApiKey == "fake_gemini_new"
+    assert bridge.openrouterApiKey == "fake_openrouter_new"
     assert bridge.connections["groqApiKeySet"] is True
+    assert bridge.connections["cerebrasApiKeySet"] is True
+    assert bridge.connections["geminiApiKeySet"] is True
+    assert bridge.connections["openrouterApiKeySet"] is True
     assert bridge.connections["telegramBotTokenMasked"] == "••••••••"
 
 
@@ -79,12 +95,93 @@ def test_settings_bridge_mask_placeholder_keeps_existing_secrets() -> None:
     services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
-    assert bridge.saveConnections("••••••••", "••••••••", "2") is True
+    assert bridge.saveConnections(
+        "••••••••",
+        "••••••••",
+        "••••••••",
+        "••••••••",
+        "••••••••",
+        "2",
+    ) is True
 
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_existing"
+    assert registration["cerebras_api_key"] == ""
+    assert registration["gemini_api_key"] == ""
+    assert registration["openrouter_api_key"] == ""
     assert registration["telegram_bot_token"] == "bot_existing"
     assert registration["telegram_user_id"] == "2"
+
+
+def test_settings_bridge_saves_advanced_connection_fields() -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    settings.save_registration(
+        {
+            "groq_api_key": "fake_groq_existing",
+            "telegram_bot_token": "bot_existing",
+            "telegram_user_id": "1",
+        },
+        skipped=False,
+    )
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    assert bridge.saveAdvancedConnections(
+        "fake_gemini_new",
+        "fake_cerebras_new",
+        "fake_openrouter_new",
+        "ollama",
+        "llama3.2:1b",
+    ) is True
+
+    registration = settings.get_registration()
+    assert registration["groq_api_key"] == "fake_groq_existing"
+    assert registration["cerebras_api_key"] == "fake_cerebras_new"
+    assert registration["gemini_api_key"] == "fake_gemini_new"
+    assert registration["openrouter_api_key"] == "fake_openrouter_new"
+    assert registration["telegram_bot_token"] == "bot_existing"
+    assert registration["telegram_user_id"] == "1"
+    assert settings.get("local_llm_backend") == "ollama"
+    assert settings.get("local_llm_model") == "llama3.2:1b"
+    assert bridge.connectionFeedback == "Дополнительные подключения сохранены."
+
+
+def test_settings_bridge_exposes_assistant_mode_and_local_llm_copy(monkeypatch) -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    settings.set("assistant_mode", "private")
+    settings.set("local_llm_backend", "ollama")
+    settings.set("local_llm_model", "llama3.2:1b")
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    monkeypatch.setattr(
+        bridge,
+        "_local_llm_diagnostics",
+        lambda: SimpleNamespace(
+            ready=True,
+            backend="ollama",
+            model_path="llama3.2:1b",
+            detail="Ollama-модель готова.",
+            user_status="Локальная модель готова.",
+            action_label="Открыть Ollama",
+            action_url="https://docs.ollama.com/",
+        ),
+    )
+
+    assert bridge.assistantMode == "private"
+    assert [item["key"] for item in bridge.assistantModeOptions] == [
+        "fast",
+        "standard",
+        "smart",
+        "private",
+    ]
+    assert bridge.assistantModeSummary == "Только локальная работа."
+    assert bridge.assistantUserStatus == "Локально готово"
+    assert bridge.localLlmBackend == "ollama"
+    assert bridge.localLlmModel == "llama3.2:1b"
+    assert bridge.localReadiness == "Локальная модель готова."
 
 
 def test_settings_bridge_update_properties_do_not_force_lazy_update_service() -> None:
@@ -106,6 +203,7 @@ def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
     services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
+    assert bridge.assistantMode == "standard"
     assert bridge.aiMode == "auto"
     assert bridge.aiProfile == "auto"
     assert bridge.aiProfiles == [

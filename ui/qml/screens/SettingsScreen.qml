@@ -11,89 +11,43 @@ Rectangle {
     signal helpRequested(string text)
     signal helpCleared()
 
-    function connectionFeedbackText() {
-        return settingsBridge.connectionFeedback || ""
-    }
+    readonly property var themeOptions: [
+        { key: "midnight", title: "Полночное свечение", note: "Основная тёмная тема JARVIS." },
+        { key: "steel", title: "Стальной контраст", note: "Более строгий и холодный вид." }
+    ]
 
-    function telegramFeedbackText() {
-        var feedback = settingsBridge.connectionFeedback || ""
-        if (feedback.indexOf("Тест") === 0 || feedback.indexOf("Telegram") === 0) {
-            return feedback
+    function findKeyIndex(model, key) {
+        for (let index = 0; index < model.length; index += 1) {
+            if (model[index].key === key) {
+                return index
+            }
         }
-        return ""
-    }
-
-    function deleteAllDataHintText() {
-        return "Это действие необратимо и удаляет ключи, историю, Telegram-состояние и весь локальный профиль JARVIS из %LOCALAPPDATA%."
-    }
-
-    function aiModeLabel() {
-        return aiProfileMeta(settingsBridge.aiProfile).title
-    }
-
-    function aiProfileMeta(profileKey) {
-        switch (profileKey) {
-        case "groq_fast":
-            return { key: "groq_fast", title: "Быстрый Groq", note: "Минимальная задержка, если Groq-ключ доступен." }
-        case "gemini_quality":
-            return { key: "gemini_quality", title: "Умный Gemini", note: "Более качественные ответы, если Gemini-ключ доступен." }
-        case "cerebras_fast":
-            return { key: "cerebras_fast", title: "Быстрый Cerebras", note: "Ещё один быстрый облачный вариант при наличии ключа." }
-        case "openrouter_free":
-            return { key: "openrouter_free", title: "Резервный OpenRouter", note: "Запасной бесплатный вариант с лимитами." }
-        default:
-            return { key: "auto", title: "Авто", note: "Сам выбирает доступный быстрый профиль." }
-        }
-    }
-
-    function aiProfileOptions() {
-        return settingsBridge.aiProfiles.map(function(profileKey) {
-            return aiProfileMeta(profileKey)
-        })
-    }
-
-    function telegramStatusText() {
-        if (settingsBridge.telegramStatus.lastError && settingsBridge.telegramStatus.lastError.length > 0) {
-            return "Ошибка Telegram"
-        }
-        if (settingsBridge.telegramStatus.connected) {
-            return "Бот на связи"
-        }
-        if (settingsBridge.telegramBotTokenSet || settingsBridge.telegramUserId.length > 0) {
-            return "Данные есть, ждём первый ответ Telegram"
-        }
-        return "Telegram не настроен"
-    }
-
-    function telegramDetailsText() {
-        var status = settingsBridge.telegramStatus
-        if (status.lastError && status.lastError.length > 0) {
-            return "Telegram сейчас отвечает с ошибкой. Проверьте токен, Telegram ID и сеть."
-        }
-        if (status.lastCommand && status.lastCommand.length > 0) {
-            var reply = status.lastReply && status.lastReply.length > 0 ? status.lastReply : "ответа ещё нет"
-            return "Последняя команда: " + status.lastCommand + "\nПоследний ответ: " + reply
-        }
-        return settingsBridge.telegramConfigured
-               ? "Команд ещё не было. Нажмите тест, чтобы проверить пуш."
-               : "Добавьте Telegram bot token и Telegram ID в подключениях выше."
+        return 0
     }
 
     function updatePillText() {
-        var status = settingsBridge.updateStatus
+        const status = settingsBridge.updateStatus
         if (settingsBridge.updateCheckBusy) {
-            return "Идёт операция"
+            return "Проверяю"
         }
         if (status.last_error && status.last_error.length > 0) {
-            return "Ошибка проверки"
-        }
-        if ((!status.last_checked_at_utc || status.last_checked_at_utc.length === 0) && !status.update_available) {
-            return "Не проверялось"
+            return "Ошибка"
         }
         if (status.update_available) {
             return "Есть обновление"
         }
         return "Актуально"
+    }
+
+    function updateHintText() {
+        const status = settingsBridge.updateStatus
+        if (status.last_error && status.last_error.length > 0) {
+            return status.last_error
+        }
+        if (status.update_available) {
+            return "Найдена новая версия. Можно открыть релиз и скачать свежий установщик."
+        }
+        return settingsBridge.updateSummary
     }
 
     ScrollView {
@@ -113,78 +67,50 @@ Rectangle {
             spacing: 14
 
             SettingsSection {
+                objectName: "settingsSection_connections"
                 Layout.fillWidth: true
                 title: "Подключения"
-                description: "Groq и Telegram для чата, уведомлений и первого запуска."
+                description: "Для старта нужны Groq и Telegram."
+                helpText: "Здесь лежат основные ключи для обычного пользователя."
                 expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Groq"
-                    description: "Ключ для быстрых облачных ответов."
-                    helpText: "Если ключ есть, JARVIS может отвечать быстрее и точнее. Локальные команды работают и без него."
+                    description: "Основной ключ для быстрых ответов."
+                    helpText: "Если ключ есть, JARVIS сможет отвечать через облако."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
+                    InputField {
+                        id: groqConnectionField
+                        objectName: "settingsGroqField"
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        InputField {
-                            id: groqConnectionField
-                            objectName: "settingsGroqField"
-                            Layout.fillWidth: true
-                            label: "Ключ Groq"
-                            text: settingsBridge.groqApiKey
-                            placeholderText: "Вставьте ключ Groq"
-                            secret: true
-                        }
-
-                        Text {
-                            text: 'Получить ключ можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://console.groq.com/keys">https://console.groq.com/keys</a>'
-                            textFormat: Text.RichText
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                        }
+                        label: "Ключ Groq"
+                        text: settingsBridge.groqApiKey
+                        placeholderText: "Вставьте ключ Groq"
+                        secret: true
                     }
                 }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Telegram bot token"
-                    description: "Токен нужен для команд и пушей в Telegram."
-                    helpText: "Бот должен быть создан в @BotFather. Этот токен хранится локально и не должен светиться в интерфейсе."
+                    description: "Токен бота для команд и ответов в Telegram."
+                    helpText: "Это токен от @BotFather для вашего личного бота."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
+                    InputField {
+                        id: telegramBotTokenField
+                        objectName: "settingsTelegramBotTokenField"
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        InputField {
-                            id: telegramBotTokenField
-                            objectName: "settingsTelegramBotTokenField"
-                            Layout.fillWidth: true
-                            label: "Токен Telegram-бота"
-                            text: settingsBridge.telegramBotToken
-                            placeholderText: "Вставьте токен от @BotFather"
-                            secret: true
-                        }
-
-                        Text {
-                            text: 'Создать Telegram-бота можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://t.me/BotFather">@BotFather</a>'
-                            textFormat: Text.RichText
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                        }
+                        label: "Токен Telegram-бота"
+                        text: settingsBridge.telegramBotToken
+                        placeholderText: "Вставьте токен от @BotFather"
+                        secret: true
                     }
                 }
 
@@ -192,33 +118,17 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Telegram ID"
                     description: "Куда JARVIS будет отправлять ответы и напоминания."
-                    helpText: "Это ваш личный Telegram ID. Он нужен, чтобы бот знал, куда писать."
+                    helpText: "Это ваш личный Telegram ID, чтобы бот писал только вам."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
+                    InputField {
+                        id: telegramUserIdField
+                        objectName: "settingsTelegramUserIdField"
                         Layout.fillWidth: true
-                        spacing: 6
-
-                        InputField {
-                            id: telegramUserIdField
-                            objectName: "settingsTelegramUserIdField"
-                            Layout.fillWidth: true
-                            label: "Telegram ID"
-                            text: settingsBridge.telegramUserId
-                            placeholderText: "Вставьте ваш Telegram ID"
-                        }
-
-                        Text {
-                            text: 'Узнать свой Telegram ID можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://t.me/userinfobot">@userinfobot</a>'
-                            textFormat: Text.RichText
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WrapAnywhere
-                            Layout.fillWidth: true
-                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
-                        }
+                        label: "Telegram ID"
+                        text: settingsBridge.telegramUserId
+                        placeholderText: "Вставьте ваш Telegram ID"
                     }
                 }
 
@@ -231,6 +141,9 @@ Rectangle {
                         text: "Сохранить подключения"
                         onClicked: settingsBridge.saveConnections(
                                        groqConnectionField.text,
+                                       settingsBridge.cerebrasApiKey,
+                                       settingsBridge.geminiApiKey,
+                                       settingsBridge.openrouterApiKey,
                                        telegramBotTokenField.text,
                                        telegramUserIdField.text
                                    )
@@ -247,8 +160,8 @@ Rectangle {
 
                 Text {
                     objectName: "settingsConnectionsFeedback"
-                    visible: settingsRoot.connectionFeedbackText().length > 0
-                    text: settingsRoot.connectionFeedbackText()
+                    visible: settingsBridge.connectionFeedback.length > 0
+                    text: settingsBridge.connectionFeedback
                     color: Theme.Colors.accent
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
@@ -258,109 +171,43 @@ Rectangle {
             }
 
             SettingsSection {
+                objectName: "settingsSection_assistantMode"
                 Layout.fillWidth: true
-                title: "Telegram"
-                description: "Статус подключения, последняя реакция и тестовый пуш."
+                title: "Режим ассистента"
+                description: "Один главный выбор: быстрый, стандартный, умный или приватный."
+                helpText: "Обычно хватает одного режима. Слово активации всегда остаётся локальным."
                 expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Статус"
-                    description: telegramStatusText()
-                    helpText: "Здесь видно, жив ли Telegram-канал, какая команда была последней и была ли ошибка."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        StatusPill {
-                            text: telegramStatusText()
-                        }
-
-                        Text {
-                            text: telegramDetailsText()
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            SecondaryButton {
-                                text: settingsBridge.telegramTestBusy ? "Отправляю..." : "Отправить тест"
-                                enabled: settingsBridge.telegramConfigured && !settingsBridge.telegramTestBusy
-                                onClicked: settingsBridge.sendTelegramTest()
-                            }
-
-                            Text {
-                                text: settingsBridge.telegramTestBusy
-                                      ? "Отправляю тестовое сообщение в Telegram..."
-                                      : settingsRoot.telegramFeedbackText().length > 0
-                                      ? settingsRoot.telegramFeedbackText()
-                                      : "Тест отправит короткое сообщение в ваш Telegram."
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.micro
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsSection {
-                Layout.fillWidth: true
-                title: "ИИ"
-                description: "Режим, провайдер и модель — без лишнего зоопарка."
-                expanded: false
-
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Профиль"
-                    description: "Выбирайте по смыслу: быстрее или умнее."
-                    helpText: "Авто выбирает доступный профиль. Groq дает минимальную задержку, Gemini обычно качественнее, Cerebras тоже быстрый, OpenRouter остается резервным вариантом."
+                    title: "Режим"
+                    description: "Выберите поведение JARVIS без лишней технички."
+                    helpText: "Быстрый — про скорость. Стандартный — основной. Умный — про качество. Приватный — только локально."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
                     AppComboBox {
-                        id: aiProfileCombo
-                        objectName: "aiProfileCombo"
-                        Layout.preferredWidth: 340
-                        model: settingsRoot.aiProfileOptions()
+                        id: assistantModeCombo
+                        objectName: "assistantModeCombo"
+                        Layout.preferredWidth: 320
+                        model: settingsBridge.assistantModeOptions
                         textRole: "title"
-                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.aiProfile))
-                        onActivated: (index) => settingsBridge.aiProfile = model[index].key
+                        currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.assistantMode)
+                        onActivated: (index) => settingsBridge.assistantMode = model[index].key
                     }
-                }
 
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Модель"
-                    description: "Точный идентификатор модели, если вы хотите его поменять вручную."
-                    helpText: "Это уже тонкая настройка. Обычно хватает профиля выше, но поле нужно оставить для явного контроля."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    InputField {
-                        id: aiModelField
-                        objectName: "aiModelField"
-                        Layout.fillWidth: true
-                        label: "Модель ИИ"
-                        text: settingsBridge.aiModel
-                        placeholderText: "openai/gpt-oss-20b"
+                    StatusPill {
+                        objectName: "assistantStatusPill"
+                        text: settingsBridge.assistantUserStatus
                     }
                 }
 
                 Text {
+                    objectName: "assistantModeSummary"
                     Layout.fillWidth: true
-                    text: "Текущий профиль: " + aiModeLabel()
+                    text: settingsBridge.assistantModeSummary
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
@@ -369,66 +216,44 @@ Rectangle {
             }
 
             SettingsSection {
+                objectName: "settingsSection_voiceSystem"
                 Layout.fillWidth: true
                 title: "Голос и система"
-                description: "Голос JARVIS, автозапуск, старт свернутым и трей."
+                description: "Голос JARVIS, автозапуск и трей."
+                helpText: "Здесь только поведение приложения и переход к голосовой вкладке."
                 expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Голос"
-                    description: voiceBridge.summary
-                    helpText: "Микрофон, вывод, wake и озвучка управляются на отдельной вкладке Голос."
+                    title: "Голос JARVIS"
+                    description: "Откройте отдельную вкладку для микрофона, wake word и проверки понимания."
+                    helpText: "Если хотите проверить, как JARVIS слышит команду, откройте голосовую вкладку."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        StatusPill {
-                            text: voiceBridge.voiceResponseEnabled ? "Озвучка включена" : "Озвучка выключена"
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            SecondaryButton {
-                                text: "Открыть голос"
-                                onClicked: settingsBridge.openScreen("voice")
-                            }
-
-                            SecondaryButton {
-                                text: "Проверка \"JARVIS меня слышит\""
-                                onClicked: settingsBridge.openScreen("voice")
-                            }
-
-                            Text {
-                                text: "Откроет вкладку голоса, где JARVIS покажет: что услышал, что понял и какое действие выбрал."
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.micro
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
+                    SecondaryButton {
+                        objectName: "openVoiceSettingsButton"
+                        text: "Открыть голос"
+                        onClicked: settingsBridge.openScreen("voice")
                     }
+
+                    Item { Layout.fillWidth: true }
                 }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Автозапуск"
                     description: "JARVIS стартует вместе с Windows."
-                    helpText: "Автозапуск нужен, если ассистент должен быть всегда под рукой. При отключении запуск только вручную."
+                    helpText: "Включайте, если хотите, чтобы приложение было готово сразу после входа."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
                     AppSwitch {
-                        id: startupSwitch
-                        objectName: "startupSwitch"
+                        objectName: "startupEnabledSwitch"
                         checked: settingsBridge.startupEnabled
                         onToggled: settingsBridge.startupEnabled = checked
                     }
@@ -436,17 +261,16 @@ Rectangle {
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Свернутый режим"
-                    description: "JARVIS может стартовать уже свернутым и не мешать на рабочем столе."
-                    helpText: "Этот режим помогает не захламлять экран при запуске. Приложение сразу уходит в компактный вид."
+                    title: "Старт свёрнутым"
+                    description: "Если автозапуск включён, JARVIS может открываться без большого окна."
+                    helpText: "Удобно, если не хотите видеть окно сразу после старта Windows."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
                     AppSwitch {
-                        id: startMinimizedSwitch
-                        objectName: "startMinimizedSwitch"
+                        objectName: "startMinimizedEnabledSwitch"
                         checked: settingsBridge.startMinimizedEnabled
                         onToggled: settingsBridge.startMinimizedEnabled = checked
                     }
@@ -455,16 +279,15 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Сворачивать в трей"
-                    description: "При закрытии окно может не исчезать, а уходить в значок рядом с часами."
-                    helpText: "Если режим включён, закрытие окна не завершает JARVIS. Он остаётся в трее."
+                    description: "При закрытии окно может уходить в значок рядом с часами."
+                    helpText: "Это помогает держать JARVIS в фоне, не занимая место на панели задач."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
                     AppSwitch {
-                        id: traySwitch
-                        objectName: "traySwitch"
+                        objectName: "minimizeToTrayEnabledSwitch"
                         checked: settingsBridge.minimizeToTrayEnabled
                         onToggled: settingsBridge.minimizeToTrayEnabled = checked
                     }
@@ -472,289 +295,288 @@ Rectangle {
             }
 
             SettingsSection {
+                objectName: "settingsSection_historyData"
                 Layout.fillWidth: true
-                title: "История, команды и данные"
-                description: "Очистка чата, избранные действия и сброс локального профиля."
+                title: "История и данные"
+                description: "Чат, избранные действия и сброс локального профиля."
+                helpText: "Здесь лежат все действия с локальными данными."
                 expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "История чата"
-                    description: "Можно очистить чат сразу или позже выключить сохранение истории."
-                    helpText: "Кнопка очистит текущую переписку. Если выключить сохранение, новые сообщения не будут записываться в историю."
+                    description: "Можно отключить сохранение истории или очистить уже сохранённую переписку."
+                    helpText: "Если отключить сохранение, новые сообщения больше не будут записываться в локальную историю."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
+                    SecondaryButton {
+                        objectName: "clearChatHistoryButton"
+                        text: "Очистить чат"
+                        onClicked: settingsBridge.clearChatHistory()
+                    }
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            SecondaryButton {
-                                objectName: "settingsClearChatButton"
-                                text: "Очистить чат"
-                                onClicked: settingsBridge.clearChatHistory()
-                            }
-
-                            AppSwitch {
-                                objectName: "settingsHistoryEnabledSwitch"
-                                checked: settingsBridge.saveHistoryEnabled
-                                onToggled: settingsBridge.setSaveHistoryEnabled(checked)
-                            }
-                        }
-
-                        Text {
-                            text: settingsBridge.saveHistoryEnabled
-                                  ? "История сохраняется локально в %LOCALAPPDATA%\\JarvisAi_Unity."
-                                  : "История выключена: новые сообщения не будут сохраняться между запусками."
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
+                    AppSwitch {
+                        objectName: "saveHistoryEnabledSwitch"
+                        checked: settingsBridge.saveHistoryEnabled
+                        onToggled: settingsBridge.setSaveHistoryEnabled(checked)
                     }
                 }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Избранные команды"
-                    description: "Закрепите 5–7 самых частых действий в быстрых командах чата."
-                    helpText: "Закрепленные команды показываются первыми в чате. Управлять ими удобнее из списка приложений."
+                    description: settingsBridge.pinnedCommands.length > 0
+                                 ? "Закреплено: " + settingsBridge.pinnedCommands.length
+                                 : "Пока ничего не закреплено."
+                    helpText: "Закреплённые команды появляются в быстрых действиях чата."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        Text {
-                            text: settingsBridge.pinnedCommands.length > 0
-                                  ? "Закреплено: " + settingsBridge.pinnedCommands.map(item => item.title).join(", ")
-                                  : "Пока ничего не закреплено. Откройте приложения и закрепите нужные команды."
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.small
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        SecondaryButton {
-                            text: "Открыть приложения"
-                            onClicked: settingsBridge.openScreen("apps")
-                        }
+                    SecondaryButton {
+                        objectName: "openAppsButton"
+                        text: "Открыть приложения"
+                        onClicked: settingsBridge.openScreen("apps")
                     }
+
+                    Item { Layout.fillWidth: true }
                 }
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Удалить все данные"
                     description: "Сбросить локальный профиль, историю и сохранения в %LOCALAPPDATA%."
-                    helpText: "Удаляет локальные настройки, ключи, историю и состояние JARVIS из %LOCALAPPDATA%\\JarvisAi_Unity. После этого нужна повторная регистрация."
+                    helpText: "Это удаляет локальные ключи, историю, Telegram-состояние и профиль JARVIS на этом компьютере."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 8
-
-                        SecondaryButton {
-                            text: "Удалить все данные"
-                            danger: true
-                            onClicked: deleteAllDataDialog.open()
-                        }
-
-                        Text {
-                            text: settingsRoot.deleteAllDataHintText()
-                            color: "#ffb4b4"
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            visible: false
-                            text: settingsBridge.connectionFeedback.length > 0
-                                  ? settingsBridge.connectionFeedback
-                                  : "Действие необратимое. Используйте, если хотите полностью сбросить локальный профиль."
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
+                    SecondaryButton {
+                        objectName: "deleteAllDataButton"
+                        text: "Удалить все данные"
+                        danger: true
+                        onClicked: settingsBridge.deleteAllData()
                     }
+
+                    Item { Layout.fillWidth: true }
                 }
             }
 
             SettingsSection {
+                objectName: "settingsSection_theme"
                 Layout.fillWidth: true
                 title: "Внешний вид"
-                description: "Тема интерфейса должна быть ниже полезных настроек."
+                description: "Один стиль для всего интерфейса."
+                helpText: "Тема влияет только на внешний вид JARVIS."
                 expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Тема"
-                    description: "Меняет весь интерфейс сразу, без разрозненных цветов в отдельных блоках."
-                    helpText: "Тема влияет сразу на всю оболочку. Она не должна мешать подключению и голосу в верхней части экрана."
+                    description: "Выберите общий стиль интерфейса."
+                    helpText: "Это не влияет на работу функций, только на внешний вид."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
                     Item { Layout.fillWidth: true }
 
                     AppComboBox {
-                        id: themeCombo
+                        id: themeModeCombo
                         objectName: "themeCombo"
-                        Layout.preferredWidth: 280
-                        model: [
-                            { key: "midnight", title: "Полуночное свечение" },
-                            { key: "steel", title: "Стальной орбит" }
-                        ]
+                        Layout.preferredWidth: 260
+                        model: settingsRoot.themeOptions
                         textRole: "title"
-                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.themeMode))
+                        currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.themeMode)
                         onActivated: (index) => settingsBridge.themeMode = model[index].key
                     }
                 }
             }
 
             SettingsSection {
+                objectName: "settingsSection_advanced"
+                Layout.fillWidth: true
+                title: "Для опытных"
+                description: "Дополнительные провайдеры и локальная модель."
+                helpText: "Это тонкие настройки, которые обычному пользователю не нужны."
+                expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Gemini"
+                    description: "Дополнительный ключ для умного режима."
+                    helpText: "Нужен только если хотите подключить Google Gemini как дополнительный маршрут."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    InputField {
+                        id: geminiField
+                        objectName: "settingsGeminiField"
+                        Layout.fillWidth: true
+                        label: "Ключ Gemini"
+                        text: settingsBridge.geminiApiKey
+                        placeholderText: "Вставьте ключ Gemini"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Cerebras"
+                    description: "Быстрый резервный облачный провайдер."
+                    helpText: "Cerebras нужен только как дополнительный маршрут, если он вам реально полезен."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    InputField {
+                        id: cerebrasField
+                        objectName: "settingsCerebrasField"
+                        Layout.fillWidth: true
+                        label: "Ключ Cerebras"
+                        text: settingsBridge.cerebrasApiKey
+                        placeholderText: "Вставьте ключ Cerebras"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "OpenRouter"
+                    description: "Запасной маршрут и бесплатные модели."
+                    helpText: "OpenRouter удобен как резервный вариант или для нестандартных сценариев."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    InputField {
+                        id: openRouterField
+                        objectName: "settingsOpenRouterField"
+                        Layout.fillWidth: true
+                        label: "Ключ OpenRouter"
+                        text: settingsBridge.openrouterApiKey
+                        placeholderText: "Вставьте ключ OpenRouter"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Локальная Llama"
+                    description: "Для приватного режима и локального запуска."
+                    helpText: "Если локальная модель не готова, JARVIS должен честно об этом говорить."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    AppComboBox {
+                        id: localBackendCombo
+                        objectName: "localLlmBackendCombo"
+                        Layout.preferredWidth: 220
+                        model: settingsBridge.localLlmBackendOptions
+                        textRole: "title"
+                        currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.localLlmBackend)
+                        onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
+                    }
+
+                    InputField {
+                        id: localModelField
+                        objectName: "localLlmModelField"
+                        Layout.fillWidth: true
+                        label: "Модель или путь"
+                        text: settingsBridge.localLlmModel
+                        placeholderText: "Например: llama3.2:1b или C:/models/model.gguf"
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: settingsBridge.localReadiness
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.small
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    PrimaryButton {
+                        objectName: "settingsAdvancedSaveButton"
+                        text: "Сохранить для опытных"
+                        onClicked: settingsBridge.saveAdvancedConnections(
+                                       geminiField.text,
+                                       cerebrasField.text,
+                                       openRouterField.text,
+                                       localBackendCombo.model[localBackendCombo.currentIndex].key,
+                                       localModelField.text
+                                   )
+                    }
+
+                    SecondaryButton {
+                        objectName: "settingsLocalLlmDocsButton"
+                        text: settingsBridge.localLlmActionLabel
+                        enabled: settingsBridge.localLlmActionUrl.length > 0
+                        onClicked: Qt.openUrlExternally(settingsBridge.localLlmActionUrl)
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+            }
+
+            SettingsSection {
+                objectName: "settingsSection_updates"
                 Layout.fillWidth: true
                 title: "Обновления"
                 description: "Версия, канал и проверка релиза на GitHub."
+                helpText: "Здесь видно текущую версию и можно проверить новый релиз."
                 expanded: false
+                onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                onHelpCleared: settingsRoot.helpCleared()
 
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Статус"
                     description: settingsBridge.updateSummary
-                    helpText: "JARVIS проверяет GitHub Releases, при наличии installer-релиза скачивает установщик и запускает его поверх текущей версии. Если сеть рвётся или installer недоступен, останется ручной переход на страницу релиза."
+                    helpText: "Если доступно обновление, здесь появится статус и переход на релиз."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    ColumnLayout {
+                    StatusPill {
+                        objectName: "updatesStatusPill"
+                        text: settingsRoot.updatePillText()
+                    }
+
+                    Text {
                         Layout.fillWidth: true
-                        spacing: 8
-
-                        StatusPill {
-                            text: updatePillText()
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 10
-
-                            SecondaryButton {
-                                text: settingsBridge.updateCheckBusy ? "Проверяю..." : "Проверить обновления"
-                                enabled: !settingsBridge.updateCheckBusy
-                                onClicked: settingsBridge.checkForUpdates()
-                            }
-
-                            SecondaryButton {
-                                text: "Установить обновление"
-                                visible: settingsBridge.updateStatus.update_available && settingsBridge.updateStatus.can_apply
-                                enabled: !settingsBridge.updateCheckBusy
-                                onClicked: settingsBridge.applyUpdate()
-                            }
-
-                            SecondaryButton {
-                                text: "Открыть релиз"
-                                visible: settingsBridge.updateStatus.release_url && settingsBridge.updateStatus.release_url.length > 0
-                                onClicked: Qt.openUrlExternally(settingsBridge.updateStatus.release_url)
-                            }
-
-                            Text {
-                                text: settingsBridge.updateCheckBusy
-                                      ? "Идёт проверка обновлений или запуск установщика..."
-                                      : settingsBridge.updateStatus.last_error && settingsBridge.updateStatus.last_error.length > 0
-                                      ? "Проверка обновлений не удалась. Проверьте сеть или VPN и попробуйте ещё раз."
-                                      : settingsBridge.updateStatus.last_apply_message && settingsBridge.updateStatus.last_apply_message.length > 0
-                                      ? settingsBridge.updateStatus.last_apply_message
-                                      : settingsBridge.updateStatus.apply_hint && settingsBridge.updateStatus.apply_hint.length > 0
-                                      ? settingsBridge.updateStatus.apply_hint
-                                      : "Проверка обновлений доступна вручную."
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.micro
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
-                        }
+                        text: settingsRoot.updateHintText()
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
                     }
                 }
-            }
 
-            Item { Layout.preferredHeight: 4 }
-        }
-    }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
 
-    Popup {
-        id: deleteAllDataDialog
-        parent: settingsRoot
-        modal: true
-        focus: true
-        width: Math.min(settingsRoot.width - 48, 560)
-        x: Math.round((settingsRoot.width - width) / 2)
-        y: Math.round((settingsRoot.height - height) / 2)
-        padding: 18
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        background: Rectangle {
-            radius: 24
-            color: Theme.Colors.card
-            border.color: Qt.rgba(1.0, 0.48, 0.48, 0.26)
-            border.width: 1
-        }
-
-        Overlay.modal: Rectangle {
-            color: Qt.rgba(0.0, 0.0, 0.0, 0.45)
-        }
-
-        contentItem: ColumnLayout {
-            width: deleteAllDataDialog.availableWidth
-            spacing: 12
-
-            Text {
-                Layout.fillWidth: true
-                text: "Удалить локальные данные?"
-                color: Theme.Colors.text
-                font.family: Theme.Typography.displayFamily
-                font.pixelSize: Theme.Typography.body
-                font.bold: true
-                wrapMode: Text.WordWrap
-            }
-
-            Text {
-                Layout.fillWidth: true
-                text: "Будут удалены ключи, история чата, Telegram-состояние и локальный профиль JARVIS из %LOCALAPPDATA%. После этого потребуется повторная настройка."
-                color: Theme.Colors.textSoft
-                font.family: Theme.Typography.bodyFamily
-                font.pixelSize: Theme.Typography.small
-                wrapMode: Text.WordWrap
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-
-                Item { Layout.fillWidth: true }
-
-                SecondaryButton {
-                    text: "Отмена"
-                    onClicked: deleteAllDataDialog.close()
-                }
-
-                SecondaryButton {
-                    text: "Удалить без возврата"
-                    danger: true
-                    onClicked: {
-                        deleteAllDataDialog.close()
-                        settingsBridge.deleteAllData()
+                    SecondaryButton {
+                        objectName: "checkForUpdatesButton"
+                        text: "Проверить обновления"
+                        onClicked: settingsBridge.checkForUpdates()
                     }
+
+                    SecondaryButton {
+                        objectName: "openReleaseButton"
+                        text: "Открыть релиз"
+                        enabled: settingsBridge.updateStatus.release_url && settingsBridge.updateStatus.release_url.length > 0
+                        onClicked: Qt.openUrlExternally(settingsBridge.updateStatus.release_url)
+                    }
+
+                    Item { Layout.fillWidth: true }
                 }
             }
         }

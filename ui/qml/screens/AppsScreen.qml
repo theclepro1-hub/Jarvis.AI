@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
@@ -12,6 +12,8 @@ Rectangle {
     property string selectedCategory: "music"
     property bool manualFormOpen: false
     property bool scanCoolingDown: false
+    signal helpRequested(string text)
+    signal helpCleared()
 
     Timer {
         id: scanCooldownTimer
@@ -67,17 +69,17 @@ Rectangle {
     function categoryIntro(category) {
         switch (category) {
         case "music":
-            return "Здесь видно, что будет открываться по команде «включи музыку». Галочка справа выбирает основное приложение."
+            return "Что откроется по команде «включи музыку». Галочка справа задаёт основное приложение."
         case "steam":
-            return "Steam и Steam-игры. Нажмите «Запустить», чтобы проверить конкретную запись."
+            return "Игры и ярлыки Steam."
         case "launcher":
-            return "Лаунчеры и игровые клиенты. Здесь не должно быть системного мусора."
+            return "Лаунчеры и игровые клиенты."
         case "web":
-            return "Сайты и веб-ярлыки. По команде «открой ютуб» или «найди в интернете» JARVIS должен идти сюда."
+            return "Сайты и веб-ярлыки."
         case "app":
-            return "Остальные пользовательские приложения и команды."
+            return "Остальные приложения и команды."
         default:
-            return "Здесь видно, что будет открываться по команде «включи музыку». Галочка справа выбирает основное приложение."
+            return "Что откроется по команде «включи музыку». Галочка справа задаёт основное приложение."
         }
     }
 
@@ -227,6 +229,21 @@ Rectangle {
                 border.width: 1
                 implicitHeight: addColumn.implicitHeight + 24
 
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            helpRequested("Здесь можно найти приложение автоматически или добавить его вручную.")
+                        } else {
+                            helpCleared()
+                        }
+                    }
+                }
+
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    onTapped: helpRequested("Здесь можно найти приложение автоматически или добавить его вручную.")
+                }
+
                 ColumnLayout {
                     id: addColumn
                     anchors.fill: parent
@@ -250,7 +267,7 @@ Rectangle {
                             }
 
                             Text {
-                                text: "Сначала найдите автоматически или выберите файл. Ручной ввод нужен только для ссылок и нестандартных команд."
+                                text: "Сначала найдите автоматически или выберите файл. Ручной ввод нужен только для ссылок и редких команд."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
                                 font.pixelSize: Theme.Typography.small
@@ -364,6 +381,21 @@ Rectangle {
                 border.width: 1
                 implicitHeight: discoveredColumn.implicitHeight + 28
 
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            helpRequested("Это найденные приложения. Их можно добавить в каталог одним кликом.")
+                        } else {
+                            helpCleared()
+                        }
+                    }
+                }
+
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    onTapped: helpRequested("Это найденные приложения. Их можно добавить в каталог одним кликом.")
+                }
+
                 ColumnLayout {
                     id: discoveredColumn
                     anchors.fill: parent
@@ -379,7 +411,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Найдено: " + visibleDiscoveryCount() + ". Показываю только понятные варианты без дублей."
+                        text: "Найдено: " + visibleDiscoveryCount() + ". Добавляйте только нужные варианты."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
@@ -446,6 +478,21 @@ Rectangle {
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
                 implicitHeight: categoryColumn.implicitHeight + 28
+
+                HoverHandler {
+                    onHoveredChanged: {
+                        if (hovered) {
+                            helpRequested("Выберите категорию, чтобы быстро увидеть подключённые приложения.")
+                        } else {
+                            helpCleared()
+                        }
+                    }
+                }
+
+                TapHandler {
+                    acceptedButtons: Qt.LeftButton
+                    onTapped: helpRequested("Выберите категорию, чтобы быстро увидеть подключённые приложения.")
+                }
 
                 ColumnLayout {
                     id: categoryColumn
@@ -520,6 +567,16 @@ Rectangle {
                             border.color: Theme.Colors.borderSoft
                             border.width: 1
                             implicitHeight: row.implicitHeight + 24
+
+                            HoverHandler {
+                                onHoveredChanged: {
+                                    if (hovered) {
+                                        helpRequested("Здесь можно запустить, закрепить или назначить основное приложение.")
+                                    } else {
+                                        helpCleared()
+                                    }
+                                }
+                            }
 
                             RowLayout {
                                 id: row
@@ -638,7 +695,7 @@ Rectangle {
                     Text {
                         visible: filteredCatalog().length === 0
                         Layout.fillWidth: true
-                        text: "В этой категории пока ничего нет. Добавьте приложение вручную или найдите автоматически."
+                        text: "В этой категории пока ничего нет. Добавьте вручную или найдите автоматически."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
