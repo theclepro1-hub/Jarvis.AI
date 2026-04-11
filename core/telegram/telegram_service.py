@@ -260,9 +260,13 @@ class TelegramService:
             self._connected = True
             self._last_error = ""
             self._last_poll_at_utc = datetime.now(timezone.utc)
-        filtered_updates: list[TelegramUpdate] = []
         with self._offset_lock:
             current_offset = self._offset
+        if current_offset is None and updates:
+            next_offset = max(update.update_id for update in updates) + 1
+            self.save_offset(next_offset)
+            return []
+        filtered_updates: list[TelegramUpdate] = []
         for update in updates:
             if current_offset is not None and update.update_id < current_offset:
                 continue
@@ -273,10 +277,6 @@ class TelegramService:
                     continue
                 self._pending_update_ids_set.add(update.update_id)
             filtered_updates.append(update)
-        if current_offset is None and filtered_updates:
-            with self._offset_lock:
-                if self._offset is None:
-                    self._offset = min(update.update_id for update in filtered_updates)
 
         if async_dispatch:
             for update in filtered_updates:

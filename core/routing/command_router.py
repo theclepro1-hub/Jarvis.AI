@@ -11,6 +11,7 @@ from core.routing.text_rules import (
     clarification_question,
     looks_like_broken_command,
     looks_like_conversation,
+    looks_like_system_command,
     normalize_text,
     strip_leading_wake_prefix,
 )
@@ -102,6 +103,18 @@ class CommandRouter:
 
         if not actionable_plans and not clarification_steps and not unsupported:
             return RouteResult("ai" if execute else "preview", commands, [], queue_items)
+
+        if unsupported and not actionable_plans and not clarification_steps and all(
+            looks_like_system_command(command) for command in unsupported
+        ):
+            return self._clarification_route(
+                clean_text,
+                "Не понял системную команду. Скажите точнее.",
+                execute=execute,
+                detail="Системную команду не удалось распознать без локального совпадения.",
+                payload={"unsupported": unsupported[:3]},
+                queue_items=queue_items,
+            )
 
         if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands):
             return RouteResult("ai", [clean_text], [], [clean_text])
@@ -207,6 +220,8 @@ class CommandRouter:
         if not normalized:
             return False
         if any(looks_like_broken_command(command) for command in normalized):
+            return False
+        if any(looks_like_system_command(command) for command in normalized):
             return False
         return all(looks_like_conversation(command) for command in normalized)
 

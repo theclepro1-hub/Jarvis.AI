@@ -134,3 +134,26 @@ def test_intent_router_strips_polite_filler_before_open_resolution() -> None:
     assert plan.question == ""
     assert len(plan.steps) == 1
     assert plan.steps[0].kind == "open_items"
+
+
+def test_intent_router_supports_extended_power_aliases() -> None:
+    router = IntentRouter(_Actions())
+
+    cases = {
+        "\u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438 \u043f\u043a": "restart",
+        "\u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u043a \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440\u0430": "restart",
+        "\u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u043f\u043a": "shutdown",
+        "\u0441\u043e\u043d": "sleep",
+        "\u0432\u044b\u0439\u0434\u0438 \u0438\u0437 \u0443\u0447\u0435\u0442\u043a\u0438": "logoff",
+        "\u0432\u044b\u0439\u0434\u0438 \u0438\u0437 \u0430\u043a\u043a\u0430\u0443\u043d\u0442\u0430": "logoff",
+        "\u0431\u043b\u043e\u043a\u0438\u0440\u0443\u0439 \u044d\u043a\u0440\u0430\u043d": "lock",
+    }
+
+    for command, expected_action in cases.items():
+        plan = router.build(command)
+
+        assert plan is not None
+        assert plan.question == ""
+        assert len(plan.steps) == 1
+        assert plan.steps[0].kind == "power_action"
+        assert plan.steps[0].payload["action"] == expected_action

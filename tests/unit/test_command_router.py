@@ -704,3 +704,28 @@ def test_command_router_opens_task_manager_without_ai() -> None:
     assert result.execution_result.steps[0].kind == "open_items"
     assert actions.opened == ["system_task_manager"]
     assert pc_control.opened_urls == []
+
+
+def test_command_router_routes_extended_restart_alias_locally_without_ai() -> None:
+    router, _actions, pc_control = make_router()
+
+    result = router.handle("\u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438 \u043f\u043a")
+
+    assert result.kind == "local"
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "power_action"
+    assert pc_control.power == ["restart"]
+    assert result.assistant_lines == ["\u041f\u0435\u0440\u0435\u0437\u0430\u0433\u0440\u0443\u0436\u0430\u044e \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440"]
+
+
+def test_command_router_does_not_fallback_to_ai_for_unknown_system_like_phrase() -> None:
+    router, actions, pc_control = make_router()
+
+    result = router.handle("\u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438 \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u0438\u043a")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["\u041d\u0435 \u043f\u043e\u043d\u044f\u043b \u0441\u0438\u0441\u0442\u0435\u043c\u043d\u0443\u044e \u043a\u043e\u043c\u0430\u043d\u0434\u0443. \u0421\u043a\u0430\u0436\u0438\u0442\u0435 \u0442\u043e\u0447\u043d\u0435\u0435."]
+    assert actions.opened == []
+    assert pc_control.power == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"

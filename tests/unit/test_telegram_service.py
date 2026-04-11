@@ -419,6 +419,45 @@ def test_async_dispatch_retries_failed_update_before_acknowledging_it() -> None:
     assert transport.requested_offsets == [300, 300]
 
 
+def test_telegram_service_bootstraps_missing_offset_without_replaying_backlog() -> None:
+    backlog = [
+        TelegramUpdate(update_id=40, chat_id=777, user_id=123456789, text="old 1"),
+        TelegramUpdate(update_id=41, chat_id=777, user_id=123456789, text="old 2"),
+    ]
+    transport = FakeTransport(backlog)
+    offset_store = FakeOffsetStore(offset=None)
+    received: list[str] = []
+
+    def handler(text: str) -> str:
+        received.append(text)
+        return f"ok:{text}"
+
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=offset_store,
+        handler=handler,
+    )
+
+    first_results = service.poll_once()
+
+    assert first_results == []
+    assert received == []
+    assert transport.sent_messages == []
+    assert offset_store.saved == [42]
+    assert transport.requested_offsets == [None]
+
+    transport.updates = [TelegramUpdate(update_id=42, chat_id=777, user_id=123456789, text="fresh")]
+
+    second_results = service.poll_once()
+
+    assert received == ["fresh"]
+    assert second_results[0].handled is True
+    assert transport.sent_messages == [(777, "ok:fresh")]
+    assert offset_store.saved[-1] == 43
+    assert transport.requested_offsets == [None, 42]
+
+
 def test_async_dispatch_exception_releases_pending_update_and_does_not_ack() -> None:
     transport = FakeTransport([])
     offset_store = FakeOffsetStore(offset=400)

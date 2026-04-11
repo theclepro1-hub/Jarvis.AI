@@ -46,6 +46,25 @@ OPEN_COMMAND_TOKENS = ("открой", "открыть", "запусти", "за
 ENABLE_COMMAND_TOKENS = ("включи", "включить")
 SEARCH_COMMAND_TOKENS = ("найди", "поищи", "ищи", "поиск")
 REMINDER_COMMAND_TOKENS = ("напомни",)
+SYSTEM_COMMAND_PREFIXES = (
+    "выключ",
+    "перезагруз",
+    "перезапуст",
+    "рестарт",
+    "ребут",
+    "сон",
+    "усыпи",
+    "режим сна",
+    "гибернац",
+    "выйди из",
+    "выход из",
+    "разлогин",
+    "логаут",
+    "заблокир",
+    "блокировк",
+    "блокируй",
+    "локни",
+)
 
 CONVERSATION_PREFIXES = (
     "привет",
@@ -163,10 +182,19 @@ def clarification_question(text: str) -> str:
     return ""
 
 
+def looks_like_system_command(text: str) -> bool:
+    lower = normalize_text(text).casefold()
+    if not lower:
+        return False
+    return any(lower.startswith(prefix) for prefix in SYSTEM_COMMAND_PREFIXES)
+
+
 def looks_like_conversation(text: str) -> bool:
     clean = normalize_text(text)
     lower = clean.casefold()
     if not lower:
+        return False
+    if looks_like_system_command(lower):
         return False
     if any(lower.startswith(prefix) for prefix in CONVERSATION_PREFIXES):
         return True
