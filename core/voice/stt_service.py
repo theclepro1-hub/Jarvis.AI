@@ -11,6 +11,7 @@ import time
 import wave
 from pathlib import Path
 
+from core.policy.assistant_mode import resolve_assistant_mode
 from core.routing.text_rules import normalize_text
 from core.voice.faster_whisper_runtime import load_faster_whisper_model, resolve_local_faster_whisper_model
 from core.voice.model_paths import is_vosk_model_ready, resolve_vosk_model_path
@@ -34,7 +35,19 @@ class STTService:
         self._http_client = None
         self._http_client_signature: tuple[str, str, float] | None = None
 
+    def assistant_mode(self) -> str:
+        return self._voice_mode()
+
     def engine(self) -> str:
+        override = str(self.settings.get("stt_backend_override", "auto")).strip().casefold()
+        if self._voice_mode() == "private" and override == "groq_whisper":
+            override = "auto"
+        if override == "local_vosk":
+            return "local_vosk"
+        if override == "local_faster_whisper":
+            return "local_faster_whisper"
+        if override == "groq_whisper":
+            return "groq_whisper"
         value = str(self.settings.get("stt_engine", "auto")).strip().casefold()
         if value in {"groq", "groq_whisper"}:
             return "groq_whisper"
@@ -46,8 +59,11 @@ class STTService:
 
     def status_text(self) -> str:
         engine = self.engine()
+        voice_mode = self._voice_mode()
         groq_key = self._groq_key()
 
+        if voice_mode == "private" and engine in {"auto", "groq_whisper"}:
+            return self._assistant_mode_status_text(voice_mode, bool(groq_key))
         if engine == "groq_whisper":
             return "распознавание через Groq готово" if groq_key else "Нужен ключ Groq"
         if engine == "local_vosk":
@@ -58,26 +74,11 @@ class STTService:
             if self._local_vosk_available():
                 return "Whisper недоступен, резервный Vosk готов"
             return "Нужен faster-whisper или локальная модель Vosk"
-
-        voice_mode = self._voice_mode()
-        if voice_mode == "private":
-            if self._local_faster_whisper_ready():
-                return "локальное распознавание готово"
-            if self._local_vosk_available():
-                return "локальное распознавание работает через Vosk"
-            return "Нужен локальный backend распознавания"
-
-        if groq_key and self._local_faster_whisper_ready():
-            return "распознавание готово"
-        if groq_key:
-            return "распознавание через Groq готово"
-        if self._local_faster_whisper_ready():
-            return "локальное распознавание готово"
-        if self._local_vosk_available():
-            return "локальное распознавание работает через Vosk"
-        return "Нужен ключ Groq или локальный backend распознавания"
+        return self._assistant_mode_status_text(voice_mode, bool(groq_key))
 
     def can_transcribe(self) -> bool:
+        if self._voice_mode() == "private":
+            return self._has_local_backend()
         engine = self.engine()
         if engine == "groq_whisper":
             return bool(self._groq_key())
@@ -85,9 +86,7 @@ class STTService:
             return self._local_vosk_available()
         if engine == "local_faster_whisper":
             return self._local_faster_whisper_ready() or self._local_vosk_available()
-        if self._voice_mode() == "private":
-            return self._local_faster_whisper_ready() or self._local_vosk_available()
-        return bool(self._groq_key()) or self._local_faster_whisper_ready() or self._local_vosk_available()
+        return bool(self._groq_key()) or self._has_local_backend()
 
     def warm_up_local_backend(self, cancel_event: threading.Event | None = None) -> bool:
         if self._is_cancelled(cancel_event):
@@ -136,6 +135,8 @@ class STTService:
 
         engine = self.engine()
         groq_key = self._groq_key()
+        if self._voice_mode() == "private":
+            return self._transcribe_private(raw_bytes, cancel_event)
 
         if engine == "auto":
             return self._transcribe_auto(raw_bytes, groq_key, cancel_event)
@@ -169,10 +170,10 @@ class STTService:
             return self._cancelled_result(engine="auto")
         voice_mode = self._voice_mode()
         if voice_mode == "private":
-            return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper", "local_vosk"), cancel_event)
+            return self._transcribe_private(raw_bytes, cancel_event)
 
-        if voice_mode == "balance":
-            if self._local_faster_whisper_ready() or self._local_vosk_available():
+        if voice_mode == "standard":
+            if self._has_local_backend():
                 local_result = self._transcribe_local_chain(raw_bytes, self._auto_local_chain(), cancel_event)
                 if local_result.ok:
                     return local_result
@@ -462,13 +463,12 @@ class STTService:
             return "local_vosk"
         if engine == "local_faster_whisper" and self._local_faster_whisper_ready():
             return "local_faster_whisper"
-        if engine == "auto" and self._voice_mode() == "balance" and self._local_vosk_available():
-            return "local_vosk"
-        if self._local_faster_whisper_ready():
-            return "local_faster_whisper"
-        if self._local_vosk_available():
-            return "local_vosk"
-        return "local_faster_whisper"
+        for candidate in self._auto_local_chain():
+            if candidate == "local_faster_whisper" and self._local_faster_whisper_ready():
+                return candidate
+            if candidate == "local_vosk" and self._local_vosk_available():
+                return candidate
+        return self._auto_local_chain()[0]
 
     def _faster_whisper_model_ref(self) -> str:
         configured = str(self.settings.get("stt_local_model", DEFAULT_FASTER_WHISPER_MODEL)).strip()
@@ -499,7 +499,7 @@ class STTService:
         )
 
     def _auto_local_chain(self) -> tuple[str, ...]:
-        if self._voice_mode() == "balance" and self._local_vosk_available():
+        if self._voice_mode() in {"fast", "standard"} and self._local_vosk_available():
             return ("local_vosk", "local_faster_whisper")
         return ("local_faster_whisper", "local_vosk")
 
@@ -523,8 +523,73 @@ class STTService:
         return str(registration.get("groq_api_key", "")).strip()
 
     def _voice_mode(self) -> str:
-        value = str(self.settings.get("voice_mode", "balance")).strip().casefold()
-        return value if value in {"private", "balance", "quality"} else "balance"
+        assistant_mode = str(resolve_assistant_mode(self.settings) or "").strip().casefold()
+        if assistant_mode in {"fast", "smart", "private"}:
+            return assistant_mode
+        value = str(self.settings.get("voice_mode", "standard")).strip().casefold()
+        if value == "balance":
+            return "standard"
+        if value == "quality":
+            return "smart"
+        if value in {"fast", "standard", "smart", "private"}:
+            return value
+        return assistant_mode if assistant_mode in {"standard"} else "standard"
+
+    def _has_local_backend(self) -> bool:
+        return self._local_faster_whisper_ready() or self._local_vosk_available()
+
+    def _transcribe_private(
+        self,
+        raw_bytes: bytes,
+        cancel_event: threading.Event | None = None,
+    ) -> TranscriptionResult:
+        if self._has_local_backend():
+            return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper", "local_vosk"), cancel_event)
+        return TranscriptionResult(
+            status="model_missing",
+            detail="Приватный режим требует локальный backend распознавания. Облачный fallback отключён.",
+            engine="local_faster_whisper",
+            backend_trace=("local_faster_whisper", "local_vosk"),
+        )
+
+    def _assistant_mode_status_text(self, voice_mode: str, cloud_ready: bool) -> str:
+        local_whisper_ready = self._local_faster_whisper_ready()
+        local_vosk_ready = self._local_vosk_available()
+
+        if voice_mode == "private":
+            if local_whisper_ready:
+                return "Приватный режим: локальное распознавание готово"
+            if local_vosk_ready:
+                return "Приватный режим: локальное распознавание через Vosk готово"
+            return "Приватный режим: нужен локальный backend распознавания, облачный fallback отключён"
+
+        if voice_mode == "standard":
+            if local_whisper_ready:
+                return "Стандартный режим: локальное распознавание готово"
+            if local_vosk_ready:
+                return "Стандартный режим: локальное распознавание через Vosk готово"
+            if cloud_ready:
+                return "Стандартный режим: облачный fallback через Groq готов"
+            return "Стандартный режим: нужен локальный backend или ключ Groq"
+
+        if voice_mode == "fast":
+            if cloud_ready:
+                return "Быстрый режим: облачное распознавание через Groq готово"
+            if local_vosk_ready:
+                return "Быстрый режим: облако недоступно, локальный Vosk готов"
+            if local_whisper_ready:
+                return "Быстрый режим: облако недоступно, локальный Whisper готов"
+            return "Быстрый режим: нужен ключ Groq или локальный backend"
+
+        if cloud_ready and local_whisper_ready:
+            return "Умный режим: Groq готов, локальный Whisper подключён как резерв"
+        if cloud_ready:
+            return "Умный режим: облачное распознавание через Groq готово"
+        if local_whisper_ready:
+            return "Умный режим: локальный Whisper готов"
+        if local_vosk_ready:
+            return "Умный режим: локальный Vosk готов как резерв"
+        return "Умный режим: нужен ключ Groq или локальный backend"
 
     def _build_http_client(self):
         import httpx

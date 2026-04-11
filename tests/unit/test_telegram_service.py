@@ -6,6 +6,8 @@ from pathlib import Path
 import time
 from types import SimpleNamespace
 
+import httpx
+
 from core.telegram.telegram_models import TelegramDispatchResult, TelegramUpdate
 from core.telegram.telegram_service import DEFAULT_POLL_INTERVAL_MS, HttpTelegramTransport, TelegramService
 
@@ -64,6 +66,45 @@ class FakeTransport:
         if self.fail_send_message is not None:
             raise self.fail_send_message
         self.sent_messages.append((chat_id, text))
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: dict[str, object] | None = None, error: Exception | None = None) -> None:
+        self.payload = payload or {"ok": True, "result": []}
+        self.error = error
+
+    def raise_for_status(self) -> None:
+        if self.error is not None:
+            raise self.error
+
+    def json(self) -> dict[str, object]:
+        return self.payload
+
+
+class FakeHttpClient:
+    instances: list["FakeHttpClient"] = []
+
+    def __init__(self, **kwargs) -> None:  # noqa: ANN003
+        self.kwargs = kwargs
+        self.get_calls: list[tuple[str, dict[str, object]]] = []
+        self.post_calls: list[tuple[str, dict[str, object]]] = []
+        self.get_response = FakeHttpResponse()
+        self.post_response = FakeHttpResponse()
+        self.__class__.instances.append(self)
+
+    def __enter__(self) -> "FakeHttpClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001, ANN201
+        return None
+
+    def get(self, url: str, params: dict[str, object]) -> FakeHttpResponse:
+        self.get_calls.append((url, dict(params)))
+        return self.get_response
+
+    def post(self, url: str, json: dict[str, object]) -> FakeHttpResponse:
+        self.post_calls.append((url, dict(json)))
+        return self.post_response
 
 
 def test_authorized_telegram_command_routes_through_handler(tmp_path: Path) -> None:
@@ -165,30 +206,56 @@ def test_telegram_poll_interval_contract_is_fast_without_busy_loop() -> None:
 
 
 def test_http_transport_uses_short_long_poll_timeout(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    class Response:
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> dict[str, object]:
-            return {"ok": True, "result": []}
-
-    def fake_get(url, params, timeout):  # noqa: ANN001, ANN202
-        captured["url"] = url
-        captured["params"] = params
-        captured["timeout"] = timeout
-        return Response()
-
-    monkeypatch.setattr("core.telegram.telegram_service.httpx.get", fake_get)
+    FakeHttpClient.instances = []
+    monkeypatch.setattr("core.telegram.telegram_service.httpx.Client", FakeHttpClient)
     transport = HttpTelegramTransport("bot_secret", timeout_seconds=12.0, poll_timeout_seconds=2.0)
 
     assert transport.get_updates(offset=40) == []
 
-    assert captured["params"]["timeout"] == 2
-    assert captured["params"]["offset"] == 40
-    assert captured["timeout"] == 12.0
-    assert "bot_secret" in captured["url"]
+    client = FakeHttpClient.instances[-1]
+    assert client.kwargs == {"timeout": 12.0}
+    assert client.get_calls == [
+        ("https://api.telegram.org/botbot_secret/getUpdates", {"timeout": 2, "allowed_updates": '["message"]', "offset": 40})
+    ]
+
+
+def test_http_transport_respects_manual_proxy_configuration(monkeypatch) -> None:
+    FakeHttpClient.instances = []
+    monkeypatch.setattr("core.telegram.telegram_service.httpx.Client", FakeHttpClient)
+    transport = HttpTelegramTransport(
+        "bot_secret",
+        timeout_seconds=12.0,
+        proxy_mode="manual",
+        proxy_url="http://127.0.0.1:8888",
+    )
+
+    transport.send_message(777, "hello")
+
+    client = FakeHttpClient.instances[-1]
+    assert client.kwargs == {"timeout": 12.0, "proxy": "http://127.0.0.1:8888", "trust_env": False}
+    assert client.post_calls == [
+        ("https://api.telegram.org/botbot_secret/sendMessage", {"chat_id": 777, "text": "hello"})
+    ]
+
+
+def test_telegram_error_strings_redact_bot_token() -> None:
+    service = TelegramService(
+        FakeSettings(),
+        transport=HttpTelegramTransport("bot_secret"),
+        offset_store=FakeOffsetStore(offset=0),
+    )
+    request = httpx.Request("GET", "https://api.telegram.org/botbot_secret/getUpdates")
+    response = httpx.Response(401, request=request)
+    exc = httpx.HTTPStatusError(
+        "Client error '401 Unauthorized' for url 'https://api.telegram.org/botbot_secret/getUpdates'",
+        request=request,
+        response=response,
+    )
+
+    formatted = service._format_error(exc)  # noqa: SLF001
+
+    assert "bot_secret" not in formatted
+    assert "[redacted]" in formatted
 
 
 def test_refresh_configuration_rebuilds_http_transport_without_restart() -> None:
@@ -480,6 +547,7 @@ def test_async_dispatch_exception_releases_pending_update_and_does_not_ack() -> 
     assert 401 not in service._pending_update_ids_set  # noqa: SLF001
     assert offset_store.saved == []
     assert "RuntimeError" in service.last_error()
+    assert "bot_token" not in service.last_error()
 
 
 def test_http_transport_timeout_falls_back_on_invalid_network_setting() -> None:
@@ -502,6 +570,34 @@ def test_http_transport_timeout_falls_back_on_invalid_network_setting() -> None:
 
     assert transport is not None
     assert transport.timeout_seconds == 12.0
+
+
+def test_http_transport_creation_uses_network_proxy_settings() -> None:
+    class Settings:
+        def get_registration(self) -> dict[str, str]:
+            return {"telegram_user_id": "123456789", "telegram_bot_token": "bot_token"}
+
+        def get(self, key: str, default=None):  # noqa: ANN001, ANN201
+            if key == "network":
+                return {
+                    "timeout_seconds": 18.5,
+                    "proxy_mode": "manual",
+                    "proxy_url": "http://127.0.0.1:8888",
+                }
+            return default
+
+    service = TelegramService(
+        Settings(),
+        transport=None,
+        offset_store=FakeOffsetStore(offset=0),
+    )
+
+    transport = service._create_http_transport("bot_token")  # noqa: SLF001
+
+    assert transport is not None
+    assert transport.timeout_seconds == 18.5
+    assert transport.proxy_mode == "manual"
+    assert transport.proxy_url == "http://127.0.0.1:8888"
 
 
 def test_duplicate_update_ids_are_deduped_before_dispatch() -> None:

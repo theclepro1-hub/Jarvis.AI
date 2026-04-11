@@ -58,12 +58,13 @@ def test_reminder_service_does_not_fake_confirm_when_parse_fails(tmp_path) -> No
     assert service.store.list_pending() == []
 
 
-def test_reminder_service_marks_failed_notifications(tmp_path) -> None:
+def test_reminder_service_keeps_due_reminders_pending_on_transient_failure(tmp_path) -> None:
     base = datetime(2026, 4, 7, 12, 0, tzinfo=timezone.utc)
     service = ReminderService(store=ReminderStore(tmp_path / "reminders.sqlite3"), clock=lambda: base)
     create_result = service.create_from_text("напомни мне чай через 1 минуту", now=base)
 
     assert create_result.ok is True
+    assert create_result.record is not None
 
     def boom(_record: ReminderRecord) -> None:
         raise RuntimeError("boom")
@@ -72,10 +73,23 @@ def test_reminder_service_marks_failed_notifications(tmp_path) -> None:
 
     assert failed == []
     pending = service.store.list_pending()
-    assert pending == []
-    stored = service.store.get(create_result.record.id)  # type: ignore[union-attr]
+    assert len(pending) == 1
+    assert pending[0].id == create_result.record.id
+
+    stored = service.store.get(create_result.record.id)
     assert stored is not None
-    assert stored.status == "failed"
+    assert stored.status == "pending"
+
+    recovered = service.recover_due(now=base + timedelta(minutes=3))
+    assert len(recovered) == 1
+    assert recovered[0].id == create_result.record.id
+
+    fired: list[ReminderRecord] = []
+    fired_results = service.fire_due(lambda record: fired.append(record), now=base + timedelta(minutes=3))
+
+    assert len(fired_results) == 1
+    assert fired[0].id == create_result.record.id
+    assert service.store.list_pending() == []
 
 
 def test_reminder_service_can_cancel_pending_reminder(tmp_path) -> None:

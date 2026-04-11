@@ -6,10 +6,25 @@ from concurrent.futures import ThreadPoolExecutor
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from core.ai.ai_service import SUPPORTED_AI_MODES, SUPPORTED_AI_PROFILES
+from core.policy.assistant_mode import (
+    AssistantReadiness,
+    infer_assistant_mode_from_legacy,
+    local_llama_ready,
+    resolve_assistant_mode,
+    resolve_assistant_policy,
+)
 from core.version import DEFAULT_VERSION
 
 
 _SETTINGS_WRITE_LOCK = threading.RLock()
+ASSISTANT_MODE_SET = frozenset({"fast", "standard", "smart", "private"})
+DEFAULT_LOCAL_LLM_BACKEND = "llama_cpp"
+SUPPORTED_TEXT_BACKEND_OVERRIDES = frozenset(
+    {"auto", "groq", "cerebras", "gemini", "openrouter", "local_llama"}
+)
+SUPPORTED_STT_BACKEND_OVERRIDES = frozenset(
+    {"auto", "groq_whisper", "local_faster_whisper", "local_vosk"}
+)
 
 
 class SettingsBridge(QObject):
@@ -18,10 +33,16 @@ class SettingsBridge(QObject):
     minimizeToTrayEnabledChanged = Signal()
     startMinimizedEnabledChanged = Signal()
     saveHistoryEnabledChanged = Signal()
+    assistantModeChanged = Signal()
+    assistantStatusChanged = Signal()
     aiModeChanged = Signal()
     aiProviderChanged = Signal()
     aiProfileChanged = Signal()
     aiModelChanged = Signal()
+    localLlmModelChanged = Signal()
+    localLlmBackendChanged = Signal()
+    textBackendOverrideChanged = Signal()
+    sttBackendOverrideChanged = Signal()
     connectionsChanged = Signal()
     connectionFeedbackChanged = Signal()
     updateSummaryChanged = Signal()
@@ -46,6 +67,12 @@ class SettingsBridge(QObject):
         self._worker_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="settings-bridge")
         self._telegramTestFinished.connect(self._on_telegram_test_finished)
         self._updateCheckFinished.connect(self._on_update_check_finished)
+        voice_bridge = getattr(self.app_bridge, "voice_bridge", None)
+        if voice_bridge is not None:
+            for signal_name in ("modeChanged", "assistantModeChanged", "statusChanged", "assistantStatusChanged", "summaryChanged"):
+                signal = getattr(voice_bridge, signal_name, None)
+                if signal is not None:
+                    signal.connect(self._on_voice_projection_changed)
 
     def _updates_service_if_ready(self):  # noqa: ANN202
         if hasattr(self.services, "_updates"):
@@ -75,11 +102,159 @@ class SettingsBridge(QObject):
             return vars(self.services).get("ai")
         return None
 
+    def _voice_service_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_voice"):
+            return getattr(self.services, "_voice")
+        if hasattr(self.services, "__dict__") and "voice" in vars(self.services):
+            return vars(self.services).get("voice")
+        return None
+
     def _normalize_ai_mode(self, value: str) -> str:
         mode = str(value or "").strip().lower()
         if mode in SUPPORTED_AI_MODES:
             return mode
         return "auto"
+
+    def _normalize_assistant_mode(self, value: str) -> str:
+        mode = str(value or "").strip().lower()
+        if mode in ASSISTANT_MODE_SET:
+            return mode
+        return "standard"
+
+    def _assistant_mode_from_settings(self) -> str:
+        return self._normalize_assistant_mode(resolve_assistant_mode(self.services.settings))
+
+    def _assistant_readiness(self) -> AssistantReadiness:
+        voice = self._voice_service_if_ready()
+        stt_service = getattr(voice, "stt_service", None) if voice is not None else None
+        local_faster_whisper_ready = False
+        local_vosk_ready = False
+        if stt_service is not None:
+            local_faster_whisper_ready = bool(getattr(stt_service, "_local_faster_whisper_ready", lambda: False)())
+            local_vosk_ready = bool(getattr(stt_service, "_local_vosk_available", lambda: False)())
+        return AssistantReadiness(
+            local_llama_ready=local_llama_ready(self.services.settings),
+            local_faster_whisper_ready=local_faster_whisper_ready,
+            local_vosk_ready=local_vosk_ready,
+        )
+
+    def _assistant_policy(self):  # noqa: ANN202
+        return resolve_assistant_policy(self.services.settings, readiness=self._assistant_readiness())
+
+    def _assistant_mode_options(self) -> list[dict[str, str]]:
+        return [
+            {"key": "fast", "title": "Быстрый", "note": "Облачный маршрут первым. Минимальная задержка."},
+            {
+                "key": "standard",
+                "title": "Стандартный",
+                "note": "Локальный приоритет там, где backend уже готов, с честным fallback.",
+            },
+            {"key": "smart", "title": "Умный", "note": "Приоритет качества ответа и более сильных cloud-маршрутов."},
+            {"key": "private", "title": "Приватный", "note": "Никакого cloud text/STT fallback. Только локальные backend'ы."},
+        ]
+
+    def _format_route(self, route: tuple[str, ...]) -> str:
+        if not route:
+            return "disabled"
+        return " -> ".join(route)
+
+    def _privacy_text(self, guarantee: str) -> str:
+        mapping = {
+            "cloud_first": "cloud-first",
+            "local_first_with_fallback": "local-first with fallback",
+            "quality_first": "quality-first",
+            "no_cloud_ever": "no cloud ever",
+        }
+        return mapping.get(str(guarantee or "").strip(), "mixed")
+
+    def _local_readiness_text(self) -> str:
+        issues = set(self._assistant_policy().readiness_issues)
+        if not issues:
+            return "Локальные backend'ы готовы."
+        labels = {
+            "local_llama_missing": "local Llama",
+            "local_faster_whisper_missing": "local faster-whisper",
+            "local_vosk_missing": "local Vosk",
+        }
+        missing = ", ".join(labels[item] for item in sorted(issues) if item in labels)
+        if self.assistantMode == "private":
+            return f"Не хватает: {missing}. Cloud fallback в private отключён."
+        return f"Не хватает: {missing}."
+
+    def _outside_text(self, policy) -> str:  # noqa: ANN202
+        if policy.mode == "private":
+            return "РќРёС‡РµРіРѕ: private РЅРµ РѕС‚РїСЂР°РІР»СЏРµС‚ text/STT РІ РѕР±Р»Р°РєРѕ."
+        if policy.text_cloud_allowed and policy.stt_cloud_allowed:
+            return "РўРµРєСЃС‚ Рё STT РјРѕРіСѓС‚ СѓС…РѕРґРёС‚СЊ РІ РѕР±Р»Р°РєРѕ РїРѕ СЂРµР¶РёРјСѓ Рё fallback-Р»РѕРіРёРєРµ."
+        if policy.text_cloud_allowed:
+            return "Р’ РѕР±Р»Р°РєРѕ РјРѕР¶РµС‚ СѓР№С‚Рё С‚РѕР»СЊРєРѕ text AI. Wake Рё STT РѕСЃС‚Р°СЋС‚СЃСЏ Р»РѕРєР°Р»СЊРЅРµРµ."
+        if policy.stt_cloud_allowed:
+            return "Р’ РѕР±Р»Р°РєРѕ РјРѕР¶РµС‚ СѓР№С‚Рё С‚РѕР»СЊРєРѕ STT РїРѕСЃР»Рµ wake-СЃР»РѕРІР°."
+        return "РћР±Р»Р°С‡РЅС‹Рµ fallback-РјР°СЂС€СЂСѓС‚С‹ РѕС‚РєР»СЋС‡РµРЅС‹."
+
+    def _local_text(self, policy) -> str:  # noqa: ANN202
+        wake = "wake word РІСЃРµРіРґР° Р»РѕРєР°Р»СЊРЅС‹Р№"
+        return f"{wake}; text: {self._format_route(policy.text_route)}; stt: {self._format_route(policy.stt_route)}"
+
+    def _assistant_status_snapshot(self) -> dict[str, object]:
+        policy = self._assistant_policy()
+        text_route = self._format_route(policy.text_route)
+        stt_route = self._format_route(policy.stt_route)
+        privacy = self._privacy_text(policy.privacy_guarantee)
+        readiness = self._local_readiness_text()
+        return {
+            "mode": self.assistantMode,
+            "wake": "local",
+            "text": text_route,
+            "stt": stt_route,
+            "privacy": privacy,
+            "readiness": readiness,
+            "outside": self._outside_text(policy),
+            "local": self._local_text(policy),
+            "summary": f"wake local · text {text_route} · stt {stt_route} · privacy {privacy}",
+            "cloudAllowed": bool(policy.text_cloud_allowed or policy.stt_cloud_allowed),
+            "textCloudAllowed": bool(policy.text_cloud_allowed),
+            "sttCloudAllowed": bool(policy.stt_cloud_allowed),
+        }
+
+    def _sync_assistant_mode_from_legacy(self, *, ai_mode: str | None = None, ai_provider: str | None = None) -> None:
+        payload = {
+            "ai_mode": ai_mode if ai_mode is not None else self.services.settings.get("ai_mode", "auto"),
+            "ai_provider": ai_provider if ai_provider is not None else self.services.settings.get("ai_provider", "auto"),
+            "voice_mode": self.services.settings.get("voice_mode", "standard"),
+        }
+        self.services.settings.set("assistant_mode", infer_assistant_mode_from_legacy(payload))
+
+    def _refresh_voice_mode_projection(self) -> None:
+        voice_bridge = getattr(self.app_bridge, "voice_bridge", None)
+        if voice_bridge is None:
+            return
+        for signal_name in ("modeChanged", "assistantModeChanged", "summaryChanged", "statusChanged", "assistantStatusChanged"):
+            signal = getattr(voice_bridge, signal_name, None)
+            if signal is not None:
+                signal.emit()
+
+    @Slot()
+    def _on_voice_projection_changed(self) -> None:
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
+
+    def _assistant_registration_state(self) -> tuple[bool, bool]:
+        registration = self._registration()
+        has_ai_key = any(
+            str(registration.get(field, "")).strip()
+            for field in (
+                "groq_api_key",
+                "cerebras_api_key",
+                "gemini_api_key",
+                "openrouter_api_key",
+            )
+        )
+        telegram_ready = bool(
+            str(registration.get("telegram_bot_token", "")).strip()
+            and str(registration.get("telegram_user_id", "")).strip()
+        )
+        return has_ai_key, telegram_ready
 
     def _default_update_summary(self) -> str:
         return f"Версия {DEFAULT_VERSION} · канал стабильный"
@@ -162,6 +337,7 @@ class SettingsBridge(QObject):
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set_save_history_enabled(bool(value))
         self.saveHistoryEnabledChanged.emit()
+        self.assistantModeChanged.emit()
         self.connectionsChanged.emit()
         self.dataSafetyChanged.emit()
 
@@ -174,7 +350,10 @@ class SettingsBridge(QObject):
         value = self._normalize_ai_mode(value)
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("ai_mode", value)
+            self._sync_assistant_mode_from_legacy(ai_mode=value)
         self.aiModeChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
         self.aiProfileChanged.emit()
 
     @Property(str, notify=aiProviderChanged)
@@ -187,7 +366,10 @@ class SettingsBridge(QObject):
             value = "auto"
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("ai_provider", value)
+            self._sync_assistant_mode_from_legacy(ai_provider=value)
         self.aiProviderChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
         self.aiProfileChanged.emit()
 
     @Property(str, notify=aiProfileChanged)
@@ -224,8 +406,11 @@ class SettingsBridge(QObject):
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("ai_mode", mode)
             self.services.settings.set("ai_provider", provider)
+            self._sync_assistant_mode_from_legacy(ai_mode=mode, ai_provider=provider)
         self.aiModeChanged.emit()
         self.aiProviderChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
         self.aiProfileChanged.emit()
 
     @Property(str, notify=aiModelChanged)
@@ -238,6 +423,165 @@ class SettingsBridge(QObject):
             self.services.settings.set("ai_model", value)
         self.aiModelChanged.emit()
 
+    @Property(str, notify=localLlmModelChanged)
+    def localLlmModel(self) -> str:
+        return str(self.services.settings.get("local_llm_model", "") or "").strip()
+
+    @localLlmModel.setter
+    def localLlmModel(self, value: str) -> None:
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("local_llm_model", str(value or "").strip())
+        self.localLlmModelChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
+
+    @Property(str, notify=assistantModeChanged)
+    def assistantMode(self) -> str:
+        return self._assistant_mode_from_settings()
+
+    @assistantMode.setter
+    def assistantMode(self, value: str) -> None:
+        self.setAssistantMode(value)
+
+    @Property(str, notify=assistantModeChanged)
+    def assistantModeSummary(self) -> str:
+        return self._assistant_policy().display_summary
+
+    @Property(str, notify=assistantModeChanged)
+    def assistantModeDetails(self) -> str:
+        mode = self.assistantMode
+        for item in self._assistant_mode_options():
+            if item.get("key") == mode:
+                return str(item.get("note", "")).strip()
+        return ""
+
+    @Property("QVariantMap", notify=assistantStatusChanged)
+    def assistantStatus(self) -> dict[str, object]:
+        return self._assistant_status_snapshot()
+
+    @Property(str, notify=connectionsChanged)
+    def assistantReadiness(self) -> str:
+        has_ai_key, telegram_ready = self._assistant_registration_state()
+        if has_ai_key and telegram_ready:
+            return "Полный режим готов"
+        if has_ai_key:
+            return "Чат готов, Telegram не завершён"
+        if telegram_ready:
+            return "Telegram готов, нужен AI key"
+        return "Нужен AI key и Telegram"
+
+    @Property(str, notify=connectionsChanged)
+    def assistantConnectionHint(self) -> str:
+        has_ai_key, telegram_ready = self._assistant_registration_state()
+        if has_ai_key and telegram_ready:
+            return "Есть AI key и Telegram. Можно свободно переключаться между fast, standard, smart и private."
+        if has_ai_key:
+            return "AI-ответы уже доступны. Чтобы завершить поток регистрация → напоминания → Telegram, добавьте bot token и Telegram ID."
+        if telegram_ready:
+            return "Telegram подключён, но без AI key ассистент останется в локальном режиме для части сценариев."
+        return "Для полного assistant-mode потока добавьте хотя бы один AI key и завершите Telegram-настройку."
+
+    @Property("QVariantList", notify=assistantModeChanged)
+    def assistantModeOptions(self) -> list[dict[str, str]]:
+        return self._assistant_mode_options()
+
+    @Property("QVariantList", notify=assistantStatusChanged)
+    def localLlmBackendOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": "llama_cpp", "title": "llama.cpp"},
+            {"key": "ollama", "title": "Ollama"},
+        ]
+
+    @Property("QVariantList", notify=assistantStatusChanged)
+    def textBackendOverrideOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": "auto", "title": "РђРІС‚Рѕ"},
+            {"key": "local_llama", "title": "Local Llama"},
+            {"key": "groq", "title": "Groq"},
+            {"key": "gemini", "title": "Gemini"},
+            {"key": "cerebras", "title": "Cerebras"},
+            {"key": "openrouter", "title": "OpenRouter"},
+        ]
+
+    @Property("QVariantList", notify=assistantStatusChanged)
+    def sttBackendOverrideOptions(self) -> list[dict[str, str]]:
+        return [
+            {"key": "auto", "title": "РђРІС‚Рѕ"},
+            {"key": "local_faster_whisper", "title": "local faster-whisper"},
+            {"key": "local_vosk", "title": "local Vosk"},
+            {"key": "groq_whisper", "title": "Groq Whisper"},
+        ]
+
+    @Property(str, notify=assistantModeChanged)
+    def effectiveTextRoute(self) -> str:
+        return self._format_route(self._assistant_policy().text_route)
+
+    @Property(str, notify=assistantModeChanged)
+    def effectiveSttRoute(self) -> str:
+        return self._format_route(self._assistant_policy().stt_route)
+
+    @Property(str, notify=assistantModeChanged)
+    def privacyGuarantee(self) -> str:
+        return self._privacy_text(self._assistant_policy().privacy_guarantee)
+
+    @Property(str, notify=assistantModeChanged)
+    def localReadiness(self) -> str:
+        return self._local_readiness_text()
+
+    @Property(str, notify=assistantStatusChanged)
+    def localLlmBackend(self) -> str:
+        backend = str(self.services.settings.get("local_llm_backend", DEFAULT_LOCAL_LLM_BACKEND) or "").strip().casefold()
+        if backend not in {"llama_cpp", "ollama"}:
+            return DEFAULT_LOCAL_LLM_BACKEND
+        return backend
+
+    @localLlmBackend.setter
+    def localLlmBackend(self, value: str) -> None:
+        backend = str(value or "").strip().casefold()
+        if backend not in {"llama_cpp", "ollama"}:
+            backend = DEFAULT_LOCAL_LLM_BACKEND
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("local_llm_backend", backend)
+        self.localLlmBackendChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
+
+    @Property(str, notify=assistantStatusChanged)
+    def textBackendOverride(self) -> str:
+        value = str(self.services.settings.get("text_backend_override", "auto") or "").strip().casefold()
+        return value if value in SUPPORTED_TEXT_BACKEND_OVERRIDES else "auto"
+
+    @textBackendOverride.setter
+    def textBackendOverride(self, value: str) -> None:
+        override = str(value or "").strip().casefold()
+        if override not in SUPPORTED_TEXT_BACKEND_OVERRIDES:
+            override = "auto"
+        if self.assistantMode == "private" and override not in {"auto", "local_llama"}:
+            override = "local_llama"
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("text_backend_override", override)
+        self.textBackendOverrideChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
+
+    @Property(str, notify=assistantStatusChanged)
+    def sttBackendOverride(self) -> str:
+        value = str(self.services.settings.get("stt_backend_override", "auto") or "").strip().casefold()
+        return value if value in SUPPORTED_STT_BACKEND_OVERRIDES else "auto"
+
+    @sttBackendOverride.setter
+    def sttBackendOverride(self, value: str) -> None:
+        override = str(value or "").strip().casefold()
+        if override not in SUPPORTED_STT_BACKEND_OVERRIDES:
+            override = "auto"
+        if self.assistantMode == "private" and override == "groq_whisper":
+            override = "auto"
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.set("stt_backend_override", override)
+        self.sttBackendOverrideChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
+
     @Property(str, notify=connectionsChanged)
     def groqApiKey(self) -> str:
         return str(self._registration().get("groq_api_key", "")).strip()
@@ -249,6 +593,42 @@ class SettingsBridge(QObject):
     @Property(bool, notify=connectionsChanged)
     def groqApiKeySet(self) -> bool:
         return bool(self.groqApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def cerebrasApiKey(self) -> str:
+        return str(self._registration().get("cerebras_api_key", "")).strip()
+
+    @Property(str, notify=connectionsChanged)
+    def cerebrasApiKeyMasked(self) -> str:
+        return self._mask_secret(self.cerebrasApiKey)
+
+    @Property(bool, notify=connectionsChanged)
+    def cerebrasApiKeySet(self) -> bool:
+        return bool(self.cerebrasApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def geminiApiKey(self) -> str:
+        return str(self._registration().get("gemini_api_key", "")).strip()
+
+    @Property(str, notify=connectionsChanged)
+    def geminiApiKeyMasked(self) -> str:
+        return self._mask_secret(self.geminiApiKey)
+
+    @Property(bool, notify=connectionsChanged)
+    def geminiApiKeySet(self) -> bool:
+        return bool(self.geminiApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def openrouterApiKey(self) -> str:
+        return str(self._registration().get("openrouter_api_key", "")).strip()
+
+    @Property(str, notify=connectionsChanged)
+    def openrouterApiKeyMasked(self) -> str:
+        return self._mask_secret(self.openrouterApiKey)
+
+    @Property(bool, notify=connectionsChanged)
+    def openrouterApiKeySet(self) -> bool:
+        return bool(self.openrouterApiKey)
 
     @Property(str, notify=connectionsChanged)
     def telegramBotToken(self) -> str:
@@ -305,6 +685,15 @@ class SettingsBridge(QObject):
             "groqApiKey": self.groqApiKey,
             "groqApiKeyMasked": self.groqApiKeyMasked,
             "groqApiKeySet": self.groqApiKeySet,
+            "cerebrasApiKey": self.cerebrasApiKey,
+            "cerebrasApiKeyMasked": self.cerebrasApiKeyMasked,
+            "cerebrasApiKeySet": self.cerebrasApiKeySet,
+            "geminiApiKey": self.geminiApiKey,
+            "geminiApiKeyMasked": self.geminiApiKeyMasked,
+            "geminiApiKeySet": self.geminiApiKeySet,
+            "openrouterApiKey": self.openrouterApiKey,
+            "openrouterApiKeyMasked": self.openrouterApiKeyMasked,
+            "openrouterApiKeySet": self.openrouterApiKeySet,
             "telegramBotToken": self.telegramBotToken,
             "telegramBotTokenMasked": self.telegramBotTokenMasked,
             "telegramBotTokenSet": self.telegramBotTokenSet,
@@ -313,9 +702,58 @@ class SettingsBridge(QObject):
             "saveHistoryEnabled": self.saveHistoryEnabled,
             "skipped": bool(registration.get("skipped", False)),
             "groq_api_key": self.groqApiKey,
+            "cerebras_api_key": self.cerebrasApiKey,
+            "gemini_api_key": self.geminiApiKey,
+            "openrouter_api_key": self.openrouterApiKey,
             "telegram_bot_token": self.telegramBotToken,
             "telegram_user_id": self.telegramUserId,
         }
+
+    @Slot(str)
+    def setAssistantMode(self, value: str) -> None:
+        mode = self._normalize_assistant_mode(value)
+        ai_mode = "auto"
+        voice_mode = "standard"
+        privacy_mode = "balance"
+        save_history_enabled = True
+        allow_text_cloud_fallback = True
+        allow_stt_cloud_fallback = True
+        if mode == "fast":
+            ai_mode = "fast"
+            voice_mode = "fast"
+        elif mode == "smart":
+            ai_mode = "quality"
+            voice_mode = "smart"
+        elif mode == "private":
+            ai_mode = "local"
+            voice_mode = "private"
+            privacy_mode = "private"
+            save_history_enabled = False
+            allow_text_cloud_fallback = False
+            allow_stt_cloud_fallback = False
+
+        with _SETTINGS_WRITE_LOCK:
+            self.services.settings.bulk_update(
+                {
+                    "assistant_mode": mode,
+                    "ai_mode": ai_mode,
+                    "ai_provider": "auto",
+                    "voice_mode": voice_mode,
+                    "privacy_mode": privacy_mode,
+                    "save_history_enabled": save_history_enabled,
+                    "allow_text_cloud_fallback": allow_text_cloud_fallback,
+                    "allow_stt_cloud_fallback": allow_stt_cloud_fallback,
+                }
+            )
+        self.aiModeChanged.emit()
+        self.aiProviderChanged.emit()
+        self.aiProfileChanged.emit()
+        self.saveHistoryEnabledChanged.emit()
+        self.assistantModeChanged.emit()
+        self.assistantStatusChanged.emit()
+        self.connectionsChanged.emit()
+        self.dataSafetyChanged.emit()
+        self._refresh_voice_mode_projection()
 
     @Property("QVariantList", notify=pinnedCommandsChanged)
     def pinnedCommands(self) -> list[dict[str, str]]:
@@ -351,12 +789,45 @@ class SettingsBridge(QObject):
         return self._default_update_status()
 
     @Slot(str, str, str, result=bool)
-    def saveConnections(self, groq_api_key: str, telegram_bot_token: str, telegram_user_id: str) -> bool:
+    @Slot(str, str, str, str, str, str, result=bool)
+    def saveConnections(
+        self,
+        groq_api_key: str,
+        arg2: str,
+        arg3: str,
+        arg4: str = "",
+        arg5: str = "",
+        arg6: str = "",
+    ) -> bool:
+        if arg4 or arg5 or arg6:
+            cerebras_api_key = arg2
+            gemini_api_key = arg3
+            openrouter_api_key = arg4
+            telegram_bot_token = arg5
+            telegram_user_id = arg6
+        else:
+            cerebras_api_key = ""
+            gemini_api_key = ""
+            openrouter_api_key = ""
+            telegram_bot_token = arg2
+            telegram_user_id = arg3
         registration = self._registration()
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.save_registration(
                 {
                     "groq_api_key": self._resolve_secret_input(groq_api_key, str(registration.get("groq_api_key", ""))),
+                    "cerebras_api_key": self._resolve_secret_input(
+                        cerebras_api_key,
+                        str(registration.get("cerebras_api_key", "")),
+                    ),
+                    "gemini_api_key": self._resolve_secret_input(
+                        gemini_api_key,
+                        str(registration.get("gemini_api_key", "")),
+                    ),
+                    "openrouter_api_key": self._resolve_secret_input(
+                        openrouter_api_key,
+                        str(registration.get("openrouter_api_key", "")),
+                    ),
                     "telegram_bot_token": self._resolve_secret_input(
                         telegram_bot_token,
                         str(registration.get("telegram_bot_token", "")),
@@ -377,6 +848,9 @@ class SettingsBridge(QObject):
         registration = self._registration()
         payload = {
             "groq_api_key": str(registration.get("groq_api_key", "")).strip(),
+            "cerebras_api_key": str(registration.get("cerebras_api_key", "")).strip(),
+            "gemini_api_key": str(registration.get("gemini_api_key", "")).strip(),
+            "openrouter_api_key": str(registration.get("openrouter_api_key", "")).strip(),
             "telegram_user_id": "",
             "telegram_bot_token": "",
         }
@@ -530,6 +1004,8 @@ class SettingsBridge(QObject):
         self.aiProviderChanged.emit()
         self.aiProfileChanged.emit()
         self.aiModelChanged.emit()
+        self.localLlmModelChanged.emit()
+        self.assistantModeChanged.emit()
         self.connectionsChanged.emit()
         self.connectionFeedbackChanged.emit()
         self.telegramStatusChanged.emit()

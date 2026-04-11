@@ -47,19 +47,21 @@ C:\JarvisAi_Unity\.venv\Scripts\pytest.exe -q
 ## Build
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\JarvisAi_Unity\build\build_release.ps1
+powershell -ExecutionPolicy Bypass -File C:\JarvisAi_Unity\build\build_release.ps1 -InstallerOnly
 ```
 
 ## Release Assets
 
-The release build produces:
+The GitHub release build publishes:
 
 - `JarvisAi_Unity_<version>_windows_installer.exe`
-- `JarvisAi_Unity_<version>_windows_onefile.exe`
-- `JarvisAi_Unity_<version>_windows_portable.zip`
+- `JarvisAi_Unity_<version>_windows_installer.exe.sha256.txt`
+
+If you omit `-InstallerOnly`, the build script still produces the local `onefile` and `portable` artifacts for manual testing.
 
 ## Release Notes
 
+- [Release 22.5.0](docs/RELEASE_22.5.0.md)
 - [Release 22.4.5](docs/RELEASE_22.4.5.md)
 - [Release 22.2.0](docs/RELEASE_22.2.0.md)
 - [Release 22.1.1](docs/RELEASE_22.1.1.md)

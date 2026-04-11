@@ -52,7 +52,7 @@ def test_voice_runtime_without_key_reports_not_connected():
     status = voice.runtime_status()
 
     assert status["model"] == "не подключена"
-    assert status["command"] == "Нужен ключ Groq или локальный backend распознавания"
+    assert status["command"] == "Стандартный режим: нужен локальный backend или ключ Groq"
     assert status["tts"] == "голосовые ответы выключены"
 
 
@@ -64,7 +64,7 @@ def test_voice_runtime_auto_mode_reports_local_backend_without_groq():
     status = voice.runtime_status()
 
     assert status["model"] == "загружена"
-    assert status["command"] == "локальное распознавание готово"
+    assert status["command"] == "Стандартный режим: локальное распознавание готово"
 
 
 def test_voice_service_defers_audio_device_scan_until_needed(monkeypatch):

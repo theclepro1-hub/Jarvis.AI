@@ -157,3 +157,10 @@ def test_intent_router_supports_extended_power_aliases() -> None:
         assert len(plan.steps) == 1
         assert plan.steps[0].kind == "power_action"
         assert plan.steps[0].payload["action"] == expected_action
+
+
+def test_intent_router_does_not_match_power_prefixes_inside_words() -> None:
+    router = IntentRouter(_Actions())
+
+    assert router.build("\u0441\u043e\u043d\u0430\u0440") is None
+    assert router.build("\u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c") is None

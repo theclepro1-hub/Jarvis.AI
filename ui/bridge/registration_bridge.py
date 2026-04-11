@@ -19,6 +19,9 @@ class RegistrationBridge(QObject):
         record = self.services.registration.load()
         return {
             "groq_api_key": record.groq_api_key,
+            "cerebras_api_key": record.cerebras_api_key,
+            "gemini_api_key": record.gemini_api_key,
+            "openrouter_api_key": record.openrouter_api_key,
             "telegram_user_id": record.telegram_user_id,
             "telegram_bot_token": record.telegram_bot_token,
             "skipped": record.skipped,
@@ -29,8 +32,36 @@ class RegistrationBridge(QObject):
         return self._feedback
 
     @Slot(str, str, str)
-    def saveRegistration(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> None:
-        record = self.services.registration.save(groq_api_key, telegram_user_id, telegram_bot_token)
+    @Slot(str, str, str, str, str, str)
+    def saveRegistration(
+        self,
+        groq_api_key: str,
+        arg2: str,
+        arg3: str,
+        arg4: str = "",
+        arg5: str = "",
+        arg6: str = "",
+    ) -> None:
+        if arg4 or arg5 or arg6:
+            cerebras_api_key = arg2
+            gemini_api_key = arg3
+            openrouter_api_key = arg4
+            telegram_user_id = arg5
+            telegram_bot_token = arg6
+        else:
+            cerebras_api_key = ""
+            gemini_api_key = ""
+            openrouter_api_key = ""
+            telegram_user_id = arg2
+            telegram_bot_token = arg3
+        record = self.services.registration.save(
+            groq_api_key,
+            cerebras_api_key,
+            gemini_api_key,
+            openrouter_api_key,
+            telegram_user_id,
+            telegram_bot_token,
+        )
         if record.is_complete:
             self._feedback = "Подключение сохранено. Можно переходить в новый JARVIS."
             self.feedbackChanged.emit()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -28,8 +29,16 @@ class ChatHistoryStore:
     def load(self) -> list[dict[str, str]]:
         if not self.history_path.exists():
             return list(DEFAULT_MESSAGES)
-        with self.history_path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+        try:
+            with self.history_path.open("r", encoding="utf-8-sig") as handle:
+                history = json.load(handle)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            self._quarantine_corrupt_history()
+            return list(DEFAULT_MESSAGES)
+        if not isinstance(history, list):
+            self._quarantine_corrupt_history()
+            return list(DEFAULT_MESSAGES)
+        return history
 
     def save(self, messages: list[dict[str, str]]) -> None:
         with self.history_path.open("w", encoding="utf-8") as handle:
@@ -38,3 +47,14 @@ class ChatHistoryStore:
     def clear(self) -> None:
         if self.history_path.exists():
             self.history_path.unlink()
+
+    def _quarantine_corrupt_history(self) -> None:
+        if not self.history_path.exists():
+            return
+        corrupt_path = self.history_path.with_name(
+            f"{self.history_path.stem}.corrupt-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}{self.history_path.suffix}"
+        )
+        try:
+            self.history_path.replace(corrupt_path)
+        except OSError:
+            pass

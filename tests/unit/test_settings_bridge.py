@@ -52,16 +52,29 @@ def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> Non
     services = SimpleNamespace(settings=settings, telegram=telegram)
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
-    assert bridge.saveConnections("fake_groq_new", "bot_new", "987654321") is True
+    assert bridge.saveConnections(
+        "fake_groq_new",
+        "cerebras_new",
+        "gemini_new",
+        "openrouter_new",
+        "bot_new",
+        "987654321",
+    ) is True
 
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_new"
+    assert registration["cerebras_api_key"] == "cerebras_new"
+    assert registration["gemini_api_key"] == "gemini_new"
+    assert registration["openrouter_api_key"] == "openrouter_new"
     assert registration["telegram_bot_token"] == "bot_new"
     assert registration["telegram_user_id"] == "987654321"
     assert registration["skipped"] is False
     assert telegram.refreshes == 1
     assert bridge.connectionFeedback == "Подключения сохранены."
     assert bridge.connections["groqApiKeySet"] is True
+    assert bridge.connections["cerebrasApiKeySet"] is True
+    assert bridge.connections["geminiApiKeySet"] is True
+    assert bridge.connections["openrouterApiKeySet"] is True
     assert bridge.connections["telegramBotTokenMasked"] == "••••••••"
 
 
@@ -71,6 +84,9 @@ def test_settings_bridge_mask_placeholder_keeps_existing_secrets() -> None:
     settings.save_registration(
         {
             "groq_api_key": "fake_groq_existing",
+            "cerebras_api_key": "cerebras_existing",
+            "gemini_api_key": "gemini_existing",
+            "openrouter_api_key": "openrouter_existing",
             "telegram_bot_token": "bot_existing",
             "telegram_user_id": "1",
         },
@@ -79,10 +95,20 @@ def test_settings_bridge_mask_placeholder_keeps_existing_secrets() -> None:
     services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
-    assert bridge.saveConnections("••••••••", "••••••••", "2") is True
+    assert bridge.saveConnections(
+        "••••••••",
+        "••••••••",
+        "••••••••",
+        "••••••••",
+        "••••••••",
+        "2",
+    ) is True
 
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_existing"
+    assert registration["cerebras_api_key"] == "cerebras_existing"
+    assert registration["gemini_api_key"] == "gemini_existing"
+    assert registration["openrouter_api_key"] == "openrouter_existing"
     assert registration["telegram_bot_token"] == "bot_existing"
     assert registration["telegram_user_id"] == "2"
 
@@ -122,3 +148,43 @@ def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
     bridge.aiProfile = "local"
     assert settings.get("ai_mode") == "auto"
     assert settings.get("ai_provider") == "auto"
+
+
+def test_settings_bridge_exposes_assistant_status_and_advanced_options() -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    bridge.assistantMode = "private"
+    bridge.localLlmBackend = "ollama"
+    bridge.textBackendOverride = "local_llama"
+    bridge.sttBackendOverride = "local_vosk"
+
+    status = bridge.assistantStatus
+
+    assert bridge.localLlmBackend == "ollama"
+    assert bridge.textBackendOverride == "local_llama"
+    assert bridge.sttBackendOverride == "local_vosk"
+    assert status["mode"] == "private"
+    assert status["wake"] == "local"
+    assert "outside" in status
+    assert "local" in status
+    assert bridge.localLlmBackendOptions == [
+        {"key": "llama_cpp", "title": "llama.cpp"},
+        {"key": "ollama", "title": "Ollama"},
+    ]
+
+
+def test_settings_bridge_private_mode_rejects_cloud_overrides() -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    bridge.assistantMode = "private"
+    bridge.textBackendOverride = "gemini"
+    bridge.sttBackendOverride = "groq_whisper"
+
+    assert bridge.textBackendOverride == "local_llama"
+    assert bridge.sttBackendOverride == "auto"

@@ -141,11 +141,12 @@ class VoiceService:
         return "загружена" if self.stt_service.can_transcribe() else "не подключена"
 
     def summary(self) -> str:
-        mode = self.settings.get("voice_mode", "balance")
+        mode = self.stt_service.assistant_mode()
         mode_label = {
+            "fast": "быстрый",
+            "standard": "стандартный",
+            "smart": "умный",
             "private": "приватный",
-            "balance": "баланс",
-            "quality": "качество",
         }.get(mode, mode)
         style = self.settings.get("command_style", "one_shot")
         style_label = "одной фразой" if style == "one_shot" else "в два шага"
@@ -459,7 +460,9 @@ class VoiceService:
         if result.status == "stt_key_missing":
             return "Нужен ключ Groq."
         if result.status == "model_missing":
-            return "Нужен ключ Groq или локальная модель распознавания."
+            if self.stt_service.assistant_mode() == "private":
+                return result.detail or "Приватный режим требует локальный backend распознавания. Облачный fallback отключён."
+            return result.detail or "Нужен ключ Groq или локальная модель распознавания."
         if result.status == "no_speech":
             return "Не удалось получить текст. Проверьте микрофон или ключ Groq."
         return result.detail or "Не удалось распознать речь."
@@ -540,9 +543,9 @@ class VoiceService:
         return self.audio_devices.normalize_output_selection(value)
 
     def _wake_capture_tuning(self) -> tuple[float, float, float, float]:
-        mode = str(self.settings.get("voice_mode", "balance")).strip().casefold()
+        mode = self.stt_service.assistant_mode()
         command_style = str(self.settings.get("command_style", "one_shot")).strip().casefold()
-        if mode == "quality":
+        if mode == "smart":
             max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 5.0, 0.55, 145.0, 0.4
         elif mode == "private":
             max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.0, 0.45, 150.0, 0.3

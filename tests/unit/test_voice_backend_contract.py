@@ -11,6 +11,7 @@ from core.voice.model_paths import MODEL_DIR_NAME
 from core.voice.speech_capture_service import SpeechCaptureService
 from core.voice.stt_service import STTService
 from core.voice.tts_service import TTSService
+from core.voice.voice_service import VoiceService
 from core.voice.voice_models import TranscriptionResult
 
 
@@ -36,6 +37,7 @@ class FakeStore:
                 "telegram_bot_token": "",
                 "skipped": False,
             },
+            "voice_mode": "balance",
         }
 
     def load(self):
@@ -76,8 +78,80 @@ def test_stt_service_reports_missing_model_without_key(tmp_path):
 
     assert result.status == "model_missing"
     assert "backend" in result.detail.casefold() or "Groq" in result.detail
-    assert service.status_text() == "Нужен ключ Groq или локальный backend распознавания"
+    assert service.status_text() == "Стандартный режим: нужен локальный backend или ключ Groq"
     assert service.can_transcribe() is False
+
+
+def test_stt_service_maps_legacy_voice_modes_to_canonical_values(tmp_path):
+    settings = SettingsService(FakeStore())
+    service = STTService(settings, local_model_path=tmp_path / "missing-model")
+
+    settings.set("voice_mode", "balance")
+    assert service.assistant_mode() == "standard"
+
+    settings.set("voice_mode", "quality")
+    assert service.assistant_mode() == "smart"
+
+
+def test_stt_service_prefers_explicit_assistant_mode_over_legacy_voice_mode(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("voice_mode", "balance")
+    settings.set("assistant_mode", "private")
+    service = STTService(settings, local_model_path=tmp_path / "missing-model")
+
+    assert service.assistant_mode() == "private"
+
+
+def test_stt_service_respects_backend_override_before_legacy_engine(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("assistant_mode", "standard")
+    settings.set("stt_engine", "groq")
+    settings.set("stt_backend_override", "local_vosk")
+    service = STTService(settings, local_model_path=tmp_path / "missing-model")
+
+    assert service.engine() == "local_vosk"
+
+
+def test_stt_service_fast_mode_prefers_groq_before_local(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("voice_mode", "fast")
+    settings.set("stt_engine", "auto")
+    settings.set("registration", {**settings.get_registration(), "groq_api_key": "test-key"})
+    service = STTService(settings, local_model_path=tmp_path / "missing-model")
+
+    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: (_ for _ in ()).throw(AssertionError("local Vosk should not run first"))  # noqa: SLF001
+    service._transcribe_with_local_faster_whisper = lambda _raw, _cancel_event=None: (_ for _ in ()).throw(AssertionError("local Whisper should not run first"))  # noqa: SLF001
+    service._transcribe_with_groq = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
+        status="ok",
+        text="открой steam",
+        detail="ok",
+        engine="groq_whisper",
+        backend_trace=("groq_whisper",),
+        latency_ms=42.0,
+    )
+
+    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
+
+    assert result.ok is True
+    assert result.engine == "groq_whisper"
+
+
+def test_stt_service_private_mode_never_uses_groq_fallback(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("voice_mode", "private")
+    settings.set("stt_engine", "auto")
+    settings.set("registration", {**settings.get_registration(), "groq_api_key": "test-key"})
+    service = STTService(settings, local_model_path=tmp_path / "missing-model")
+    service._faster_whisper_available = lambda: False  # noqa: SLF001
+    service._transcribe_with_groq = lambda _raw, _cancel_event=None: (_ for _ in ()).throw(AssertionError("private mode must not call Groq"))  # noqa: SLF001
+
+    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
+
+    assert result.status == "model_missing"
+    assert "локаль" in result.detail.casefold()
+    assert "fallback" in result.detail.casefold()
+    assert "Groq" not in service.status_text()
+    assert "облач" in service.status_text().casefold()
 
 
 def test_stt_service_prefers_local_faster_whisper_engine_alias(tmp_path):
@@ -177,10 +251,10 @@ def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(mo
     assert result.backend_trace == ("local_vosk",)
 
 
-def test_stt_service_balance_mode_prefers_vosk_before_heavier_whisper(tmp_path):
+def test_stt_service_standard_mode_prefers_vosk_before_heavier_whisper(tmp_path):
     settings = SettingsService(FakeStore())
     settings.set("stt_engine", "auto")
-    settings.set("voice_mode", "balance")
+    settings.set("voice_mode", "standard")
     settings.set("stt_local_model", str(tmp_path / "fw-model"))
     model_path = tmp_path / "vosk-model"
     make_ready_vosk_model(model_path)
@@ -211,6 +285,54 @@ def test_stt_service_balance_mode_prefers_vosk_before_heavier_whisper(tmp_path):
 
     assert result.ok is True
     assert order == ["local_vosk"]
+
+
+def test_voice_service_private_mode_reports_local_only_model_missing():
+    settings = SettingsService(FakeStore())
+    settings.set("voice_mode", "private")
+    service = VoiceService(settings)
+
+    note = service._stt_note_from_result(  # noqa: SLF001
+        TranscriptionResult(
+            status="model_missing",
+            detail="Приватный режим требует локальный backend распознавания. Облачный fallback отключён.",
+            engine="local_faster_whisper",
+        )
+    )
+
+    assert "локаль" in note.casefold()
+    assert "Groq" not in note
+
+
+def test_stt_service_private_mode_never_uses_cloud_transcription(monkeypatch, tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "auto")
+    settings.set("voice_mode", "private")
+    model_path = tmp_path / "vosk-model"
+    make_ready_vosk_model(model_path)
+    service = STTService(settings, local_model_path=model_path)
+    service._local_faster_whisper_ready = lambda: False  # noqa: SLF001
+    service._local_vosk_available = lambda: True  # noqa: SLF001
+
+    monkeypatch.setattr(
+        service,
+        "_transcribe_with_groq",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("cloud STT must not run in private mode")),
+    )
+    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
+        status="ok",
+        text="открой настройки",
+        detail="ok",
+        engine="local_vosk",
+        backend_trace=("local_vosk",),
+        latency_ms=11.0,
+    )
+
+    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
+
+    assert result.ok is True
+    assert result.engine == "local_vosk"
+    assert result.backend_trace == ("local_vosk",)
 
 
 def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeypatch, tmp_path):

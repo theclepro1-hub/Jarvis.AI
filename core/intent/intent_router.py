@@ -421,9 +421,18 @@ class IntentRouter:
 
     def _detect_power_action(self, lower: str) -> str | None:
         for action, aliases in POWER_ALIASES.items():
-            if any(lower.startswith(alias) for alias in aliases):
+            if any(self._matches_alias_prefix(lower, alias) for alias in aliases):
                 return action
         return None
+
+    def _matches_alias_prefix(self, lower: str, alias: str) -> bool:
+        if lower == alias:
+            return True
+        if not lower.startswith(alias):
+            return False
+        if len(lower) == len(alias):
+            return True
+        return not lower[len(alias)].isalnum()
 
     def _strip_polite_prefix(self, lower: str) -> str:
         for prefix in ("пожалуйста ", "ну ", "jarvis ", "джарвис "):

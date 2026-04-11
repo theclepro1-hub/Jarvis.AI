@@ -11,9 +11,20 @@ class RegistrationService:
         payload = self.settings.get_registration()
         return RegistrationModel(**payload)
 
-    def save(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> RegistrationModel:
+    def save(
+        self,
+        groq_api_key: str,
+        cerebras_api_key: str,
+        gemini_api_key: str,
+        openrouter_api_key: str,
+        telegram_user_id: str,
+        telegram_bot_token: str,
+    ) -> RegistrationModel:
         payload = {
             "groq_api_key": groq_api_key.strip(),
+            "cerebras_api_key": cerebras_api_key.strip(),
+            "gemini_api_key": gemini_api_key.strip(),
+            "openrouter_api_key": openrouter_api_key.strip(),
             "telegram_user_id": telegram_user_id.strip(),
             "telegram_bot_token": telegram_bot_token.strip(),
         }

@@ -16,6 +16,9 @@ class FakeStore:
             "microphone_name": "Системный по умолчанию",
             "registration": {
                 "groq_api_key": "",
+                "cerebras_api_key": "",
+                "gemini_api_key": "",
+                "openrouter_api_key": "",
                 "telegram_user_id": "",
                 "telegram_bot_token": "",
                 "skipped": False,
@@ -32,7 +35,14 @@ class FakeStore:
 def test_registration_completes_when_all_fields_are_filled():
     settings = SettingsService(FakeStore())
     service = RegistrationService(settings)
-    result = service.save("fake_groq_key", "123", "bot_token")
+    result = service.save("fake_groq_key", "", "", "", "123", "bot_token")
+    assert result.is_complete is True
+
+
+def test_registration_completes_with_any_supported_ai_provider():
+    settings = SettingsService(FakeStore())
+    service = RegistrationService(settings)
+    result = service.save("", "", "gemini_key", "", "123", "bot_token")
     assert result.is_complete is True
 
 

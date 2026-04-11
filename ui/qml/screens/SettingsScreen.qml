@@ -27,31 +27,6 @@ Rectangle {
         return "Это действие необратимо и удаляет ключи, историю, Telegram-состояние и весь локальный профиль JARVIS из %LOCALAPPDATA%."
     }
 
-    function aiModeLabel() {
-        return aiProfileMeta(settingsBridge.aiProfile).title
-    }
-
-    function aiProfileMeta(profileKey) {
-        switch (profileKey) {
-        case "groq_fast":
-            return { key: "groq_fast", title: "Быстрый Groq", note: "Минимальная задержка, если Groq-ключ доступен." }
-        case "gemini_quality":
-            return { key: "gemini_quality", title: "Умный Gemini", note: "Более качественные ответы, если Gemini-ключ доступен." }
-        case "cerebras_fast":
-            return { key: "cerebras_fast", title: "Быстрый Cerebras", note: "Ещё один быстрый облачный вариант при наличии ключа." }
-        case "openrouter_free":
-            return { key: "openrouter_free", title: "Резервный OpenRouter", note: "Запасной бесплатный вариант с лимитами." }
-        default:
-            return { key: "auto", title: "Авто", note: "Сам выбирает доступный быстрый профиль." }
-        }
-    }
-
-    function aiProfileOptions() {
-        return settingsBridge.aiProfiles.map(function(profileKey) {
-            return aiProfileMeta(profileKey)
-        })
-    }
-
     function telegramStatusText() {
         if (settingsBridge.telegramStatus.lastError && settingsBridge.telegramStatus.lastError.length > 0) {
             return "Ошибка Telegram"
@@ -115,7 +90,7 @@ Rectangle {
             SettingsSection {
                 Layout.fillWidth: true
                 title: "Подключения"
-                description: "Groq и Telegram для чата, уведомлений и первого запуска."
+                description: "AI-ключи и Telegram для чата, уведомлений и первого запуска."
                 expanded: false
 
                 SettingRow {
@@ -222,6 +197,111 @@ Rectangle {
                     }
                 }
 
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Gemini"
+                    description: "Ключ для Google Gemini, если нужен упор на качество."
+                    helpText: "Используется для облачных ответов через совместимый OpenAI-интерфейс Gemini. Можно оставить пустым, если этот провайдер вам не нужен."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        InputField {
+                            id: geminiConnectionField
+                            objectName: "settingsGeminiField"
+                            Layout.fillWidth: true
+                            label: "Ключ Gemini"
+                            text: settingsBridge.geminiApiKey
+                            placeholderText: "Вставьте ключ Gemini"
+                            secret: true
+                        }
+
+                        Text {
+                            text: 'Документация и выпуск ключа: <a style="color:#68f0d1;text-decoration:none" href="https://ai.google.dev/gemini-api/docs/api-key">https://ai.google.dev/gemini-api/docs/api-key</a>'
+                            textFormat: Text.RichText
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                        }
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Cerebras"
+                    description: "Ключ для быстрого ответа через Cerebras."
+                    helpText: "Это ещё один облачный провайдер с низкой задержкой. Поле можно не заполнять, если вы не используете Cerebras."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        InputField {
+                            id: cerebrasConnectionField
+                            objectName: "settingsCerebrasField"
+                            Layout.fillWidth: true
+                            label: "Ключ Cerebras"
+                            text: settingsBridge.cerebrasApiKey
+                            placeholderText: "Вставьте ключ Cerebras"
+                            secret: true
+                        }
+
+                        Text {
+                            text: 'Документация Cerebras Inference: <a style="color:#68f0d1;text-decoration:none" href="https://inference-docs.cerebras.ai/">https://inference-docs.cerebras.ai/</a>'
+                            textFormat: Text.RichText
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                        }
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "OpenRouter"
+                    description: "Ключ для резервного маршрута и бесплатных моделей OpenRouter."
+                    helpText: "Удобен как запасной провайдер, если основной ключ недоступен или вы хотите использовать free-маршруты."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        InputField {
+                            id: openrouterConnectionField
+                            objectName: "settingsOpenRouterField"
+                            Layout.fillWidth: true
+                            label: "Ключ OpenRouter"
+                            text: settingsBridge.openrouterApiKey
+                            placeholderText: "Вставьте ключ OpenRouter"
+                            secret: true
+                        }
+
+                        Text {
+                            text: 'Быстрый старт OpenRouter: <a style="color:#68f0d1;text-decoration:none" href="https://openrouter.ai/docs/quickstart">https://openrouter.ai/docs/quickstart</a>'
+                            textFormat: Text.RichText
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                            wrapMode: Text.WrapAnywhere
+                            Layout.fillWidth: true
+                            onLinkActivated: function(link) { Qt.openUrlExternally(link) }
+                        }
+                    }
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
@@ -231,6 +311,9 @@ Rectangle {
                         text: "Сохранить подключения"
                         onClicked: settingsBridge.saveConnections(
                                        groqConnectionField.text,
+                                       cerebrasConnectionField.text,
+                                       geminiConnectionField.text,
+                                       openrouterConnectionField.text,
                                        telegramBotTokenField.text,
                                        telegramUserIdField.text
                                    )
@@ -317,34 +400,243 @@ Rectangle {
 
             SettingsSection {
                 Layout.fillWidth: true
-                title: "ИИ"
-                description: "Режим, провайдер и модель — без лишнего зоопарка."
+                title: "Режим ассистента"
+                description: "Один главный выбор: быстрый, стандарт, умный или приватный. Wake word всегда локальный."
                 expanded: false
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Профиль"
-                    description: "Выбирайте по смыслу: быстрее или умнее."
-                    helpText: "Авто выбирает доступный профиль. Groq дает минимальную задержку, Gemini обычно качественнее, Cerebras тоже быстрый, OpenRouter остается резервным вариантом."
+                    title: "Режим"
+                    description: "Wake word остаётся локальным. Разница между режимами начинается после «Джарвис»."
+                    helpText: "Быстрый и умный могут раньше уходить в облако, стандартный сначала старается использовать локальные backend'ы, приватный никогда не включает скрытый cloud fallback."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    AppComboBox {
-                        id: aiProfileCombo
-                        objectName: "aiProfileCombo"
-                        Layout.preferredWidth: 340
-                        model: settingsRoot.aiProfileOptions()
-                        textRole: "title"
-                        currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.aiProfile))
-                        onActivated: (index) => settingsBridge.aiProfile = model[index].key
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        AppComboBox {
+                            id: assistantModeCombo
+                            objectName: "assistantModeCombo"
+                            Layout.preferredWidth: 340
+                            model: settingsBridge.assistantModeOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.assistantMode))
+                            onActivated: (index) => settingsBridge.assistantMode = model[index].key
+                        }
+
+                        Text {
+                            text: settingsBridge.assistantModeSummary
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.small
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: settingsBridge.assistantModeDetails
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.micro
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: "Текстовый маршрут: " + settingsBridge.effectiveTextRoute
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.micro
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: "Распознавание речи: " + settingsBridge.effectiveSttRoute
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.micro
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: "Политика приватности: " + settingsBridge.privacyGuarantee
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.micro
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            text: settingsBridge.localReadiness
+                            color: Theme.Colors.textSoft
+                            font.family: Theme.Typography.bodyFamily
+                            font.pixelSize: Theme.Typography.micro
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: width > 760 ? 3 : 1
+                            rowSpacing: 10
+                            columnSpacing: 10
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                color: Qt.rgba(0.07, 0.12, 0.19, 0.92)
+                                radius: 18
+                                border.color: Theme.Colors.borderSoft
+                                border.width: 1
+                                implicitHeight: localCardColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: localCardColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 6
+
+                                    Text {
+                                        text: "Р§С‚Рѕ Р»РѕРєР°Р»СЊРЅРѕ"
+                                        color: Theme.Colors.text
+                                        font.family: Theme.Typography.displayFamily
+                                        font.pixelSize: Theme.Typography.small
+                                        font.bold: true
+                                    }
+
+                                    Text {
+                                        text: settingsBridge.assistantStatus.local
+                                        color: Theme.Colors.textSoft
+                                        font.family: Theme.Typography.bodyFamily
+                                        font.pixelSize: Theme.Typography.micro
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                color: Qt.rgba(0.07, 0.12, 0.19, 0.92)
+                                radius: 18
+                                border.color: Theme.Colors.borderSoft
+                                border.width: 1
+                                implicitHeight: outsideCardColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: outsideCardColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 6
+
+                                    Text {
+                                        text: "Р§С‚Рѕ СѓР№РґС‘С‚ РЅР°СЂСѓР¶Сѓ"
+                                        color: Theme.Colors.text
+                                        font.family: Theme.Typography.displayFamily
+                                        font.pixelSize: Theme.Typography.small
+                                        font.bold: true
+                                    }
+
+                                    Text {
+                                        text: settingsBridge.assistantStatus.outside
+                                        color: Theme.Colors.textSoft
+                                        font.family: Theme.Typography.bodyFamily
+                                        font.pixelSize: Theme.Typography.micro
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                color: Qt.rgba(0.07, 0.12, 0.19, 0.92)
+                                radius: 18
+                                border.color: Theme.Colors.borderSoft
+                                border.width: 1
+                                implicitHeight: readinessCardColumn.implicitHeight + 20
+
+                                ColumnLayout {
+                                    id: readinessCardColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 6
+
+                                    Text {
+                                        text: "РЎРµР№С‡Р°СЃ РіРѕС‚РѕРІРѕ"
+                                        color: Theme.Colors.text
+                                        font.family: Theme.Typography.displayFamily
+                                        font.pixelSize: Theme.Typography.small
+                                        font.bold: true
+                                    }
+
+                                    Text {
+                                        text: settingsBridge.assistantStatus.readiness
+                                        color: Theme.Colors.textSoft
+                                        font.family: Theme.Typography.bodyFamily
+                                        font.pixelSize: Theme.Typography.micro
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Модель"
-                    description: "Точный идентификатор модели, если вы хотите его поменять вручную."
-                    helpText: "Это уже тонкая настройка. Обычно хватает профиля выше, но поле нужно оставить для явного контроля."
+                    title: "Advanced routing"
+                    description: "Р СѓС‡РЅРѕР№ override РґР»СЏ text/STT Рё РІС‹Р±РѕСЂР° Р»РѕРєР°Р»СЊРЅРѕРіРѕ backend."
+                    helpText: "РќРѕСЂРјР°Р»СЊРЅРѕРјСѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЋ РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РІС‹Р±СЂР°С‚СЊ СЂРµР¶РёРј РІС‹С€Рµ. Р­С‚Рё РїРµСЂРµРєР»СЋС‡Р°С‚РµР»Рё РЅСѓР¶РЅС‹ С‚РѕР»СЊРєРѕ РµСЃР»Рё С…РѕС‚РёС‚Рµ Р¶С‘СЃС‚РєРѕ Р·Р°С„РёРєСЃРёСЂРѕРІР°С‚СЊ backend."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        AppComboBox {
+                            id: localLlmBackendCombo
+                            objectName: "localLlmBackendCombo"
+                            Layout.preferredWidth: 280
+                            model: settingsBridge.localLlmBackendOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.localLlmBackend))
+                            onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
+                        }
+
+                        AppComboBox {
+                            id: textBackendOverrideCombo
+                            objectName: "textBackendOverrideCombo"
+                            Layout.preferredWidth: 320
+                            model: settingsBridge.textBackendOverrideOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.textBackendOverride))
+                            onActivated: (index) => settingsBridge.textBackendOverride = model[index].key
+                        }
+
+                        AppComboBox {
+                            id: sttBackendOverrideCombo
+                            objectName: "sttBackendOverrideCombo"
+                            Layout.preferredWidth: 320
+                            model: settingsBridge.sttBackendOverrideOptions
+                            textRole: "title"
+                            currentIndex: Math.max(0, model.findIndex(item => item.key === settingsBridge.sttBackendOverride))
+                            onActivated: (index) => settingsBridge.sttBackendOverride = model[index].key
+                        }
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Cloud model id"
+                    description: "Точный идентификатор облачной модели, если нужен ручной override."
+                    helpText: "Обычно это поле не нужно. Достаточно выбрать режим и, при желании, ручной маршрут выше."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
@@ -352,15 +644,51 @@ Rectangle {
                         id: aiModelField
                         objectName: "aiModelField"
                         Layout.fillWidth: true
-                        label: "Модель ИИ"
+                        label: "Облачная модель"
                         text: settingsBridge.aiModel
                         placeholderText: "openai/gpt-oss-20b"
                     }
                 }
 
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "Локальная Llama"
+                    description: settingsBridge.localLlmBackend === "ollama"
+                                 ? "Имя модели Ollama для standard/private text AI."
+                                 : "Путь к `.gguf`-модели для standard/private text AI."
+                    helpText: settingsBridge.localLlmBackend === "ollama"
+                              ? "Если выбран Ollama, укажите имя модели в формате `llama3.1:8b` или другой локальный tag."
+                              : "Если хотите настоящий приватный text AI, укажите путь к локальной GGUF-модели для llama.cpp. Без неё private честно останется без текстового ответа."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    Text {
+                        text: settingsBridge.localLlmBackend === "ollama"
+                              ? "Для Ollama здесь нужно имя модели, а не путь к файлу."
+                              : "Для llama.cpp здесь нужен путь к локальной GGUF-модели."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    InputField {
+                        id: localLlmModelField
+                        objectName: "localLlmModelField"
+                        Layout.fillWidth: true
+                        label: settingsBridge.localLlmBackend === "ollama" ? "Модель Ollama" : "Путь к GGUF"
+                        text: settingsBridge.localLlmModel
+                        placeholderText: settingsBridge.localLlmBackend === "ollama"
+                                         ? "llama3.1:8b"
+                                         : "C:/models/llama-3.1-8b-instruct-q4_k_m.gguf"
+                        onTextChanged: settingsBridge.localLlmModel = text
+                    }
+                }
+
                 Text {
                     Layout.fillWidth: true
-                    text: "Текущий профиль: " + aiModeLabel()
+                    text: settingsBridge.assistantConnectionHint
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small

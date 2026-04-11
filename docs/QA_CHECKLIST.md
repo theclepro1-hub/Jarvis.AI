@@ -53,3 +53,9 @@ Fail if local commands call the LLM. Fail if a concrete AI profile silently fall
 
 9. Microphone hardware smoke.
 If safe, enumerate devices and open the selected/system microphone for one short read without saving audio. Fail if opening a valid selected/system microphone crashes the app path. If hardware access is unavailable, mark hardware as not tested and keep mocked classifier tests as the gate.
+
+10. Local LLM runtime.
+Fail if `assistant_mode=private` claims readiness before the configured local backend is actually usable.
+Fail if `llama_cpp` is selected but the package is missing or the model file is absent.
+Fail if `ollama` is selected but the daemon is unreachable, the configured model is not installed, or generation falls back to cloud.
+If no local model is configured, mark local LLM as not ready instead of pretending the backend is usable.

@@ -71,10 +71,14 @@ class HttpTelegramTransport:
         bot_token: str,
         timeout_seconds: float = 12.0,
         poll_timeout_seconds: float = DEFAULT_LONG_POLL_TIMEOUT_SECONDS,
+        proxy_mode: str = "system",
+        proxy_url: str = "",
     ) -> None:
         self.bot_token = bot_token.strip()
         self.timeout_seconds = timeout_seconds
         self.poll_timeout_seconds = max(0.0, float(poll_timeout_seconds))
+        self.proxy_mode = str(proxy_mode or "system").strip().lower()
+        self.proxy_url = str(proxy_url or "").strip()
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
 
     def get_updates(self, offset: int | None = None) -> list[TelegramUpdate]:
@@ -86,9 +90,10 @@ class HttpTelegramTransport:
         }
         if offset is not None:
             params["offset"] = offset
-        response = httpx.get(f"{self.base_url}/getUpdates", params=params, timeout=self.timeout_seconds)
-        response.raise_for_status()
-        payload = response.json()
+        with self._create_http_client() as client:
+            response = client.get(f"{self.base_url}/getUpdates", params=params)
+            response.raise_for_status()
+            payload = response.json()
         if not payload.get("ok"):
             return []
         updates: list[TelegramUpdate] = []
@@ -113,12 +118,23 @@ class HttpTelegramTransport:
     def send_message(self, chat_id: int, text: str) -> None:
         if not self.bot_token:
             return
-        response = httpx.post(
-            f"{self.base_url}/sendMessage",
-            json={"chat_id": chat_id, "text": text},
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
+        with self._create_http_client() as client:
+            response = client.post(
+                f"{self.base_url}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+            )
+            response.raise_for_status()
+
+    def _create_http_client(self) -> httpx.Client:
+        client_kwargs: dict[str, object] = {
+            "timeout": self.timeout_seconds,
+        }
+        if self.proxy_mode == "manual" and self.proxy_url:
+            client_kwargs["proxy"] = self.proxy_url
+            client_kwargs["trust_env"] = False
+        elif self.proxy_mode == "off":
+            client_kwargs["trust_env"] = False
+        return httpx.Client(**client_kwargs)
 
 
 class TelegramService:
@@ -468,13 +484,52 @@ class TelegramService:
         except (TypeError, ValueError):
             timeout = 12.0
         timeout = max(3.0, timeout)
-        return HttpTelegramTransport(token, timeout_seconds=timeout)
+        proxy_mode = "system"
+        proxy_url = ""
+        if isinstance(network, dict):
+            proxy_mode = str(network.get("proxy_mode", "system") or "system").strip().lower()
+            if proxy_mode not in {"system", "manual", "off"}:
+                proxy_mode = "system"
+            proxy_url = str(network.get("proxy_url", "") or "").strip()
+        return HttpTelegramTransport(
+            token,
+            timeout_seconds=timeout,
+            proxy_mode=proxy_mode,
+            proxy_url=proxy_url,
+        )
 
     def _format_error(self, exc: Exception) -> str:
         message = str(exc).strip()
+        message = self._redact_telegram_secret(message)
         if message:
             return f"{type(exc).__name__}: {message}"
         return type(exc).__name__
+
+    def _redact_telegram_secret(self, text: str) -> str:
+        redacted = str(text or "")
+        if not redacted:
+            return redacted
+        for token in self._telegram_tokens():
+            redacted = redacted.replace(self._telegram_base_url(token), "https://api.telegram.org/bot[redacted]")
+            redacted = redacted.replace(f"bot{token}", "bot[redacted]")
+            redacted = redacted.replace(token, "[redacted]")
+        return redacted
+
+    def _telegram_base_url(self, token: str) -> str:
+        token = str(token or "").strip()
+        if not token:
+            return "https://api.telegram.org/bot"
+        return f"https://api.telegram.org/bot{token}"
+
+    def _telegram_tokens(self) -> list[str]:
+        tokens: list[str] = []
+        transport = self.transport
+        if isinstance(transport, HttpTelegramTransport) and transport.bot_token:
+            tokens.append(transport.bot_token)
+        configured = self.bot_token()
+        if configured and configured not in tokens:
+            tokens.append(configured)
+        return tokens
 
     def _is_seen_update(self, update_id: int) -> bool:
         with self._offset_lock:

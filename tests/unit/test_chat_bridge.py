@@ -67,6 +67,7 @@ class _AiWithResult(_Ai):
             provider_label="Groq",
             model="openai/gpt-oss-20b",
             elapsed_ms=145,
+            assistant_mode="fast",
         )
 
 
@@ -414,10 +415,10 @@ def test_chat_bridge_normalizes_legacy_local_ai_mode_in_stage_and_hint() -> None
         get=lambda key, default=None: {"ai_mode": "local", "ai_provider": "auto"}.get(key, default)
     )
 
-    assert bridge._initial_ai_stage_label(None) == "Готовлю ответ ИИ…"
+    assert bridge._initial_ai_stage_label(None) == "Приватный режим: готовлю локальный ответ…"
 
     hint = bridge._format_ai_response_hint(
         SimpleNamespace(mode="local", provider_label="Groq", elapsed_ms=150, fallback_used=False)
     )
 
-    assert hint == "Авто: Groq · 0.1 с"
+    assert hint == "Приватно: Groq · 0.1 с"

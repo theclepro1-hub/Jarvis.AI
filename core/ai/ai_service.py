@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import time
 from typing import Any, Callable
 
 import httpx
 from openai import OpenAI
+
+from core.ai.local_llm_service import LocalLLMService, LocalLLMUnavailableError
+from core.routing.text_ai_policy import ResolvedTextAIRoute, resolve_text_ai_route
 
 
 SYSTEM_PROMPT = """
@@ -23,6 +27,7 @@ SUPPORTED_AI_MODE_SET = frozenset(SUPPORTED_AI_MODES)
 SUPPORTED_AI_PROFILES = ("auto", "groq_fast", "cerebras_fast", "gemini_quality", "openrouter_free")
 AI_MODES = SUPPORTED_AI_MODE_SET
 DEFAULT_NO_PROXY = "localhost,127.0.0.1,::1"
+PRIVATE_TEXT_BACKEND_ERROR = "private_text_backend_unavailable"
 AI_MODE_BUDGET_SECONDS: dict[str, float] = {
     "auto": 5.0,
     "fast": 2.5,
@@ -65,6 +70,9 @@ class AIReplyResult:
     elapsed_ms: int = 0
     fallback_used: bool = False
     error: str = ""
+    assistant_mode: str = ""
+    privacy_guarantee: str = ""
+    route_summary: str = ""
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -140,6 +148,7 @@ class AIService:
         self.settings = settings_service
         self._client_factory = client_factory or OpenAI
         self._sleep = sleep
+        self.local_llm = LocalLLMService(settings_service)
 
     def generate_reply(self, user_text: str, history: list[dict[str, str]] | None = None) -> str:
         return self.generate_reply_result(user_text, history).text
@@ -151,67 +160,98 @@ class AIService:
         *,
         status_callback: Callable[[str], None] | None = None,
     ) -> AIReplyResult:
-        ai_mode = self._ai_mode()
+        route = self._resolved_text_route()
+        ai_mode = route.legacy_mode
         started_at = time.perf_counter()
         messages = self._build_messages(user_text, history or [])
-        attempts = self.provider_plan(ai_mode)
+        attempts = self.provider_plan(route=route)
         if not attempts:
+            if route.assistant_mode == "private":
+                detail = self.local_llm.status().detail
+                return AIReplyResult(
+                    text=self._private_text_backend_reply(detail),
+                    mode=ai_mode,
+                    elapsed_ms=self._elapsed_ms(started_at),
+                    error=PRIVATE_TEXT_BACKEND_ERROR,
+                    assistant_mode=route.assistant_mode,
+                    privacy_guarantee=route.privacy_guarantee,
+                    route_summary=route.summary,
+                )
             reply = self._fallback_reply(user_text)
             return AIReplyResult(
                 text=reply,
                 mode=ai_mode,
                 elapsed_ms=self._elapsed_ms(started_at),
                 error="no_provider_attempts",
+                assistant_mode=route.assistant_mode,
+                privacy_guarantee=route.privacy_guarantee,
+                route_summary=route.summary,
             )
 
-        budget_seconds = self._mode_budget_seconds(ai_mode)
+        budget_seconds = self._mode_budget_seconds(route.request_profile)
         last_error: str | None = None
         for index, attempt in enumerate(attempts):
             elapsed = time.perf_counter() - started_at
             remaining_budget = budget_seconds - elapsed
             if remaining_budget <= 0:
-                last_error = f"latency budget exceeded ({ai_mode})"
+                last_error = f"latency budget exceeded ({route.assistant_mode})"
                 break
-            spec = PROVIDERS[attempt.provider]
-            api_key = self._provider_api_key(spec)
-            if not api_key:
-                continue
             self._report_stage(
                 status_callback,
                 self._attempt_stage_label(
-                    ai_mode=ai_mode,
-                    spec=spec,
+                    ai_mode=self._stage_mode_key(route),
+                    provider_label=self._provider_label(attempt.provider),
                     model=attempt.model,
                     attempt_index=index,
                     attempts_total=len(attempts),
                 ),
             )
 
-            reply, error = self._try_provider(
-                spec,
-                attempt.model,
-                api_key,
-                messages,
-                ai_mode=ai_mode,
-                budget_seconds=remaining_budget,
-            )
+            if attempt.provider == "local_llama":
+                reply, error = self._try_local_llama(messages, ai_mode=route.request_profile)
+            else:
+                spec = PROVIDERS[attempt.provider]
+                api_key = self._provider_api_key(spec)
+                if not api_key:
+                    continue
+                reply, error = self._try_provider(
+                    spec,
+                    attempt.model,
+                    api_key,
+                    messages,
+                    ai_mode=route.request_profile,
+                    budget_seconds=remaining_budget,
+                )
             if reply:
                 return AIReplyResult(
                     text=reply,
                     mode=ai_mode,
-                    provider=spec.key,
-                    provider_label=spec.label,
+                    provider=attempt.provider,
+                    provider_label=self._provider_label(attempt.provider),
                     model=attempt.model,
                     elapsed_ms=self._elapsed_ms(started_at),
                     fallback_used=index > 0,
+                    assistant_mode=route.assistant_mode,
+                    privacy_guarantee=route.privacy_guarantee,
+                    route_summary=route.summary,
                 )
             last_error = error or last_error
             if index < len(attempts) - 1:
-                next_spec = PROVIDERS[attempts[index + 1].provider]
                 self._report_stage(
                     status_callback,
-                    self._fallback_stage_label(spec, next_spec),
+                    self._fallback_stage_label(attempt.provider, attempts[index + 1].provider),
                 )
+
+        if route.assistant_mode == "private":
+            return AIReplyResult(
+                text=self._private_text_backend_reply(last_error),
+                mode=ai_mode,
+                elapsed_ms=self._elapsed_ms(started_at),
+                error=PRIVATE_TEXT_BACKEND_ERROR,
+                assistant_mode=route.assistant_mode,
+                privacy_guarantee=route.privacy_guarantee,
+                route_summary=route.summary,
+            )
 
         return AIReplyResult(
             text=self._fallback_reply(user_text, last_error),
@@ -219,24 +259,42 @@ class AIService:
             elapsed_ms=self._elapsed_ms(started_at),
             fallback_used=len(attempts) > 1,
             error=last_error or "",
+            assistant_mode=route.assistant_mode,
+            privacy_guarantee=route.privacy_guarantee,
+            route_summary=route.summary,
         )
 
-    def provider_plan(self, ai_mode: str | None = None) -> list[ProviderAttempt]:
-        mode = self._normalize_mode(ai_mode or self._ai_mode())
-        configured_provider = str(self.settings.get("ai_provider", "auto")).strip().lower()
-        if configured_provider in PROVIDERS:
-            provider_keys = (configured_provider,)
-        else:
-            provider_keys = PROVIDER_PLANS[mode]
+    def provider_plan(
+        self,
+        ai_mode: str | None = None,
+        *,
+        route: ResolvedTextAIRoute | None = None,
+    ) -> list[ProviderAttempt]:
+        route = route or self._resolved_text_route(ai_mode)
+        if not route.provider_route:
+            return []
 
         seen: set[str] = set()
         attempts: list[ProviderAttempt] = []
-        for provider_key in provider_keys:
+        for provider_key in route.provider_route:
             if provider_key in seen:
                 continue
             seen.add(provider_key)
+            if provider_key == "local_llama":
+                attempts.append(
+                    ProviderAttempt(
+                        provider=provider_key,
+                        model=self._local_model_label(),
+                    )
+                )
+                continue
             spec = PROVIDERS[provider_key]
-            attempts.append(ProviderAttempt(provider=provider_key, model=spec.models[mode]))
+            attempts.append(
+                ProviderAttempt(
+                    provider=provider_key,
+                    model=spec.models[route.request_profile],
+                )
+            )
         return attempts
 
     def network_settings(self) -> NetworkSettings:
@@ -342,15 +400,27 @@ class AIService:
 
         return os.environ.get(spec.env_var, "").strip()
 
-    def _ai_mode(self) -> str:
-        return self._normalize_mode(str(self.settings.get("ai_mode", "auto")).strip().lower())
+    def _resolved_text_route(self, mode_hint: str | None = None) -> ResolvedTextAIRoute:
+        return resolve_text_ai_route(self.settings, mode_hint=mode_hint)
 
     def _mode_budget_seconds(self, mode: str) -> float:
+        if mode == "standard":
+            mode = "auto"
+        elif mode == "smart":
+            mode = "quality"
+        elif mode == "private":
+            mode = "auto"
         if mode in AI_MODE_BUDGET_SECONDS:
             return AI_MODE_BUDGET_SECONDS[mode]
         return AI_MODE_BUDGET_SECONDS["auto"]
 
     def _mode_request_options(self, mode: str) -> dict[str, float | int]:
+        if mode == "standard":
+            mode = "auto"
+        elif mode == "smart":
+            mode = "quality"
+        elif mode == "private":
+            mode = "auto"
         if mode == "fast":
             return {
                 "temperature": 0.2,
@@ -370,22 +440,27 @@ class AIService:
         self,
         *,
         ai_mode: str,
-        spec: ProviderSpec,
+        provider_label: str,
         model: str,
         attempt_index: int,
         attempts_total: int,
     ) -> str:
         mode_label = {
             "fast": "Быстрый режим",
-            "quality": "Качество",
-            "auto": "Авто-режим",
+            "standard": "Стандартный режим",
+            "smart": "Умный режим",
+            "private": "Приватный режим",
+            "quality": "Умный режим",
+            "auto": "Стандартный режим",
         }.get(ai_mode, "ИИ")
         if attempts_total <= 1:
-            return f"{mode_label}: {spec.label}…"
-        return f"{mode_label}: {spec.label} ({attempt_index + 1}/{attempts_total})…"
+            return f"{mode_label}: {provider_label}…"
+        return f"{mode_label}: {provider_label} ({attempt_index + 1}/{attempts_total})…"
 
-    def _fallback_stage_label(self, current: ProviderSpec, next_spec: ProviderSpec) -> str:
-        return f"{current.label} не ответил, переключаюсь на {next_spec.label}…"
+    def _fallback_stage_label(self, current_provider: str, next_provider: str) -> str:
+        current_label = self._provider_label(current_provider)
+        next_label = self._provider_label(next_provider)
+        return f"{current_label} не ответил, переключаюсь на {next_label}…"
 
     def _report_stage(self, callback: Callable[[str], None] | None, text: str) -> None:
         if callback is None:
@@ -396,6 +471,34 @@ class AIService:
 
     def _elapsed_ms(self, started_at: float) -> int:
         return max(0, int((time.perf_counter() - started_at) * 1000))
+
+    def _stage_mode_key(self, route: ResolvedTextAIRoute) -> str:
+        return route.assistant_mode or route.legacy_mode
+
+    def _provider_label(self, provider_key: str) -> str:
+        if provider_key == "local_llama":
+            backend_label = getattr(self.local_llm, "backend_label", None)
+            if callable(backend_label):
+                label = str(backend_label() or "").strip()
+                if label:
+                    return label
+            return "Local Llama"
+        spec = PROVIDERS.get(provider_key)
+        if spec is not None:
+            return spec.label
+        return provider_key
+
+    def _local_model_label(self) -> str:
+        model_label = getattr(self.local_llm, "model_label", None)
+        if callable(model_label):
+            label = str(model_label() or "").strip()
+            if label:
+                return label
+
+        model_path = str(getattr(self.local_llm, "model_path", lambda: "")() or "").strip()
+        if not model_path:
+            return "llama.cpp"
+        return Path(model_path).name or model_path
 
     def _normalize_mode(self, value: str) -> str:
         if value in AI_MODES:
@@ -447,6 +550,37 @@ class AIService:
         if status_code:
             return f"HTTP {status_code}"
         return exc.__class__.__name__
+
+    def _try_local_llama(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        ai_mode: str,
+    ) -> tuple[str | None, str | None]:
+        options = self._mode_request_options(ai_mode)
+        try:
+            reply = self.local_llm.generate(
+                messages,
+                temperature=float(options["temperature"]),
+                max_tokens=int(options["max_tokens"]),
+            )
+        except LocalLLMUnavailableError as exc:
+            return None, str(exc)
+        except Exception as exc:  # noqa: BLE001
+            return None, self._describe_error(exc)
+        return reply, None
+
+    def _private_text_backend_reply(self, detail: str | None = None) -> str:
+        detail_text = str(detail or "").strip()
+        if detail_text:
+            return (
+                "Приватный режим для текста включён, но локальная Llama не готова "
+                f"({detail_text}). Облачные провайдеры для текста не использовались."
+            )
+        return (
+            "Приватный режим для текста включён, но локальная Llama не готова. "
+            "Облачные провайдеры для текста не использовались."
+        )
 
     def _fallback_reply(self, user_text: str, last_error: str | None = None) -> str:
         lower = user_text.lower()

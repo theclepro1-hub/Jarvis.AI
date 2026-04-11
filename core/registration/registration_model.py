@@ -14,9 +14,21 @@ class RegistrationModel:
     skipped: bool = False
 
     @property
+    def has_any_ai_key(self) -> bool:
+        return any(
+            value.strip()
+            for value in (
+                self.groq_api_key,
+                self.cerebras_api_key,
+                self.gemini_api_key,
+                self.openrouter_api_key,
+            )
+        )
+
+    @property
     def is_complete(self) -> bool:
         return bool(
-            self.groq_api_key.strip()
+            self.has_any_ai_key
             and self.telegram_user_id.strip()
             and self.telegram_bot_token.strip()
         )

@@ -84,6 +84,64 @@ def test_settings_store_recovers_from_corrupt_json(monkeypatch, tmp_path) -> Non
     assert recovery_files[0].read_text(encoding="utf-8").startswith('{"theme_mode": "midnight",')
 
 
+def test_settings_store_ignores_corrupt_secret_blob_without_crashing(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store = SettingsStore()
+    payload = json.loads(json.dumps(DEFAULT_SETTINGS))
+    payload["theme_mode"] = "aurora"
+    payload["registration_secrets"] = {
+        "provider": "windows-dpapi",
+        "fields": {
+            "groq_api_key": "dpapi:AA==",
+        },
+    }
+    store.settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    loaded = store.load()
+
+    assert loaded["theme_mode"] == "aurora"
+    assert loaded["registration"]["groq_api_key"] == ""
+
+
+def test_settings_store_migrates_legacy_voice_and_ai_modes_to_assistant_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store = SettingsStore()
+    payload = json.loads(json.dumps(DEFAULT_SETTINGS))
+    payload.pop("assistant_mode", None)
+    payload["voice_mode"] = "private"
+    payload["ai_mode"] = "quality"
+    store.settings_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    loaded = store.load()
+
+    assert loaded["assistant_mode"] == "private"
+    assert loaded["allow_text_cloud_fallback"] is False
+    assert loaded["allow_stt_cloud_fallback"] is False
+
+
+def test_settings_store_clearing_secret_removes_stale_registration_secrets(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
+    store = SettingsStore()
+    payload = json.loads(json.dumps(DEFAULT_SETTINGS))
+    payload["registration"]["groq_api_key"] = "fake_groq_test_secret"
+    payload["registration"]["telegram_bot_token"] = "bot_test_secret"
+
+    store.save(payload)
+
+    cleared = store.load()
+    cleared["registration"]["groq_api_key"] = ""
+    cleared["registration"]["telegram_bot_token"] = ""
+    store.save(cleared)
+
+    raw = json.loads(store.settings_path.read_text(encoding="utf-8"))
+    fields = ((raw.get("registration_secrets") or {}).get("fields") or {})
+
+    assert "groq_api_key" not in fields
+    assert "telegram_bot_token" not in fields
+    assert store.load()["registration"]["groq_api_key"] == ""
+    assert store.load()["registration"]["telegram_bot_token"] == ""
+
+
 def test_settings_store_falls_back_to_direct_write_when_replace_is_locked(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
     store = SettingsStore()

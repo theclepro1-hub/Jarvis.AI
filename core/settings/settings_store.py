@@ -13,6 +13,15 @@ from typing import Any
 
 from ctypes import wintypes
 
+from core.policy.assistant_mode import (
+    DEFAULT_ASSISTANT_MODE,
+    DEFAULT_LOCAL_LLM_BACKEND,
+    SUPPORTED_ASSISTANT_MODES,
+    SUPPORTED_STT_BACKEND_OVERRIDES,
+    SUPPORTED_TEXT_BACKEND_OVERRIDES,
+    infer_assistant_mode_from_legacy,
+)
+
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     "theme_mode": "midnight",
@@ -25,6 +34,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ai_mode": "auto",
     "ai_model": "openai/gpt-oss-20b",
     "ai_max_attempts": 1,
+    "assistant_mode": DEFAULT_ASSISTANT_MODE,
+    "text_backend_override": "auto",
+    "stt_backend_override": "auto",
+    "local_llm_backend": DEFAULT_LOCAL_LLM_BACKEND,
+    "local_llm_model": "",
+    "allow_text_cloud_fallback": True,
+    "allow_stt_cloud_fallback": True,
     "network": {
         "proxy_mode": "system",
         "proxy_url": "",
@@ -92,7 +108,7 @@ class SettingsStore:
             return self._default_settings_copy()
 
         try:
-            with self.settings_path.open("r", encoding="utf-8") as handle:
+            with self.settings_path.open("r", encoding="utf-8-sig") as handle:
                 data = json.load(handle)
         except (json.JSONDecodeError, UnicodeDecodeError, OSError, ValueError):
             self._recover_corrupt_settings()
@@ -103,6 +119,7 @@ class SettingsStore:
             return self._default_settings_copy()
 
         merged = self._merge_defaults(data, DEFAULT_SETTINGS)
+        self._normalize_assistant_settings(merged, source_data=data)
         self._restore_registration_secrets(merged)
         microphone_name = str(merged.get("microphone_name", "")).strip()
         if not microphone_name:
@@ -178,8 +195,47 @@ class SettingsStore:
                 result[key] = value
         return result
 
+    def _normalize_assistant_settings(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_data: dict[str, Any] | None = None,
+    ) -> None:
+        explicit_mode = ""
+        if isinstance(source_data, dict):
+            explicit_mode = str(source_data.get("assistant_mode", "") or "").strip().casefold()
+        assistant_mode = explicit_mode or str(payload.get("assistant_mode", "") or "").strip().casefold()
+        if assistant_mode not in SUPPORTED_ASSISTANT_MODES or (
+            isinstance(source_data, dict) and "assistant_mode" not in source_data
+        ):
+            assistant_mode = infer_assistant_mode_from_legacy(payload)
+        payload["assistant_mode"] = assistant_mode
+
+        text_override = str(payload.get("text_backend_override", "auto") or "").strip().casefold()
+        if text_override not in SUPPORTED_TEXT_BACKEND_OVERRIDES:
+            text_override = "auto"
+        payload["text_backend_override"] = text_override
+
+        stt_override = str(payload.get("stt_backend_override", "auto") or "").strip().casefold()
+        if stt_override not in SUPPORTED_STT_BACKEND_OVERRIDES:
+            stt_override = "auto"
+        payload["stt_backend_override"] = stt_override
+
+        backend = str(payload.get("local_llm_backend", DEFAULT_LOCAL_LLM_BACKEND) or "").strip().casefold()
+        payload["local_llm_backend"] = backend or DEFAULT_LOCAL_LLM_BACKEND
+        payload["local_llm_model"] = str(payload.get("local_llm_model", "") or "").strip()
+
+        if assistant_mode == "private":
+            payload["allow_text_cloud_fallback"] = False
+            payload["allow_stt_cloud_fallback"] = False
+            return
+
+        payload["allow_text_cloud_fallback"] = bool(payload.get("allow_text_cloud_fallback", True))
+        payload["allow_stt_cloud_fallback"] = bool(payload.get("allow_stt_cloud_fallback", True))
+
     def _prepare_for_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = json.loads(json.dumps(payload))
+        result.pop("registration_secrets", None)
         registration = result.get("registration")
         if os.name != "nt" or not isinstance(registration, dict):
             return result
@@ -216,7 +272,10 @@ class SettingsStore:
             protected_value = fields.get(field)
             if not isinstance(protected_value, str) or not protected_value:
                 continue
-            registration[field] = self._unprotect_text(protected_value)
+            try:
+                registration[field] = self._unprotect_text(protected_value)
+            except Exception:
+                continue
 
     def _protect_text(self, value: str) -> str:
         raw = value.encode("utf-8")

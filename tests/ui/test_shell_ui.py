@@ -541,6 +541,28 @@ def test_settings_connections_can_update_registration_fields(ui_runtime) -> None
     assert "Подключения сохранены" in _find(window, "settingsConnectionsFeedback").property("text")
 
 
+def test_settings_assistant_mode_propagates_to_voice_and_privacy_state(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _pump(app, 200)
+    _click(app, window, _find(window, "navButton_settings"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+
+    assert runtime.settings_bridge.assistantMode == "standard"
+
+    runtime.settings_bridge.assistantMode = "private"
+    _pump(app, 120)
+
+    assert runtime.services.settings.get("voice_mode", "") == "private"
+    assert runtime.services.settings.get("privacy_mode", "") == "private"
+    assert runtime.services.settings.get("save_history_enabled", True) is False
+
+    _click(app, window, _find(window, "navButton_voice"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "voice")
+    assert runtime.voice_bridge.mode == "private"
+
+
 def test_settings_updates_section_stays_last(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 

@@ -1,7 +1,60 @@
 from __future__ import annotations
 
+import sys
 import threading
+import types
 from types import SimpleNamespace
+
+if "PySide6.QtCore" not in sys.modules:
+    class _BoundSignal:
+        def __init__(self) -> None:
+            self._subscribers: list[object] = []
+
+        def connect(self, callback) -> None:  # noqa: ANN001
+            self._subscribers.append(callback)
+
+        def emit(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            for callback in list(self._subscribers):
+                callback(*args, **kwargs)
+
+    class _SignalDescriptor:
+        def __set_name__(self, _owner, name: str) -> None:  # noqa: ANN001
+            self._name = f"__signal_{name}"
+
+        def __get__(self, instance, _owner):  # noqa: ANN001, ANN202
+            if instance is None:
+                return self
+            signal = instance.__dict__.get(self._name)
+            if signal is None:
+                signal = _BoundSignal()
+                instance.__dict__[self._name] = signal
+            return signal
+
+    class _QObject:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+    def _property(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        def decorator(func):  # noqa: ANN001
+            return property(func)
+
+        return decorator
+
+    def _slot(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        def decorator(func):  # noqa: ANN001
+            return func
+
+        return decorator
+
+    qtcore = types.ModuleType("PySide6.QtCore")
+    qtcore.QObject = _QObject
+    qtcore.Property = _property
+    qtcore.Signal = lambda *_args, **_kwargs: _SignalDescriptor()
+    qtcore.Slot = _slot
+    pyside6 = types.ModuleType("PySide6")
+    pyside6.QtCore = qtcore
+    sys.modules["PySide6"] = pyside6
+    sys.modules["PySide6.QtCore"] = qtcore
 
 from ui.bridge.voice_bridge import VoiceBridge
 
@@ -231,6 +284,12 @@ def test_voice_bridge_runtime_status_keeps_command_backend_and_exposes_wake_mode
     assert status["wakeModel"] == "загружена"
     assert status["model"] == "загружена"
     assert status["command"] == "готово"
+    assert status["assistantMode"] == "standard"
+    assert status["assistantWake"] == "local"
+    assert "assistantTextRoute" in status
+    assert "assistantSttRoute" in status
+    assert "assistantPrivacy" in status
+    assert "assistantReadiness" in status
 
 
 def test_voice_bridge_failed_warmup_can_retry_on_next_start():
@@ -274,3 +333,38 @@ def test_voice_bridge_is_recording_does_not_force_lazy_voice_service():
     bridge = VoiceBridge(state, _LazyVoiceServices(), chat_bridge=_ChatBridge())
 
     assert bridge.isRecording is False
+
+
+def test_voice_bridge_normalizes_legacy_mode_values():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    assert bridge.mode == "standard"
+
+    bridge.setMode("quality")
+
+    assert bridge.mode == "smart"
+    assert bridge.assistantMode == "smart"
+    assert services.settings.payload["assistant_mode"] == "smart"
+    assert services.settings.payload["ai_mode"] == "quality"
+    assert services.settings.payload["voice_mode"] == "smart"
+
+
+def test_voice_bridge_private_local_only_note_is_reported_as_stt_error():
+    services = _Services()
+    services.settings.payload["voice_mode"] = "private"
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    note = bridge._wake_failure_note(  # noqa: SLF001
+        SimpleNamespace(
+            status="model_missing",
+            detail="Приватный режим требует локальный backend распознавания. Облачный fallback отключён.",
+        )
+    )
+    bridge._push_voice_note(note)  # noqa: SLF001
+
+    assert "локаль" in note.casefold()
+    assert "Groq" not in note
+    assert state.status == "Ошибка распознавания"

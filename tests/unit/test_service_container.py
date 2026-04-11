@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 from types import SimpleNamespace
 
 from PySide6.QtCore import QCoreApplication
@@ -84,6 +85,7 @@ def test_service_container_defers_heavy_services_until_accessed(monkeypatch) -> 
     container.settings = _FakeSettings()
     container.startup = SimpleNamespace(is_enabled=lambda: False)
     container.registration = SimpleNamespace()
+    container._lazy_lock = threading.RLock()
     container._reminders = None
     container._telegram = None
     container._voice = None
@@ -139,6 +141,154 @@ def test_service_container_defers_heavy_services_until_accessed(monkeypatch) -> 
     assert created == ["ai", "actions", "batch_router", "pc_control", "command_router"]
 
 
+def test_service_container_ai_is_singleton_under_concurrent_access(monkeypatch) -> None:
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings = _FakeSettings()
+    container._lazy_lock = threading.RLock()
+    container._ai = None
+
+    created: list[str] = []
+    created_lock = threading.Lock()
+
+    class TrackedAi:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("ai")
+            time.sleep(0.05)
+
+    monkeypatch.setattr("core.services.service_container.AIService", TrackedAi)
+
+    results = _run_concurrent_access(lambda: container.ai)
+
+    assert len(created) == 1
+    assert len({id(result) for result in results}) == 1
+
+
+def test_service_container_wake_is_singleton_under_concurrent_access(monkeypatch) -> None:
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings = _FakeSettings()
+    container._lazy_lock = threading.RLock()
+    container._voice = None
+    container._wake = None
+
+    created: list[str] = []
+    created_lock = threading.Lock()
+
+    class TrackedVoice:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("voice")
+            time.sleep(0.05)
+
+    class TrackedWake:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("wake")
+            time.sleep(0.05)
+
+    monkeypatch.setattr("core.services.service_container.VoiceService", TrackedVoice)
+    monkeypatch.setattr("core.services.service_container.WakeService", TrackedWake)
+
+    results = _run_concurrent_access(lambda: container.wake)
+
+    assert created.count("voice") == 1
+    assert created.count("wake") == 1
+    assert len({id(result) for result in results}) == 1
+
+
+def test_service_container_reminders_is_singleton_under_concurrent_access(monkeypatch) -> None:
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings = _FakeSettings()
+    container._lazy_lock = threading.RLock()
+    container._reminders = None
+
+    created: list[str] = []
+    created_lock = threading.Lock()
+
+    class TrackedReminders:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("reminders")
+            time.sleep(0.05)
+
+    monkeypatch.setattr("core.services.service_container.ReminderService", TrackedReminders)
+
+    results = _run_concurrent_access(lambda: container.reminders)
+
+    assert created.count("reminders") == 1
+    assert len({id(result) for result in results}) == 1
+
+
+def test_service_container_command_router_is_singleton_under_concurrent_access(monkeypatch) -> None:
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings = _FakeSettings()
+    container._lazy_lock = threading.RLock()
+    container._reminders = None
+    container._voice = None
+    container._wake = None
+    container._updates = None
+    container._ai = None
+    container._actions = None
+    container._batch_router = None
+    container._pc_control = None
+    container._command_router = None
+
+    created: list[str] = []
+    created_lock = threading.Lock()
+
+    class TrackedActions:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("actions")
+            time.sleep(0.05)
+
+    class TrackedBatchRouter:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("batch_router")
+            time.sleep(0.05)
+
+    class TrackedAi:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("ai")
+            time.sleep(0.05)
+
+    class TrackedPcControl:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("pc_control")
+            time.sleep(0.05)
+
+    class TrackedReminders:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("reminders")
+            time.sleep(0.05)
+
+    class TrackedCommandRouter:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with created_lock:
+                created.append("command_router")
+            time.sleep(0.05)
+
+    monkeypatch.setattr("core.services.service_container.ActionRegistry", TrackedActions)
+    monkeypatch.setattr("core.services.service_container.BatchRouter", TrackedBatchRouter)
+    monkeypatch.setattr("core.services.service_container.AIService", TrackedAi)
+    monkeypatch.setattr("core.services.service_container.PcControlService", TrackedPcControl)
+    monkeypatch.setattr("core.services.service_container.ReminderService", TrackedReminders)
+    monkeypatch.setattr("core.services.service_container.CommandRouter", TrackedCommandRouter)
+
+    results = _run_concurrent_access(lambda: container.command_router)
+
+    assert created.count("actions") == 1
+    assert created.count("batch_router") == 1
+    assert created.count("ai") == 1
+    assert created.count("pc_control") == 1
+    assert created.count("command_router") == 1
+    assert len({id(result) for result in results}) == 1
+
+
 def test_service_container_telegram_transport_uses_safe_timeout_fallback() -> None:
     class Settings(_FakeSettings):
         def __init__(self) -> None:
@@ -153,6 +303,37 @@ def test_service_container_telegram_transport_uses_safe_timeout_fallback() -> No
 
     assert transport is not None
     assert transport.timeout_seconds == 12.0
+    assert transport.proxy_mode == "system"
+    assert transport.proxy_url == ""
+
+
+def test_service_container_telegram_transport_uses_proxy_settings() -> None:
+    class Settings(_FakeSettings):
+        def __init__(self) -> None:
+            super().__init__()
+            self._registration = {"telegram_bot_token": "bot_token"}
+            self._settings = {
+                "network": {
+                    "timeout_seconds": 18.5,
+                    "proxy_mode": "manual",
+                    "proxy_url": "http://127.0.0.1:8888",
+                }
+            }
+
+        def get(self, key: str, default=None):  # noqa: ANN001, ANN201
+            if key == "network":
+                return self._settings["network"]
+            return default
+
+    container = ServiceContainer.__new__(ServiceContainer)
+    container.settings = Settings()
+
+    transport = ServiceContainer._create_telegram_transport(container)
+
+    assert transport is not None
+    assert transport.timeout_seconds == 18.5
+    assert transport.proxy_mode == "manual"
+    assert transport.proxy_url == "http://127.0.0.1:8888"
 
 
 def test_service_container_does_not_write_startup_flag_when_unchanged(monkeypatch) -> None:
@@ -261,6 +442,33 @@ def _wait_until(predicate, timeout_seconds: float = 2.0) -> None:  # noqa: ANN00
             return
         time.sleep(0.01)
     raise AssertionError("condition timeout")
+
+
+def _run_concurrent_access(accessor, worker_count: int = 12):  # noqa: ANN001
+    barrier = threading.Barrier(worker_count)
+    results: list[object] = []
+    errors: list[BaseException] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        try:
+            barrier.wait()
+            value = accessor()
+            with results_lock:
+                results.append(value)
+        except BaseException as exc:  # noqa: BLE001
+            with results_lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(worker_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3.0)
+
+    assert not errors
+    assert all(not thread.is_alive() for thread in threads)
+    return results
 
 
 def test_settings_bridge_send_telegram_test_is_single_flight() -> None:

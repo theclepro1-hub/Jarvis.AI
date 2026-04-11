@@ -9,6 +9,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
 from core.ai.ai_service import SUPPORTED_AI_MODES
+from core.policy.assistant_mode import resolve_assistant_mode
 
 
 class ChatBridge(QObject):
@@ -470,30 +471,46 @@ class ChatBridge(QObject):
 
     def _initial_ai_stage_label(self, route) -> str:  # noqa: ANN001
         settings = getattr(self.services, "settings", None)
-        mode = "auto"
-        provider = "auto"
+        assistant_mode = "standard"
         if settings is not None and hasattr(settings, "get"):
-            mode = self._normalize_ai_mode(settings.get("ai_mode", "auto"))
-            provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
+            assistant_mode = str(resolve_assistant_mode(settings) or "standard").strip().lower()
         if route is not None and getattr(route, "execution_result", None) is not None:
             return "Локально не хватило уверенности, подключаю ИИ…"
-        if mode == "fast" or provider in {"groq", "cerebras"}:
+        if assistant_mode == "fast":
             return "Быстрый режим: готовлю ответ…"
-        if mode == "quality" or provider == "gemini":
-            return "Режим качества: готовлю ответ…"
+        if assistant_mode == "smart":
+            return "Умный режим: готовлю ответ…"
+        if assistant_mode == "private":
+            return "Приватный режим: готовлю локальный ответ…"
+        if assistant_mode == "standard":
+            return "Стандартный режим: готовлю ответ…"
         return "Готовлю ответ ИИ…"
 
     def _format_ai_response_hint(self, result) -> str:  # noqa: ANN001
         provider_label = str(getattr(result, "provider_label", "") or "").strip()
         elapsed_ms = int(getattr(result, "elapsed_ms", 0) or 0)
-        mode = self._normalize_ai_mode(getattr(result, "mode", ""))
+        assistant_mode = str(getattr(result, "assistant_mode", "") or "").strip().lower()
+        if not assistant_mode:
+            raw_mode = str(getattr(result, "mode", "") or "").strip().lower()
+            mode = self._normalize_ai_mode(raw_mode)
+            assistant_mode = {
+                "fast": "fast",
+                "quality": "smart",
+                "auto": "standard",
+                "local": "private",
+            }.get(raw_mode, {
+                "fast": "fast",
+                "quality": "smart",
+                "auto": "standard",
+            }.get(mode, "standard"))
         if not provider_label or elapsed_ms <= 0:
             return ""
         mode_label = {
             "fast": "Быстро",
-            "quality": "Качество",
-            "auto": "Авто",
-        }.get(mode, "ИИ")
+            "standard": "Стандарт",
+            "smart": "Умно",
+            "private": "Приватно",
+        }.get(assistant_mode, "ИИ")
         hint = f"{mode_label}: {provider_label} · {elapsed_ms / 1000.0:.1f} с"
         if bool(getattr(result, "fallback_used", False)):
             return f"{hint} (резерв)"

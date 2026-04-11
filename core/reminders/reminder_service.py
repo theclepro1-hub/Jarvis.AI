@@ -61,8 +61,8 @@ class ReminderService:
         for record in due:
             try:
                 notifier(record)
-            except Exception as exc:  # noqa: BLE001
-                self.store.mark_failed(record.id, type(exc).__name__)
+            except Exception:  # noqa: BLE001
+                # Keep the reminder pending so the next polling cycle can retry delivery.
                 continue
             self.store.mark_fired(record.id, fired_at_utc=now or self.clock())
             fired.append(self.store.get(record.id) or record)

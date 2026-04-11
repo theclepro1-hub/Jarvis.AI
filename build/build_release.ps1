@@ -1,3 +1,7 @@
+param(
+    [switch]$InstallerOnly
+)
+
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -156,6 +160,9 @@ if (!(Test-Path $venvPython)) {
 
 $version = (& $venvPython -c "from core.version import DEFAULT_VERSION; print(DEFAULT_VERSION)").Trim()
 Write-Host "RELEASE_VERSION $version"
+if ($InstallerOnly) {
+    Write-Host "RELEASE_MODE installer-only"
+}
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $versionInfoFile) | Out-Null
 $versionInfoContent = @"
@@ -293,89 +300,93 @@ if (!(Test-Path $portableDistPath)) {
     throw "Portable dist folder missing: $portableDistPath"
 }
 
-$portableZip = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_portable.zip" -f $version)
-Compress-Archive -Path $portableDistPath -DestinationPath $portableZip -Force
-Write-ChecksumFile -ArtifactPath $portableZip | Out-Null
-Assert-ChecksumFile -ArtifactPath $portableZip | Out-Null
-
-$nativeErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "SilentlyContinue"
-& $venvPython -m PyInstaller `
-    --noconfirm `
-    --noupx `
-    --windowed `
-    --onefile `
-    --name "JarvisAi_Unity" `
-    --icon $iconPath `
-    --version-file $versionInfoFile `
-    --distpath $oneFileDistDir `
-    --workpath $oneFileBuildDir `
-    --specpath $oneFileBuildDir `
-    --paths $root `
-    --exclude-module PySide6.Qt3DAnimation `
-    --exclude-module PySide6.Qt3DCore `
-    --exclude-module PySide6.Qt3DExtras `
-    --exclude-module PySide6.Qt3DInput `
-    --exclude-module PySide6.Qt3DLogic `
-    --exclude-module PySide6.Qt3DRender `
-    --exclude-module PySide6.QtCharts `
-    --exclude-module PySide6.QtDataVisualization `
-    --exclude-module PySide6.QtGraphs `
-    --exclude-module PySide6.QtLocation `
-    --exclude-module PySide6.QtMultimedia `
-    --exclude-module PySide6.QtNetworkAuth `
-    --exclude-module PySide6.QtPdf `
-    --exclude-module PySide6.QtPdfWidgets `
-    --exclude-module PySide6.QtPositioning `
-    --exclude-module PySide6.QtQuick3D `
-    --exclude-module PySide6.QtQuick3DAssetImport `
-    --exclude-module PySide6.QtQuick3DAssetUtils `
-    --exclude-module PySide6.QtQuick3DPhysics `
-    --exclude-module PySide6.QtRemoteObjects `
-    --exclude-module PySide6.QtSensors `
-    --exclude-module PySide6.QtSerialBus `
-    --exclude-module PySide6.QtSerialPort `
-    --exclude-module PySide6.QtHelp `
-    --exclude-module PySide6.QtMultimediaWidgets `
-    --exclude-module PySide6.QtScxml `
-    --exclude-module PySide6.QtSpatialAudio `
-    --exclude-module PySide6.QtSql `
-    --exclude-module PySide6.QtSvgWidgets `
-    --exclude-module PySide6.QtTest `
-    --exclude-module PySide6.QtStateMachine `
-    --exclude-module PySide6.QtTextToSpeech `
-    --exclude-module PySide6.QtVirtualKeyboard `
-    --exclude-module PySide6.QtWebChannel `
-    --exclude-module PySide6.QtWebEngineCore `
-    --exclude-module PySide6.QtWebEngineQuick `
-    --exclude-module PySide6.QtWebEngineWidgets `
-    --exclude-module PySide6.QtWebSockets `
-    --collect-all faster_whisper `
-    --collect-all ctranslate2 `
-    --collect-all av `
-    --collect-all vosk `
-    --hidden-import pyttsx3.drivers.sapi5 `
-    --hidden-import win32com.client `
-    --hidden-import pythoncom `
-    --hidden-import pywintypes `
-    --add-data "$root\\ui;ui" `
-    --add-data "$root\\assets;assets" `
-    --add-data "$modelPath;assets\\models\\$modelName" `
-    "$root\\app\\main.py"
-$pyInstallerExit = $LASTEXITCODE
-$ErrorActionPreference = $nativeErrorActionPreference
-if ($pyInstallerExit -ne 0) {
-    throw "PyInstaller onefile failed with exit code $pyInstallerExit"
+if (-not $InstallerOnly) {
+    $portableZip = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_portable.zip" -f $version)
+    Compress-Archive -Path $portableDistPath -DestinationPath $portableZip -Force
+    Write-ChecksumFile -ArtifactPath $portableZip | Out-Null
+    Assert-ChecksumFile -ArtifactPath $portableZip | Out-Null
 }
 
-$oneFileExe = Join-Path $oneFileDistDir "JarvisAi_Unity.exe"
-if (!(Test-Path $oneFileExe)) {
-    throw "Onefile executable missing: $oneFileExe"
+if (-not $InstallerOnly) {
+    $nativeErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    & $venvPython -m PyInstaller `
+        --noconfirm `
+        --noupx `
+        --windowed `
+        --onefile `
+        --name "JarvisAi_Unity" `
+        --icon $iconPath `
+        --version-file $versionInfoFile `
+        --distpath $oneFileDistDir `
+        --workpath $oneFileBuildDir `
+        --specpath $oneFileBuildDir `
+        --paths $root `
+        --exclude-module PySide6.Qt3DAnimation `
+        --exclude-module PySide6.Qt3DCore `
+        --exclude-module PySide6.Qt3DExtras `
+        --exclude-module PySide6.Qt3DInput `
+        --exclude-module PySide6.Qt3DLogic `
+        --exclude-module PySide6.Qt3DRender `
+        --exclude-module PySide6.QtCharts `
+        --exclude-module PySide6.QtDataVisualization `
+        --exclude-module PySide6.QtGraphs `
+        --exclude-module PySide6.QtLocation `
+        --exclude-module PySide6.QtMultimedia `
+        --exclude-module PySide6.QtNetworkAuth `
+        --exclude-module PySide6.QtPdf `
+        --exclude-module PySide6.QtPdfWidgets `
+        --exclude-module PySide6.QtPositioning `
+        --exclude-module PySide6.QtQuick3D `
+        --exclude-module PySide6.QtQuick3DAssetImport `
+        --exclude-module PySide6.QtQuick3DAssetUtils `
+        --exclude-module PySide6.QtQuick3DPhysics `
+        --exclude-module PySide6.QtRemoteObjects `
+        --exclude-module PySide6.QtSensors `
+        --exclude-module PySide6.QtSerialBus `
+        --exclude-module PySide6.QtSerialPort `
+        --exclude-module PySide6.QtHelp `
+        --exclude-module PySide6.QtMultimediaWidgets `
+        --exclude-module PySide6.QtScxml `
+        --exclude-module PySide6.QtSpatialAudio `
+        --exclude-module PySide6.QtSql `
+        --exclude-module PySide6.QtSvgWidgets `
+        --exclude-module PySide6.QtTest `
+        --exclude-module PySide6.QtStateMachine `
+        --exclude-module PySide6.QtTextToSpeech `
+        --exclude-module PySide6.QtVirtualKeyboard `
+        --exclude-module PySide6.QtWebChannel `
+        --exclude-module PySide6.QtWebEngineCore `
+        --exclude-module PySide6.QtWebEngineQuick `
+        --exclude-module PySide6.QtWebEngineWidgets `
+        --exclude-module PySide6.QtWebSockets `
+        --collect-all faster_whisper `
+        --collect-all ctranslate2 `
+        --collect-all av `
+        --collect-all vosk `
+        --hidden-import pyttsx3.drivers.sapi5 `
+        --hidden-import win32com.client `
+        --hidden-import pythoncom `
+        --hidden-import pywintypes `
+        --add-data "$root\\ui;ui" `
+        --add-data "$root\\assets;assets" `
+        --add-data "$modelPath;assets\\models\\$modelName" `
+        "$root\\app\\main.py"
+    $pyInstallerExit = $LASTEXITCODE
+    $ErrorActionPreference = $nativeErrorActionPreference
+    if ($pyInstallerExit -ne 0) {
+        throw "PyInstaller onefile failed with exit code $pyInstallerExit"
+    }
+
+    $oneFileExe = Join-Path $oneFileDistDir "JarvisAi_Unity.exe"
+    if (!(Test-Path $oneFileExe)) {
+        throw "Onefile executable missing: $oneFileExe"
+    }
+    $oneFileRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_onefile.exe" -f $version)
+    Copy-Item $oneFileExe $oneFileRelease -Force
+    Write-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
+    Assert-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
 }
-$oneFileRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_onefile.exe" -f $version)
-Copy-Item $oneFileExe $oneFileRelease -Force
-Write-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
-Assert-ChecksumFile -ArtifactPath $oneFileRelease | Out-Null
 
 $programFilesX86 = ${env:ProgramFiles(x86)}
 if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
@@ -383,6 +394,10 @@ if ([string]::IsNullOrWhiteSpace($programFilesX86)) {
 }
 $innoCompiler = Join-Path $programFilesX86 "Inno Setup 6\\ISCC.exe"
 $installerRelease = Join-Path $releaseDir ("JarvisAi_Unity_{0}_windows_installer.exe" -f $version)
+
+if ($InstallerOnly -and !(Test-Path $innoCompiler)) {
+    throw "Installer-only release requires Inno Setup compiler: $innoCompiler"
+}
 
 if (Test-Path $innoCompiler) {
     Remove-Item -LiteralPath $installerDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -414,5 +429,7 @@ if (Test-Path $innoCompiler) {
 }
 
 Write-Host "BUILD_OK $distDir\\JarvisAi_Unity"
-Write-Host "ASSET_OK $portableZip"
-Write-Host "ASSET_OK $oneFileRelease"
+if (-not $InstallerOnly) {
+    Write-Host "ASSET_OK $portableZip"
+    Write-Host "ASSET_OK $oneFileRelease"
+}

@@ -31,6 +31,108 @@ Rectangle {
             width: voiceScroll.availableWidth
             spacing: 14
 
+            Text {
+                Layout.fillWidth: true
+                text: "Режим: " + voiceBridge.assistantMode + " · " + voiceBridge.assistantStatus["privacy"] + " · Text AI: " + voiceBridge.assistantStatus["text"] + " · STT: " + voiceBridge.assistantStatus["stt"] + " · Wake local"
+                color: Theme.Colors.textSoft
+                font.family: Theme.Typography.bodyFamily
+                font.pixelSize: Theme.Typography.small
+                wrapMode: Text.WordWrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                color: Theme.Colors.card
+                radius: 22
+                border.color: Theme.Colors.borderSoft
+                border.width: 1
+                implicitHeight: assistantStatusColumn.implicitHeight + 24
+
+                ColumnLayout {
+                    id: assistantStatusColumn
+                    anchors.fill: parent
+                    anchors.margins: 14
+                    spacing: 8
+
+                    Text {
+                        text: "Режим ассистента"
+                        color: Theme.Colors.text
+                        font.family: Theme.Typography.displayFamily
+                        font.pixelSize: Theme.Typography.small
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: "Wake: local"
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "STT route: " + voiceBridge.assistantStatus["stt"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Text route: " + voiceBridge.assistantStatus["text"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Что локально: " + voiceBridge.assistantStatus["local"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Что уйдёт наружу: " + voiceBridge.assistantStatus["outside"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: "Готовность: " + voiceBridge.assistantStatus["readiness"]
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.micro
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Слово активации"
+                description: "JARVIS слушает «Джарвис» локально и не должен засорять чат служебными статусами."
+
+                Item { Layout.fillWidth: true }
+
+                AppSwitch {
+                    id: wakeWordSwitch
+                    objectName: "wakeWordSwitch"
+                    checked: voiceBridge.wakeWordEnabled
+                    onToggled: voiceBridge.setWakeWordEnabled(checked)
+                }
+            }
+
             SettingRow {
                 Layout.fillWidth: true
                 title: "Микрофон"
@@ -170,21 +272,6 @@ Rectangle {
 
             SettingRow {
                 Layout.fillWidth: true
-                title: "Слово активации"
-                description: "JARVIS слушает «Джарвис» локально и не должен засорять чат служебными статусами."
-
-                Item { Layout.fillWidth: true }
-
-                AppSwitch {
-                    id: wakeWordSwitch
-                    objectName: "wakeWordSwitch"
-                    checked: voiceBridge.wakeWordEnabled
-                    onToggled: voiceBridge.setWakeWordEnabled(checked)
-                }
-            }
-
-            SettingRow {
-                Layout.fillWidth: true
                 title: "Статус"
                 description: "Короткая сводка по wake-слову, распознаванию и озвучке."
 
@@ -262,18 +349,19 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Распознавание речи"
-                description: "Выберите баланс между приватностью, скоростью и качеством распознавания."
+                description: "Быстрый чаще опирается на облако, стандартный держит локальный приоритет, умный тянется к лучшему качеству, приватный работает только локально."
 
                 Item { Layout.fillWidth: true }
 
                 AppComboBox {
                     id: voiceModeCombo
                     objectName: "voiceModeCombo"
-                    Layout.preferredWidth: 220
+                    Layout.preferredWidth: 240
                     model: [
-                        { key: "private", title: "Приватный" },
-                        { key: "balance", title: "Баланс" },
-                        { key: "quality", title: "Качество" }
+                        { key: "fast", title: "Быстрый" },
+                        { key: "standard", title: "Стандартный" },
+                        { key: "smart", title: "Умный" },
+                        { key: "private", title: "Приватный" }
                     ]
                     textRole: "title"
                     currentIndex: Math.max(0, model.findIndex(item => item.key === voiceBridge.mode))
