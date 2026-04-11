@@ -85,6 +85,13 @@ class _Voice:
     def summary(self) -> str:
         return "summary"
 
+    def strip_wake_word(self, text: str) -> str:
+        cleaned = text.strip()
+        for prefix in ("Джарвис, ", "Джарвис ", "джарвис, ", "джарвис "):
+            if cleaned.startswith(prefix):
+                return cleaned[len(prefix):].strip()
+        return cleaned
+
     def runtime_status(self) -> dict[str, str]:
         return {"wakeWord": "Жду «Джарвис»", "command": "готово", "ai": "ok", "model": "загружена", "tts": "ok"}
 
@@ -167,6 +174,19 @@ def test_voice_bridge_deliver_transcribed_text_sets_handoff_status():
     assert services.voice.handoff_calls == 1
     assert chat_bridge.received == ["открой ютуб"]
     assert bridge.recordingHint == "Команда распознана. Передаю в обработку..."
+
+
+def test_voice_bridge_strips_wake_word_before_chat_submit():
+    services = _Services()
+    chat_bridge = _ChatBridge()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=chat_bridge)
+
+    bridge._wake_hint = "Джарвис услышан. Захватываю команду..."  # noqa: SLF001
+    bridge._deliver_transcribed_text("Джарвис, открой ютуб")  # noqa: SLF001
+
+    assert chat_bridge.received == ["открой ютуб"]
+    assert bridge.wakeHint == ""
 
 
 def test_voice_bridge_preserves_failure_note_through_finalize():

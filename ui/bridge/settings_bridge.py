@@ -56,6 +56,9 @@ class SettingsBridge(QObject):
         self._connection_feedback = ""
         self._telegram_test_busy = False
         self._update_check_busy = False
+        self._local_llm_diagnostics_cache: LocalLLMDiagnostics | None = None
+        self._update_summary_cache: str | None = None
+        self._update_status_cache: dict[str, object] | None = None
         self._operation_lock = threading.Lock()
         self._worker_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="settings-bridge")
         self._telegramTestFinished.connect(self._on_telegram_test_finished)
@@ -90,6 +93,12 @@ class SettingsBridge(QObject):
         return None
 
     def _local_llm_diagnostics(self) -> LocalLLMDiagnostics:
+        if self._local_llm_diagnostics_cache is not None:
+            return self._local_llm_diagnostics_cache
+        self._local_llm_diagnostics_cache = self._load_local_llm_diagnostics()
+        return self._local_llm_diagnostics_cache
+
+    def _load_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
         try:
             return LocalLLMService(self.services.settings).diagnostics()
         except Exception:  # noqa: BLE001
@@ -102,6 +111,19 @@ class SettingsBridge(QObject):
                 action_label="",
                 action_url="",
             )
+
+    def _refresh_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
+        self._local_llm_diagnostics_cache = self._load_local_llm_diagnostics()
+        return self._local_llm_diagnostics_cache
+
+    def _refresh_update_snapshot(self) -> None:
+        updates = self._updates_service_if_ready()
+        if updates is not None and hasattr(updates, "summary") and hasattr(updates, "status_snapshot"):
+            self._update_summary_cache = str(updates.summary())
+            self._update_status_cache = dict(updates.status_snapshot())
+            return
+        self._update_summary_cache = self._default_update_summary()
+        self._update_status_cache = self._default_update_status()
 
     def _normalize_ai_mode(self, value: str) -> str:
         mode = str(value or "").strip().lower()
@@ -237,13 +259,12 @@ class SettingsBridge(QObject):
     @Property(str, notify=assistantModeSummaryChanged)
     def assistantModeSummary(self) -> str:
         mode = self.assistantMode
-        diagnostics = self._local_llm_diagnostics()
         if mode == "fast":
             return "Самый быстрый путь ответа."
         if mode == "smart":
             return "Приоритет качеству ответа."
         if mode == "private":
-            return "Только локальная работа." if diagnostics.ready else "Только локальная работа. Нужна локальная модель."
+            return "Только локальная работа."
         return "Сначала локально, потом облако."
 
     @Property(str, notify=assistantUserStatusChanged)
@@ -265,6 +286,7 @@ class SettingsBridge(QObject):
         backend = self._normalize_local_backend(value)
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("local_llm_backend", backend)
+        self._refresh_local_llm_diagnostics()
         self.localLlmBackendChanged.emit()
         self.localReadinessChanged.emit()
         self.assistantModeSummaryChanged.emit()
@@ -286,6 +308,7 @@ class SettingsBridge(QObject):
     def localLlmModel(self, value: str) -> None:
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("local_llm_model", str(value or "").strip())
+        self._refresh_local_llm_diagnostics()
         self.localLlmModelChanged.emit()
         self.localReadinessChanged.emit()
         self.assistantModeSummaryChanged.emit()
@@ -539,17 +562,15 @@ class SettingsBridge(QObject):
 
     @Property(str, notify=updateSummaryChanged)
     def updateSummary(self) -> str:
-        updates = self._updates_service_if_ready()
-        if updates is not None and hasattr(updates, "summary"):
-            return str(updates.summary())
-        return self._default_update_summary()
+        if self._update_summary_cache is None:
+            self._refresh_update_snapshot()
+        return self._update_summary_cache
 
     @Property("QVariantMap", notify=updateSummaryChanged)
     def updateStatus(self) -> dict[str, object]:
-        updates = self._updates_service_if_ready()
-        if updates is not None and hasattr(updates, "status_snapshot"):
-            return dict(updates.status_snapshot())
-        return self._default_update_status()
+        if self._update_status_cache is None:
+            self._refresh_update_snapshot()
+        return dict(self._update_status_cache)
 
     @Slot(str, str, str, str, str, str, result=bool)
     def saveConnections(
@@ -625,6 +646,7 @@ class SettingsBridge(QObject):
             )
             self.services.settings.set("local_llm_backend", self._normalize_local_backend(local_llm_backend))
             self.services.settings.set("local_llm_model", str(local_llm_model or "").strip())
+        self._refresh_local_llm_diagnostics()
         self._connection_feedback = "Дополнительные подключения сохранены."
         self.localLlmBackendChanged.emit()
         self.localLlmModelChanged.emit()
@@ -697,6 +719,7 @@ class SettingsBridge(QObject):
     def checkForUpdates(self) -> bool:
         updates = getattr(self.services, "updates", None)
         if updates is None or not hasattr(updates, "check_now"):
+            self._refresh_update_snapshot()
             self.updateSummaryChanged.emit()
             return False
         with self._operation_lock:
@@ -720,6 +743,7 @@ class SettingsBridge(QObject):
             with self._operation_lock:
                 self._update_check_busy = False
             self.updateCheckBusyChanged.emit()
+            self._refresh_update_snapshot()
             self.updateSummaryChanged.emit()
             return False
         return True
@@ -728,6 +752,7 @@ class SettingsBridge(QObject):
     def applyUpdate(self) -> bool:
         updates = getattr(self.services, "updates", None)
         if updates is None or not hasattr(updates, "apply_update"):
+            self._refresh_update_snapshot()
             self.updateSummaryChanged.emit()
             return False
         with self._operation_lock:
@@ -751,6 +776,7 @@ class SettingsBridge(QObject):
             with self._operation_lock:
                 self._update_check_busy = False
             self.updateCheckBusyChanged.emit()
+            self._refresh_update_snapshot()
             self.updateSummaryChanged.emit()
             return False
         return True
@@ -783,6 +809,8 @@ class SettingsBridge(QObject):
         self._refresh_telegram_transport()
         if self.app_bridge is not None and hasattr(self.app_bridge, "restartRegistration"):
             self.app_bridge.restartRegistration()
+        self._refresh_local_llm_diagnostics()
+        self._refresh_update_snapshot()
         self._connection_feedback = "Все данные удалены. Нужна повторная регистрация."
         self.themeModeChanged.emit()
         self.startupEnabledChanged.emit()
@@ -878,4 +906,5 @@ class SettingsBridge(QObject):
         with self._operation_lock:
             self._update_check_busy = False
         self.updateCheckBusyChanged.emit()
+        self._refresh_update_snapshot()
         self.updateSummaryChanged.emit()

@@ -42,8 +42,6 @@ Rectangle {
                 onHelpRequested: (text) => voiceRoot.helpRequested(text)
                 onHelpCleared: voiceRoot.helpCleared()
 
-                Item { Layout.fillWidth: true }
-
                 AppSwitch {
                     objectName: "wakeWordSwitch"
                     checked: voiceBridge.wakeWordEnabled
@@ -59,12 +57,12 @@ Rectangle {
                 onHelpRequested: (text) => voiceRoot.helpRequested(text)
                 onHelpCleared: voiceRoot.helpCleared()
 
-                Item { Layout.fillWidth: true }
-
                 AppComboBox {
                     id: microphoneCombo
                     objectName: "microphoneCombo"
-                    Layout.preferredWidth: 420
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 360
+                    Layout.alignment: Qt.AlignLeft
                     model: voiceBridge.microphoneDeviceModels
                     textRole: "name"
                     currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedMicrophone))
@@ -80,12 +78,12 @@ Rectangle {
                 onHelpRequested: (text) => voiceRoot.helpRequested(text)
                 onHelpCleared: voiceRoot.helpCleared()
 
-                Item { Layout.fillWidth: true }
-
                 AppComboBox {
                     id: outputCombo
                     objectName: "outputDeviceCombo"
-                    Layout.preferredWidth: 420
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 360
+                    Layout.alignment: Qt.AlignLeft
                     enabled: voiceBridge.canRouteTtsOutput
                     opacity: enabled ? 1.0 : 0.48
                     model: voiceBridge.outputDeviceModels
@@ -166,16 +164,14 @@ Rectangle {
                                 voiceBridge.runJarvisVoiceTest()
                             }
                         }
-
-                        Item { Layout.fillWidth: true }
                     }
                 }
             }
 
             SettingRow {
                 Layout.fillWidth: true
-                title: "Голос JARVIS"
-                description: "Озвучка ответов, движок голоса и выбор голоса."
+                title: "Озвучка ответов"
+                description: "Включите, если JARVIS должен отвечать голосом."
                 helpText: "Если не нужна голосовая озвучка ответов, выключите её здесь."
                 onHelpRequested: (text) => voiceRoot.helpRequested(text)
                 onHelpCleared: voiceRoot.helpCleared()
@@ -185,16 +181,24 @@ Rectangle {
                     checked: voiceBridge.voiceResponseEnabled
                     onToggled: voiceBridge.setVoiceResponseEnabled(checked)
                 }
+            }
 
-                StatusPill {
-                    objectName: "ttsEnginePill"
-                    text: voiceBridge.ttsEngine === "edge" ? "Edge" : "Системный голос"
-                }
+            SettingRow {
+                Layout.fillWidth: true
+                title: "Голос JARVIS"
+                description: "Выберите голос для озвучки, если она включена."
+                helpText: "Если голосов мало, это зависит от доступных системных голосов и выбранного движка."
+                onHelpRequested: (text) => voiceRoot.helpRequested(text)
+                onHelpCleared: voiceRoot.helpCleared()
 
                 AppComboBox {
                     id: ttsVoiceCombo
                     objectName: "ttsVoiceCombo"
-                    Layout.preferredWidth: 260
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 300
+                    Layout.alignment: Qt.AlignLeft
+                    enabled: voiceBridge.voiceResponseEnabled
+                    opacity: enabled ? 1.0 : 0.52
                     model: voiceBridge.ttsVoices
                     currentIndex: Math.max(0, model.indexOf(voiceBridge.selectedTtsVoice))
                     onActivated: (index) => voiceBridge.setTtsVoice(model[index])
@@ -209,12 +213,12 @@ Rectangle {
                 onHelpRequested: (text) => voiceRoot.helpRequested(text)
                 onHelpCleared: voiceRoot.helpCleared()
 
-                Item { Layout.fillWidth: true }
-
                 AppComboBox {
                     id: commandStyleCombo
                     objectName: "commandStyleCombo"
-                    Layout.preferredWidth: 240
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 260
+                    Layout.alignment: Qt.AlignLeft
                     model: [
                         { key: "one_shot", title: "Одна фраза", note: "Быстрее и проще." },
                         { key: "two_step", title: "Два шага", note: "Полезно в шумной среде." }

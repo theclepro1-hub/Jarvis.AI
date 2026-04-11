@@ -557,6 +557,16 @@ def test_command_router_preview_marks_plain_conversation_as_ai_path() -> None:
     assert result.commands == ["как дела"]
 
 
+def test_command_router_strips_short_wake_alias_before_open_command() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("гарви открой ютуб")
+
+    assert result.kind == "local"
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
 def test_command_router_keeps_wake_only_phrase_out_of_ai_path() -> None:
     router, _actions, _pc_control = make_router()
 

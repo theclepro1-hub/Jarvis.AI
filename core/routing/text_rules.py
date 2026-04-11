@@ -5,21 +5,20 @@ import re
 
 WAKE_PREFIX_ALIASES = (
     "гарви с",
+    "гарви",
+    "гарби",
     "джарвис",
     "жарвис",
     "джервис",
     "джарвес",
     "джарис",
+    "джарви",
+    "жарви",
     "гарвис",
     "jarvis",
 )
 
-STRICT_WAKE_ALIASES = (
-    "джарвис",
-    "жарвис",
-    "джервис",
-    "jarvis",
-)
+STRICT_WAKE_ALIASES = WAKE_PREFIX_ALIASES
 
 COMMAND_FRAGMENT_TOKENS = (
     "открой",

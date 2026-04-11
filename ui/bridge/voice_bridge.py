@@ -46,6 +46,8 @@ class VoiceBridge(QObject):
         self._recording_hint = "Ручной микрофон готов."
         self._wake_hint = ""
         self._voice_test = self._empty_voice_test()
+        self._summary_cache = ""
+        self._runtime_status_cache: dict[str, str] = {}
         self._warmup_lock = threading.Lock()
         self._warmup_started = False
         self.voiceTestTextReady.connect(self._handle_voice_test_text)
@@ -71,6 +73,7 @@ class VoiceBridge(QObject):
     @mode.setter
     def mode(self, value: str) -> None:
         self.services.settings.set("voice_mode", value)
+        self._refresh_voice_status_cache()
         self.modeChanged.emit()
         self.summaryChanged.emit()
 
@@ -81,6 +84,7 @@ class VoiceBridge(QObject):
     @commandStyle.setter
     def commandStyle(self, value: str) -> None:
         self.services.settings.set("command_style", value)
+        self._refresh_voice_status_cache()
         self.commandStyleChanged.emit()
         self.summaryChanged.emit()
 
@@ -95,6 +99,7 @@ class VoiceBridge(QObject):
             self.startWakeRuntime()
         else:
             self.services.wake.stop()
+        self._refresh_voice_status_cache()
         self.wakeWordEnabledChanged.emit()
         self.summaryChanged.emit()
         self.statusChanged.emit()
@@ -106,6 +111,7 @@ class VoiceBridge(QObject):
     @voiceResponseEnabled.setter
     def voiceResponseEnabled(self, value: bool) -> None:
         self.services.settings.set("voice_response_enabled", bool(value))
+        self._refresh_voice_status_cache()
         self.voiceResponseEnabledChanged.emit()
         self.summaryChanged.emit()
         self.statusChanged.emit()
@@ -117,6 +123,7 @@ class VoiceBridge(QObject):
     @ttsEngine.setter
     def ttsEngine(self, value: str) -> None:
         self.services.settings.set("tts_engine", value)
+        self._refresh_voice_status_cache()
         self.ttsEngineChanged.emit()
         self.ttsOutputRoutingChanged.emit()
         self.ttsVoicesChanged.emit()
@@ -189,6 +196,7 @@ class VoiceBridge(QObject):
     def selectedMicrophone(self, value: str) -> None:
         normalized = self.services.voice.normalize_microphone_selection(value)
         self.services.settings.set("microphone_name", normalized)
+        self._refresh_voice_status_cache()
         self.selectedMicrophoneChanged.emit()
         self.summaryChanged.emit()
         self.statusChanged.emit()
@@ -205,19 +213,21 @@ class VoiceBridge(QObject):
     def selectedOutputDevice(self, value: str) -> None:
         normalized = self.services.voice.normalize_output_selection(value)
         self.services.settings.set("voice_output_name", normalized)
+        self._refresh_voice_status_cache()
         self.selectedOutputDeviceChanged.emit()
         self.statusChanged.emit()
 
     @Property(str, notify=summaryChanged)
     def summary(self) -> str:
-        return self.services.voice.summary()
+        if not self._summary_cache:
+            self._refresh_voice_status_cache()
+        return self._summary_cache
 
     @Property("QVariantMap", notify=statusChanged)
     def runtimeStatus(self) -> dict[str, str]:
-        status = dict(self.services.voice.runtime_status())
-        status["wakeWord"] = self.services.wake.status()
-        status["wakeModel"] = self.services.wake.model_status()
-        return status
+        if not self._runtime_status_cache:
+            self._refresh_voice_status_cache()
+        return dict(self._runtime_status_cache)
 
     @Property(str, notify=testResultChanged)
     def testResult(self) -> str:
@@ -356,6 +366,7 @@ class VoiceBridge(QObject):
             return
         self._start_voice_runtime_warmup()
         self.services.wake.start(self._emit_wake_detected, self._emit_wake_status_updated)
+        self._refresh_voice_status_cache()
         self.summaryChanged.emit()
         self.statusChanged.emit()
 
@@ -364,6 +375,8 @@ class VoiceBridge(QObject):
         self.services.wake.stop()
 
     def _deliver_transcribed_text(self, text: str) -> None:
+        raw_text = text.strip()
+        normalized_text = self._strip_voice_test_wake_word(raw_text) if self._wake_hint else raw_text
         self._recording_hint = "Команда распознана. Передаю в обработку..."
         self.recordingHintChanged.emit()
         self.state.status = "Передаю команду в обработку"
@@ -371,8 +384,11 @@ class VoiceBridge(QObject):
         if hasattr(self.services.voice, "mark_wake_route_handoff"):
             self.services.voice.mark_wake_route_handoff()
         self.voiceTimingsChanged.emit()
+        self._refresh_voice_status_cache()
         if self._chat_bridge is not None:
-            self._chat_bridge.submitTranscribedText(text)
+            self._chat_bridge.submitTranscribedText(normalized_text)
+        if self._wake_hint:
+            self.clearWakeHint()
 
     def _push_voice_note(self, note: str) -> None:
         self._recording_hint = note
@@ -392,6 +408,7 @@ class VoiceBridge(QObject):
             self.state.status = "Запись отменена"
         else:
             self.state.status = "Готов"
+        self._refresh_voice_status_cache()
         self.statusChanged.emit()
 
     def _finalize_capture(self) -> None:
@@ -427,6 +444,7 @@ class VoiceBridge(QObject):
             ready=False,
             detail="Слово активации услышано. Захватываю команду",
         )
+        self._refresh_voice_status_cache()
         thread = threading.Thread(target=self._finish_after_wake, args=(pre_roll,), daemon=True)
         thread.start()
 
@@ -461,9 +479,50 @@ class VoiceBridge(QObject):
         self.captureFinished.emit()
 
     def _emit_voice_status_change(self) -> None:
+        self._refresh_voice_status_cache()
         self.summaryChanged.emit()
         self.statusChanged.emit()
         self.voiceTimingsChanged.emit()
+
+    def _refresh_voice_status_cache(self) -> None:
+        voice_backend = self._voice_backend_if_ready()
+        wake_backend = getattr(self.services, "wake", None)
+        if voice_backend is None or wake_backend is None:
+            self._summary_cache = self._fallback_voice_summary()
+            self._runtime_status_cache = self._fallback_voice_status()
+            return
+
+        self._summary_cache = voice_backend.summary()
+        status = dict(voice_backend.runtime_status())
+        status["wakeWord"] = wake_backend.status()
+        status["wakeModel"] = wake_backend.model_status()
+        self._runtime_status_cache = status
+
+    def _fallback_voice_summary(self) -> str:
+        settings = getattr(self.services, "settings", None)
+        if settings is not None and hasattr(settings, "get"):
+            mode = str(settings.get("voice_mode", "balance")).strip().casefold()
+            style = str(settings.get("command_style", "one_shot")).strip()
+        else:
+            mode = "balance"
+            style = "one_shot"
+        mode_label = {
+            "private": "приватный",
+            "balance": "баланс",
+            "quality": "качество",
+        }.get(mode, mode or "balance")
+        style_label = "одной фразой" if style == "one_shot" else "в два шага"
+        return f"Слово активации: Готов. Распознавание речи: Готов. Режим: {mode_label}. Сценарий: {style_label}."
+
+    def _fallback_voice_status(self) -> dict[str, str]:
+        return {
+            "wakeWord": "Готов",
+            "command": "Готов",
+            "ai": "Groq или резервный локальный режим",
+            "model": "не подключена",
+            "tts": "Готов",
+            "wakeModel": "не загружена",
+        }
 
     def _start_voice_runtime_warmup(self) -> None:
         with self._warmup_lock:

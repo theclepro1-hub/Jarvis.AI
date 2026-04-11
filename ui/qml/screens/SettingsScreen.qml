@@ -381,12 +381,12 @@ Rectangle {
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
-                    Item { Layout.fillWidth: true }
-
                     AppComboBox {
                         id: themeModeCombo
                         objectName: "themeCombo"
-                        Layout.preferredWidth: 260
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 320
+                        Layout.alignment: Qt.AlignLeft
                         model: settingsRoot.themeOptions
                         textRole: "title"
                         currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.themeMode)
@@ -499,30 +499,17 @@ Rectangle {
                     wrapMode: Text.WordWrap
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 10
-
-                    PrimaryButton {
-                        objectName: "settingsAdvancedSaveButton"
-                        text: "Сохранить для опытных"
-                        onClicked: settingsBridge.saveAdvancedConnections(
-                                       geminiField.text,
-                                       cerebrasField.text,
-                                       openRouterField.text,
-                                       localBackendCombo.model[localBackendCombo.currentIndex].key,
-                                       localModelField.text
-                                   )
-                    }
-
-                    SecondaryButton {
-                        objectName: "settingsLocalLlmDocsButton"
-                        text: settingsBridge.localLlmActionLabel
-                        enabled: settingsBridge.localLlmActionUrl.length > 0
-                        onClicked: Qt.openUrlExternally(settingsBridge.localLlmActionUrl)
-                    }
-
-                    Item { Layout.fillWidth: true }
+                PrimaryButton {
+                    objectName: "settingsAdvancedSaveButton"
+                    text: "Сохранить для опытных"
+                    Layout.alignment: Qt.AlignLeft
+                    onClicked: settingsBridge.saveAdvancedConnections(
+                                   geminiField.text,
+                                   cerebrasField.text,
+                                   openRouterField.text,
+                                   localBackendCombo.model[localBackendCombo.currentIndex].key,
+                                   localModelField.text
+                               )
                 }
             }
 

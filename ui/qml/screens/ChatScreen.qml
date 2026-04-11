@@ -350,7 +350,6 @@ Rectangle {
             Layout.preferredHeight: 96
             busy: chatBridge.thinking
             busyHint: chatBridge.thinkingLabel
-            wakeHint: voiceBridge.wakeHint
             idleHint: chatBridge.lastResponseHint
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint

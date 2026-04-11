@@ -118,6 +118,8 @@ def test_voice_service_strips_wake_word_from_transcription():
     assert voice._strip_wake_word("Джарвис открой YouTube") == "открой YouTube"  # noqa: SLF001
     assert voice._strip_wake_word("jarvis запусти музыку") == "запусти музыку"  # noqa: SLF001
     assert voice._strip_wake_word("гарви с как дела") == "как дела"  # noqa: SLF001
+    assert voice._strip_wake_word("гарви открой YouTube") == "открой YouTube"  # noqa: SLF001
+    assert voice._strip_wake_word("джарви открой браузер") == "открой браузер"  # noqa: SLF001
     assert voice._strip_wake_word("жарвис, как дела?") == "как дела?"  # noqa: SLF001
     assert voice._strip_wake_word("как у джарвиса дела") == "как у джарвиса дела"  # noqa: SLF001
     assert voice._strip_wake_word("джарвис") == ""  # noqa: SLF001
