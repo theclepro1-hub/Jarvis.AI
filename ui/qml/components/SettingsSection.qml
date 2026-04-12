@@ -85,14 +85,13 @@ Rectangle {
                         }
                     }
 
-                    Text {
-                        text: root.expanded ? "v" : ">"
-                        color: Theme.Colors.accent
-                        font.family: Theme.Typography.displayFamily
-                        font.pixelSize: 22
-                        font.bold: true
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
+                    JarvisIcon {
+                        name: "chevron"
+                        iconColor: Theme.Colors.accent
+                        width: 18
+                        height: 18
+                        rotation: root.expanded ? 180 : 0
+                        Layout.alignment: Qt.AlignVCenter
                     }
                 }
             }

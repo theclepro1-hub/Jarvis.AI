@@ -4,6 +4,8 @@ import threading
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
+from core.policy.assistant_mode import resolve_assistant_mode
+
 
 class VoiceBridge(QObject):
     modeChanged = Signal()
@@ -65,6 +67,15 @@ class VoiceBridge(QObject):
             return getattr(self.services, "_voice")
         if hasattr(self.services, "__dict__") and "voice" in vars(self.services):
             return vars(self.services).get("voice")
+        return None
+
+    def _wake_backend_if_ready(self):  # noqa: ANN202
+        if hasattr(self.services, "_wake"):
+            return getattr(self.services, "_wake")
+        if hasattr(self.services, "__dict__") and "wake" in vars(self.services):
+            return vars(self.services).get("wake")
+        if hasattr(self.services, "__dict__") and "_wake" in vars(self.services):
+            return vars(self.services).get("_wake")
         return None
 
     @Property(str, notify=modeChanged)
@@ -446,14 +457,14 @@ class VoiceBridge(QObject):
     def _handle_wake_detected(self, pre_roll: bytes) -> None:
         if self.services.voice.is_recording:
             return
-        self._wake_hint = "Джарвис услышан. Подхватываю команду..."
+        self._wake_hint = "Услышал «Джарвис». Подхватываю начало команды..."
         self.wakeHintChanged.emit()
-        self.state.status = "Слушаю команду"
+        self.state.status = "Подхватываю команду"
         self.statusChanged.emit()
         self.services.voice.set_wake_runtime_status(
             "capturing_command",
             ready=False,
-            detail="Слово активации услышано. Захватываю команду",
+            detail="Услышал «Джарвис». Подхватываю начало команды",
         )
         self._refresh_voice_status_cache()
         thread = threading.Thread(target=self._finish_after_wake, args=(pre_roll,), daemon=True)
@@ -497,31 +508,36 @@ class VoiceBridge(QObject):
 
     def _refresh_voice_status_cache(self) -> None:
         voice_backend = self._voice_backend_if_ready()
-        wake_backend = getattr(self.services, "wake", None)
-        if voice_backend is None or wake_backend is None:
+        wake_backend = self._wake_backend_if_ready()
+        if voice_backend is None:
             self._summary_cache = self._fallback_voice_summary()
             self._runtime_status_cache = self._fallback_voice_status()
             return
 
         self._summary_cache = voice_backend.summary()
         status = dict(voice_backend.runtime_status())
-        status["wakeWord"] = wake_backend.status()
-        status["wakeModel"] = wake_backend.model_status()
+        if wake_backend is not None:
+            status["wakeWord"] = wake_backend.status()
+            status["wakeModel"] = wake_backend.model_status()
+        else:
+            status.setdefault("wakeWord", "Жду «Джарвис»")
+            status.setdefault("wakeModel", "не загружена")
         self._runtime_status_cache = status
 
     def _fallback_voice_summary(self) -> str:
         settings = getattr(self.services, "settings", None)
         if settings is not None and hasattr(settings, "get"):
-            mode = str(settings.get("voice_mode", "balance")).strip().casefold()
+            mode = resolve_assistant_mode(settings)
             style = str(settings.get("command_style", "one_shot")).strip()
         else:
-            mode = "balance"
+            mode = "standard"
             style = "one_shot"
         mode_label = {
             "private": "приватный",
-            "balance": "баланс",
-            "quality": "качество",
-        }.get(mode, mode or "balance")
+            "standard": "стандартный",
+            "smart": "умный",
+            "fast": "быстрый",
+        }.get(mode, mode or "standard")
         style_label = "одной фразой" if style == "one_shot" else "в два шага"
         return f"Слово активации: Готов. Распознавание речи: Готов. Режим: {mode_label}. Сценарий: {style_label}."
 

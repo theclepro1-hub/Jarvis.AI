@@ -79,7 +79,7 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Groq"
-                    description: "Основной ключ для быстрых ответов."
+                    description: "Основной ключ для ответов JARVIS."
                     helpText: "Если ключ есть, JARVIS сможет отвечать через облако."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
@@ -98,7 +98,7 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Telegram bot token"
-                    description: "Токен бота для команд и ответов в Telegram."
+                    description: "Токен личного бота для Telegram."
                     helpText: "Это токен от @BotFather для вашего личного бота."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
@@ -117,7 +117,7 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Telegram ID"
-                    description: "Куда JARVIS будет отправлять ответы и напоминания."
+                    description: "Куда JARVIS будет писать ответы и напоминания."
                     helpText: "Это ваш личный Telegram ID, чтобы бот писал только вам."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
@@ -174,7 +174,7 @@ Rectangle {
                 objectName: "settingsSection_assistantMode"
                 Layout.fillWidth: true
                 title: "Режим ассистента"
-                description: "Один главный выбор: быстрый, стандартный, умный или приватный."
+                description: "Один выбор без лишней технички."
                 helpText: "Обычно хватает одного режима. Слово активации всегда остаётся локальным."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -214,7 +214,7 @@ Rectangle {
                 objectName: "settingsSection_voiceSystem"
                 Layout.fillWidth: true
                 title: "Голос и система"
-                description: "Голос JARVIS, автозапуск и трей."
+                description: "Микрофон, автозапуск и поведение окна."
                 helpText: "Здесь только поведение приложения и переход к голосовой вкладке."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -293,7 +293,7 @@ Rectangle {
                 objectName: "settingsSection_historyData"
                 Layout.fillWidth: true
                 title: "История и данные"
-                description: "Чат, избранные действия и сброс локального профиля."
+                description: "Чат, избранное и сброс локального профиля."
                 helpText: "Здесь лежат все действия с локальными данными."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -379,8 +379,7 @@ Rectangle {
                     AppComboBox {
                         id: themeModeCombo
                         objectName: "themeCombo"
-                        Layout.fillWidth: true
-                        Layout.maximumWidth: 320
+                        Layout.preferredWidth: 360
                         Layout.alignment: Qt.AlignLeft
                         model: settingsRoot.themeOptions
                         textRole: "title"
@@ -394,7 +393,7 @@ Rectangle {
                 objectName: "settingsSection_advanced"
                 Layout.fillWidth: true
                 title: "Для опытных"
-                description: "Дополнительные провайдеры и локальная модель."
+                description: "Дополнительные провайдеры и локальная Llama."
                 helpText: "Это тонкие настройки, которые обычному пользователю не нужны."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -460,7 +459,7 @@ Rectangle {
                 SettingRow {
                     Layout.fillWidth: true
                     title: "Локальная Llama"
-                    description: "Для приватного режима и локального запуска."
+                    description: "Нужна только для приватного режима или локального text AI."
                     helpText: "Если локальная модель не готова, JARVIS должен честно об этом говорить."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
@@ -482,31 +481,36 @@ Rectangle {
                         label: "Модель или путь"
                         text: settingsBridge.localLlmModel
                         placeholderText: "Например: llama3.2:1b или C:/models/model.gguf"
-                        visible: settingsBridge.localLlmBackend !== "auto" || text.length > 0
                     }
                 }
 
                 Text {
                     Layout.fillWidth: true
                     text: settingsBridge.localReadiness
-                    visible: settingsBridge.localLlmBackend !== "auto" || settingsBridge.localLlmModel.length > 0
+                    visible: settingsBridge.localReadiness.length > 0
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
                     wrapMode: Text.WordWrap
                 }
 
-                PrimaryButton {
-                    objectName: "settingsAdvancedSaveButton"
-                    text: "Сохранить"
-                    Layout.alignment: Qt.AlignLeft
-                    onClicked: settingsBridge.saveAdvancedConnections(
-                                   geminiField.text,
-                                   cerebrasField.text,
-                                   openRouterField.text,
-                                   localBackendCombo.model[localBackendCombo.currentIndex].key,
-                                   localModelField.text
-                               )
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    PrimaryButton {
+                        objectName: "settingsAdvancedSaveButton"
+                        text: "Сохранить для опытных"
+                        onClicked: settingsBridge.saveAdvancedConnections(
+                                       geminiField.text,
+                                       cerebrasField.text,
+                                       openRouterField.text,
+                                       localBackendCombo.model[localBackendCombo.currentIndex].key,
+                                       localModelField.text
+                                   )
+                    }
+
+                    Item { Layout.fillWidth: true }
                 }
             }
 

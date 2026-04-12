@@ -9,6 +9,7 @@ from typing import Callable
 
 import sounddevice as sd
 
+from core.policy.assistant_mode import AssistantReadiness, resolve_assistant_mode, resolve_assistant_policy
 from core.routing.text_rules import WAKE_PREFIX_ALIASES, strip_leading_wake_prefix
 from core.voice.audio_device_service import AudioDeviceService
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
@@ -124,6 +125,7 @@ class VoiceService:
             "preparing": "Готовлю слово активации",
             "waiting_wake": "Жду «Джарвис»",
             "capturing_command": self._wake_detail or "Подхватываю начало команды",
+            "recognizing_command": self._wake_detail or "Распознаю команду",
             "transcribing": self._wake_detail or "Распознаю команду",
             "routing": self._wake_detail or "Передаю команду в обработку",
             "executing": self._wake_detail or "Выполняю",
@@ -141,25 +143,31 @@ class VoiceService:
         return "загружена" if self.stt_service.can_transcribe() else "не подключена"
 
     def summary(self) -> str:
-        mode = self.settings.get("voice_mode", "balance")
+        policy = self._assistant_policy()
+        mode = resolve_assistant_mode(self.settings)
         mode_label = {
+            "fast": "быстрый",
+            "standard": "стандартный",
+            "smart": "умный",
             "private": "приватный",
-            "balance": "баланс",
-            "quality": "качество",
         }.get(mode, mode)
         style = self.settings.get("command_style", "one_shot")
         style_label = "одной фразой" if style == "one_shot" else "в два шага"
+        stt_route = " -> ".join(policy.stt_route) if policy.stt_route else "не задан"
         return (
             f"Слово активации: {self.wake_status_text()}. "
             f"Распознавание речи: {self.command_status_text()}. "
-            f"Режим: {mode_label}. Сценарий: {style_label}."
+            f"Режим: {mode_label}. Сценарий: {style_label}. "
+            f"Маршрут STT: {stt_route}."
         )
 
     def runtime_status(self) -> dict[str, str]:
+        policy = self._assistant_policy()
+        privacy = "Только локально" if not policy.stt_cloud_allowed else "Локально и облако"
         return {
             "wakeWord": self.wake_status_text(),
             "command": self.command_status_text(),
-            "ai": "Groq или резервный локальный режим",
+            "ai": privacy,
             "model": self.model_status_text(),
             "tts": self.tts_status_text(),
         }
@@ -270,6 +278,14 @@ class VoiceService:
 
     def warm_up_local_stt_backend(self) -> bool:
         return self.stt_service.warm_up_local_backend(cancel_event=self._manual_stop_event)
+
+    def _assistant_policy(self):
+        readiness = AssistantReadiness(
+            local_llama_ready=False,
+            local_faster_whisper_ready=self.stt_service._local_faster_whisper_ready(),  # noqa: SLF001
+            local_vosk_ready=self.stt_service._local_vosk_available(),  # noqa: SLF001
+        )
+        return resolve_assistant_policy(self.settings, readiness=readiness)
 
     def available_tts_engines(self) -> list[dict[str, object]]:
         return [

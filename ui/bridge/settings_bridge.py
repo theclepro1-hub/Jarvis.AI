@@ -57,6 +57,8 @@ class SettingsBridge(QObject):
         self._telegram_test_busy = False
         self._update_check_busy = False
         self._local_llm_diagnostics_cache: LocalLLMDiagnostics | None = None
+        self._local_llm_refresh_lock = threading.Lock()
+        self._local_llm_refresh_inflight = False
         self._update_summary_cache: str | None = None
         self._update_status_cache: dict[str, object] | None = None
         self._operation_lock = threading.Lock()
@@ -95,8 +97,42 @@ class SettingsBridge(QObject):
     def _local_llm_diagnostics(self) -> LocalLLMDiagnostics:
         if self._local_llm_diagnostics_cache is not None:
             return self._local_llm_diagnostics_cache
-        self._local_llm_diagnostics_cache = self._load_local_llm_diagnostics()
+        self._local_llm_diagnostics_cache = self._placeholder_local_llm_diagnostics()
+        self._schedule_local_llm_refresh()
         return self._local_llm_diagnostics_cache
+
+    def _placeholder_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
+        backend = self._normalize_local_backend(self.services.settings.get("local_llm_backend", "auto"))
+        model = str(self.services.settings.get("local_llm_model", "")).strip()
+        if backend == "ollama":
+            return LocalLLMDiagnostics(
+                ready=False,
+                backend="ollama",
+                model_path=model,
+                detail="Проверяю Ollama...",
+                user_status="Проверяю локальную модель...",
+                action_label="Открыть Ollama",
+                action_url="https://docs.ollama.com/",
+            )
+        if backend == "llama_cpp":
+            return LocalLLMDiagnostics(
+                ready=False,
+                backend="llama_cpp",
+                model_path=model,
+                detail="Проверяю локальную модель...",
+                user_status="Проверяю локальную модель...",
+                action_label="Открыть llama.cpp",
+                action_url="https://github.com/abetlen/llama-cpp-python",
+            )
+        return LocalLLMDiagnostics(
+            ready=False,
+            backend="auto",
+            model_path=model,
+            detail="Проверяю локальный runtime...",
+            user_status="Проверяю локальную модель...",
+            action_label="",
+            action_url="",
+        )
 
     def _load_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
         try:
@@ -113,8 +149,28 @@ class SettingsBridge(QObject):
             )
 
     def _refresh_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
-        self._local_llm_diagnostics_cache = self._load_local_llm_diagnostics()
+        self._local_llm_diagnostics_cache = self._placeholder_local_llm_diagnostics()
+        self._schedule_local_llm_refresh()
         return self._local_llm_diagnostics_cache
+
+    def _schedule_local_llm_refresh(self) -> None:
+        with self._local_llm_refresh_lock:
+            if self._local_llm_refresh_inflight:
+                return
+            self._local_llm_refresh_inflight = True
+
+        def worker() -> None:
+            try:
+                diagnostics = self._load_local_llm_diagnostics()
+            finally:
+                with self._local_llm_refresh_lock:
+                    self._local_llm_refresh_inflight = False
+            self._local_llm_diagnostics_cache = diagnostics
+            self.localReadinessChanged.emit()
+            self.assistantUserStatusChanged.emit()
+            self.assistantModeSummaryChanged.emit()
+
+        threading.Thread(target=worker, name="settings-local-llm-refresh", daemon=True).start()
 
     def _refresh_update_snapshot(self) -> None:
         updates = self._updates_service_if_ready()

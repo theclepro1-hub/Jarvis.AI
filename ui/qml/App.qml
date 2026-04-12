@@ -89,7 +89,7 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 92
+                Layout.preferredHeight: 88
                 color: Theme.Colors.panel
                 radius: 28
                 border.color: Theme.Colors.borderSoft
@@ -131,8 +131,10 @@ ApplicationWindow {
                         StatusPill {
                             Layout.alignment: Qt.AlignRight
                             text: appBridge.currentScreen === "registration"
-                                  ? "Подключения"
-                                  : "Готов"
+                                  ? "Первый запуск"
+                                  : (appBridge.assistantStatus && appBridge.assistantStatus.length > 0
+                                     ? appBridge.assistantStatus
+                                     : "Готов")
                         }
                     }
                 }
