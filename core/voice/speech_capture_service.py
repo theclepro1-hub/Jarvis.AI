@@ -26,6 +26,7 @@ class CaptureConfig:
     noise_ratio: float = 1.18
     max_adaptive_threshold: float = 270.0
     end_threshold_ratio: float = 0.72
+    speech_gate_ratio: float = 1.22
 
 
 class SpeechCaptureService:
@@ -78,7 +79,7 @@ class SpeechCaptureService:
 
                     energy = self._chunk_energy(raw)
                     if not speech_started:
-                        if energy >= start_threshold:
+                        if energy >= self._speech_gate(start_threshold):
                             speech_frames += 1
                             if speech_frames >= max(1, self._config.min_start_frames):
                                 speech_started = True
@@ -140,4 +141,10 @@ class SpeechCaptureService:
         return max(
             self._config.energy_threshold * self._config.end_threshold_ratio,
             start_threshold * self._config.end_threshold_ratio,
+        )
+
+    def _speech_gate(self, start_threshold: float) -> float:
+        return max(
+            start_threshold,
+            self._config.energy_threshold * self._config.speech_gate_ratio,
         )

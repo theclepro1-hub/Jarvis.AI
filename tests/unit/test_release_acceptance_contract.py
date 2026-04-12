@@ -195,7 +195,8 @@ def test_release_gate_chat_footer_keeps_transient_wake_handoff_status() -> None:
     chat_source = (root / "ui" / "qml" / "screens" / "ChatScreen.qml").read_text(encoding="utf-8")
 
     assert 'property string wakeHint' in composer_source
-    assert 'hasPriorityWakeHint' in composer_source
+    assert 'readonly property bool hasWakeHint' in composer_source
+    assert 'text: root.recording' in composer_source
     assert 'wakeHint: voiceBridge.wakeHint' in chat_source
 
 

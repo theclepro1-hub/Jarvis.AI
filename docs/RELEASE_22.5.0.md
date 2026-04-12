@@ -39,7 +39,7 @@
 
 - `ruff check .`
 - `python -m compileall -q app core tests tools`
-- `pytest -q` → `327 passed`
+- `pytest -q` → `330 passed`
 - `powershell -ExecutionPolicy Bypass -File .\build\build_release.ps1` → OK
 - packaged portable smoke:
   - `QT_QPA_PLATFORM=offscreen`
@@ -49,6 +49,5 @@
 
 ## Артефакты Windows
 
-- `JarvisAi_Unity_22.5.0_windows_installer.exe`
-- `JarvisAi_Unity_22.5.0_windows_portable.zip`
-- `JarvisAi_Unity_22.5.0_windows_onefile.exe`
+- GitHub release публикует один основной артефакт: `JarvisAi_Unity_22.5.0_windows_installer.exe`
+- `portable` и `onefile` собираются как внутренние release-артефакты для проверки и диагностики, но не навязываются пользователю на странице скачивания.

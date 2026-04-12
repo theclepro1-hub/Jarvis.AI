@@ -206,7 +206,7 @@ Rectangle {
                             objectName: "registrationSaveButton"
                             text: "Продолжить"
                             onClicked: registrationBridge.saveRegistration(
-                                           groqField.text,
+                                           settingsBridge.assistantMode === "private" ? "" : groqField.text,
                                            userIdField.text,
                                            botTokenField.text
                                        )

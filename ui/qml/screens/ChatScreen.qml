@@ -201,7 +201,7 @@ Rectangle {
                     target: chatBridge
 
                     function onMessageAppended(role) {
-                        if (role === "user" || role === "assistant") {
+                        if ((role === "user" || role === "assistant") && listView.followBottom) {
                             listView.requestFollowBottom()
                         }
                     }

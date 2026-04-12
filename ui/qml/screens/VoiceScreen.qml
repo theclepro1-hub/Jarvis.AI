@@ -37,7 +37,9 @@ Rectangle {
             SettingRow {
                 Layout.fillWidth: true
                 title: "Слово активации"
-                description: "JARVIS слушает «Джарвис» локально."
+                description: voiceBridge.wakeWordEnabled
+                             ? "JARVIS ждёт «Джарвис» локально."
+                             : "Слово активации выключено. Остаётся только ручной микрофон."
                 helpText: "Если включено, JARVIS ждёт слово активации в фоне. Если выключено, остаётся только ручной микрофон."
                 onHelpRequested: (text) => voiceRoot.helpRequested(text)
                 onHelpCleared: voiceRoot.helpCleared()

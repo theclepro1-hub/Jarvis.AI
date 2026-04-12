@@ -428,19 +428,15 @@ class VoiceBridge(QObject):
             self.clearWakeHint()
             self.state.status = "Запись отменена"
         else:
-            self.state.status = "Готов"
+            self.clearWakeHint()
+            self.state.status = note.strip() or "Готов"
         self._refresh_voice_status_cache()
         self.statusChanged.emit()
 
     def _finalize_capture(self) -> None:
         self._wake_capture_active = False
         self.recordingChanged.emit()
-        if self.state.status not in {
-            "Не расслышал",
-            "Проблема с микрофоном",
-            "Ошибка распознавания",
-            "Запись отменена",
-        }:
+        if self._should_reset_status_after_capture(self.state.status):
             self._recording_hint = "Ручной микрофон готов."
             self.recordingHintChanged.emit()
             self.state.status = "Готов"
@@ -449,6 +445,17 @@ class VoiceBridge(QObject):
             self.clearWakeHint()
         if self.wakeWordEnabled:
             self.startWakeRuntime()
+
+    def _should_reset_status_after_capture(self, status: str) -> bool:
+        return status in {
+            "",
+            "Готов",
+            "Слушаю",
+            "Останавливаю",
+            "Передаю команду в обработку",
+            "Распознаю команду после «Джарвис»",
+            "Услышал «Джарвис». Подхватываю команду",
+        }
 
     def _emit_wake_detected(self, pre_roll: bytes) -> None:
         self.wakeDetected.emit(pre_roll)

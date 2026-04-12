@@ -167,6 +167,56 @@ def test_speech_capture_treats_wake_pre_roll_as_active_speech(monkeypatch):
     assert result.speech_started is True
 
 
+def test_speech_capture_adapts_to_steady_noise_before_real_speech(monkeypatch):
+    frames = 1600
+
+    def pcm_block(amplitude: int) -> bytes:
+        return array("h", [amplitude] * frames).tobytes()
+
+    blocks = iter(
+        (
+            pcm_block(182),
+            pcm_block(188),
+            pcm_block(190),
+            pcm_block(242),
+            pcm_block(246),
+            pcm_block(0),
+            pcm_block(0),
+            pcm_block(0),
+        )
+    )
+
+    class FakeStream:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN002, ANN003
+            return False
+
+        def read(self, blocksize):  # noqa: ANN001
+            return next(blocks, pcm_block(0)), False
+
+    monkeypatch.setattr("core.voice.speech_capture_service.sd.RawInputStream", FakeStream)
+
+    service = SpeechCaptureService(
+        lambda: None,
+        threading.Event(),
+        config=CaptureConfig(
+            max_seconds=0.8,
+            silence_seconds=0.2,
+            energy_threshold=160.0,
+            noise_floor_frames=3,
+        ),
+    )
+    result = service.capture_until_silence()
+
+    assert result.status == "ok"
+    assert result.speech_started is True
+
+
 def test_stt_service_reports_missing_model_without_key(tmp_path):
     settings = SettingsService(FakeStore())
     service = STTService(settings, local_model_path=tmp_path / "missing-model")

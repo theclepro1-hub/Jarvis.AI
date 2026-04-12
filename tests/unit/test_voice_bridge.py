@@ -203,6 +203,30 @@ def test_voice_bridge_preserves_failure_note_through_finalize():
     assert bridge.recordingHint == "Не расслышал команду после слова активации."
 
 
+def test_voice_bridge_preserves_missing_key_note_through_finalize():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    bridge._push_voice_note("Нужен ключ Groq для облачного распознавания речи.")  # noqa: SLF001
+    bridge._finalize_capture()  # noqa: SLF001
+
+    assert state.status == "Нужен ключ Groq для облачного распознавания речи."
+    assert bridge.recordingHint == "Нужен ключ Groq для облачного распознавания речи."
+
+
+def test_voice_bridge_preserves_missing_model_note_through_finalize():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    bridge._push_voice_note("Нужна локальная или облачная модель распознавания речи.")  # noqa: SLF001
+    bridge._finalize_capture()  # noqa: SLF001
+
+    assert state.status == "Нужна локальная или облачная модель распознавания речи."
+    assert bridge.recordingHint == "Нужна локальная или облачная модель распознавания речи."
+
+
 def test_voice_bridge_clears_wake_hint_when_capture_finishes():
     services = _Services()
     state = SimpleNamespace(status="Готов")

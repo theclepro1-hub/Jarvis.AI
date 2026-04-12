@@ -50,6 +50,72 @@ Rectangle {
         return settingsBridge.updateSummary
     }
 
+    Popup {
+        id: deleteAllDataConfirmPopup
+        objectName: "deleteAllDataConfirmPopup"
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(480, settingsRoot.width - 48)
+        padding: 0
+
+        background: Rectangle {
+            radius: 24
+            color: Theme.Colors.card
+            border.color: Theme.Colors.border
+            border.width: 1
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 20
+            spacing: 14
+
+            Text {
+                Layout.fillWidth: true
+                text: "Удалить все данные?"
+                color: Theme.Colors.text
+                font.family: Theme.Typography.displayFamily
+                font.pixelSize: Theme.Typography.title
+                font.bold: true
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Это удалит локальные ключи, историю, Telegram-состояние и профиль JARVIS на этом компьютере."
+                color: Theme.Colors.textMuted
+                font.family: Theme.Typography.bodyFamily
+                font.pixelSize: Theme.Typography.body
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Item { Layout.fillWidth: true }
+
+                SecondaryButton {
+                    objectName: "deleteAllDataCancelButton"
+                    text: "Отмена"
+                    onClicked: deleteAllDataConfirmPopup.close()
+                }
+
+                SecondaryButton {
+                    objectName: "deleteAllDataConfirmButton"
+                    text: "Удалить без возврата"
+                    danger: true
+                    onClicked: {
+                        deleteAllDataConfirmPopup.close()
+                        settingsBridge.deleteAllData()
+                    }
+                }
+            }
+        }
+    }
+
     ScrollView {
         id: settingsScroll
         objectName: "settingsScroll"
@@ -381,7 +447,7 @@ Rectangle {
                         objectName: "deleteAllDataButton"
                         text: "Удалить все данные"
                         danger: true
-                        onClicked: settingsBridge.deleteAllData()
+                        onClicked: deleteAllDataConfirmPopup.open()
                     }
 
                     Text {
