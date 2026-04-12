@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import threading
 import time
+from collections import deque
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from core.services.chat_history_store import ChatHistoryStore
 from core.settings.settings_service import SettingsService
@@ -83,6 +84,9 @@ class ServiceContainer:
         self.registration = registration_service_cls(self.settings)
         _boot_log("services:init:registration")
         self._lazy_lock = threading.RLock()
+        self._telegram_history_lock = threading.RLock()
+        self._telegram_history_by_chat_id: dict[str, deque[dict[str, str]]] = {}
+        self._telegram_history_limit = 12
         self._reminders = None
         self._telegram = None
         self._voice = None
@@ -101,14 +105,39 @@ class ServiceContainer:
             self._lazy_lock = threading.RLock()
         return self._lazy_lock
 
-    def handle_external_command(self, text: str, telegram_chat_id: str = "") -> str:
+    def handle_external_command(
+        self,
+        text: str,
+        telegram_chat_id: str = "",
+        status_callback: Callable[[str], None] | None = None,
+    ) -> str:
         route = self.command_router.handle(text, source="telegram", telegram_chat_id=telegram_chat_id)
         if route.assistant_lines:
             return "\n".join(route.assistant_lines)
         if route.kind != "ai" and not route.commands:
             return ""
+        if route.kind != "ai":
+            return self._telegram_route_reply(route)
         clean = " ".join(route.commands).strip() if route.commands else text
-        return self.ai.generate_reply(clean, [])
+        history = self._telegram_history(telegram_chat_id)
+        prompt = self._telegram_ai_prompt(clean)
+        if hasattr(self.ai, "generate_reply_result"):
+            result = self.ai.generate_reply_result(prompt, history, status_callback=status_callback)
+            reply = str(getattr(result, "text", "") or "").strip()
+        else:
+            if status_callback is not None:
+                status_callback("telegram_ai")
+            reply = str(self.ai.generate_reply(prompt, history) or "").strip()
+        compact = self._compact_telegram_reply(reply)
+        self._remember_telegram_exchange(telegram_chat_id, clean, compact)
+        return compact
+
+    def classify_external_command(self, text: str, telegram_chat_id: str = "") -> str:
+        try:
+            route = self.command_router.preview(text, source="telegram", telegram_chat_id=telegram_chat_id)
+        except Exception:
+            return "fast"
+        return "ai" if str(getattr(route, "kind", "")).strip().casefold() == "ai" else "fast"
 
     @property
     def ai(self) -> AIService:
@@ -237,6 +266,7 @@ class ServiceContainer:
                         self.settings,
                         transport=self._create_telegram_transport(),
                         handler=self.handle_external_command,
+                        classifier=self.classify_external_command,
                     )
         return self._telegram
 
@@ -342,9 +372,70 @@ class ServiceContainer:
 
         network = self.settings.get("network", {}) or {}
         timeout_value = network.get("timeout_seconds", 12.0)
+        proxy_mode = str(network.get("proxy_mode", "system")).strip().lower()
+        if proxy_mode not in {"system", "manual", "off"}:
+            proxy_mode = "system"
+        proxy_url = str(network.get("proxy_url", "")).strip()
         try:
             timeout = float(timeout_value)
         except (TypeError, ValueError):
             timeout = 12.0
         timeout = max(3.0, timeout)
-        return transport_cls(token, timeout_seconds=timeout)
+        return transport_cls(
+            token,
+            timeout_seconds=timeout,
+            proxy_mode=proxy_mode,
+            proxy_url=proxy_url,
+        )
+
+    def _telegram_history(self, chat_id: str) -> list[dict[str, str]]:
+        key = str(chat_id or "").strip()
+        if not key:
+            return []
+        with self._telegram_history_lock:
+            history = self._telegram_history_by_chat_id.get(key)
+            if history is None:
+                return []
+            return [dict(item) for item in history]
+
+    def _remember_telegram_exchange(self, chat_id: str, user_text: str, assistant_text: str) -> None:
+        key = str(chat_id or "").strip()
+        user = str(user_text or "").strip()
+        assistant = str(assistant_text or "").strip()
+        if not key or not user or not assistant:
+            return
+        with self._telegram_history_lock:
+            history = self._telegram_history_by_chat_id.setdefault(
+                key,
+                deque(maxlen=self._telegram_history_limit),
+            )
+            history.append({"role": "user", "text": user})
+            history.append({"role": "assistant", "text": assistant})
+
+    def _telegram_ai_prompt(self, text: str) -> str:
+        clean = str(text or "").strip()
+        if not clean:
+            return ""
+        return (
+            "Ответь кратко и по делу для Telegram. "
+            "Без длинных вступлений, лишней вежливой воды и длинных списков, если они не нужны.\n\n"
+            f"{clean}"
+        )
+
+    def _compact_telegram_reply(self, text: str) -> str:
+        lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+        if not lines:
+            return ""
+        return "\n".join(lines)
+
+    def _telegram_route_reply(self, route) -> str:  # noqa: ANN001
+        execution_result = getattr(route, "execution_result", None)
+        if execution_result is None:
+            return ""
+        lines: list[str] = []
+        for step in getattr(execution_result, "steps", []) or []:
+            title = str(getattr(step, "title", "") or "").strip()
+            if not title:
+                continue
+            lines.append(title)
+        return "\n".join(lines[:2])

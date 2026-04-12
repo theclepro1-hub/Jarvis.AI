@@ -4,7 +4,8 @@ import inspect
 import json
 import os
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+import time
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
@@ -14,9 +15,11 @@ import httpx
 from core.telegram.telegram_models import TelegramDispatchResult, TelegramStatusSnapshot, TelegramUpdate
 
 DEFAULT_POLL_INTERVAL_MS = 1000
-DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 2.0
-DEFAULT_DISPATCH_WORKERS = 4
+DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 15.0
+DEFAULT_FAST_DISPATCH_WORKERS = 4
+DEFAULT_AI_DISPATCH_WORKERS = 2
 DEFAULT_MAX_INFLIGHT_DISPATCHES = 24
+DEFAULT_CHAT_ACTION_INTERVAL_SECONDS = 2.5
 
 
 class TelegramTransport(Protocol):
@@ -24,6 +27,12 @@ class TelegramTransport(Protocol):
         raise NotImplementedError
 
     def send_message(self, chat_id: int, text: str) -> None:
+        raise NotImplementedError
+
+    def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        raise NotImplementedError
+
+    def close(self) -> None:
         raise NotImplementedError
 
 
@@ -71,11 +80,20 @@ class HttpTelegramTransport:
         bot_token: str,
         timeout_seconds: float = 12.0,
         poll_timeout_seconds: float = DEFAULT_LONG_POLL_TIMEOUT_SECONDS,
+        *,
+        proxy_mode: str = "system",
+        proxy_url: str = "",
     ) -> None:
         self.bot_token = bot_token.strip()
         self.timeout_seconds = timeout_seconds
         self.poll_timeout_seconds = max(0.0, float(poll_timeout_seconds))
+        self.proxy_mode = str(proxy_mode or "system").strip().lower()
+        if self.proxy_mode not in {"system", "manual", "off"}:
+            self.proxy_mode = "system"
+        self.proxy_url = str(proxy_url or "").strip()
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
+        self._client_lock = threading.Lock()
+        self._client: httpx.Client | None = self._create_client()
 
     def get_updates(self, offset: int | None = None) -> list[TelegramUpdate]:
         if not self.bot_token:
@@ -86,7 +104,7 @@ class HttpTelegramTransport:
         }
         if offset is not None:
             params["offset"] = offset
-        response = httpx.get(f"{self.base_url}/getUpdates", params=params, timeout=self.timeout_seconds)
+        response = self._client_instance().get(f"{self.base_url}/getUpdates", params=params)
         response.raise_for_status()
         payload = response.json()
         if not payload.get("ok"):
@@ -113,12 +131,47 @@ class HttpTelegramTransport:
     def send_message(self, chat_id: int, text: str) -> None:
         if not self.bot_token:
             return
-        response = httpx.post(
+        response = self._client_instance().post(
             f"{self.base_url}/sendMessage",
             json={"chat_id": chat_id, "text": text},
-            timeout=self.timeout_seconds,
         )
         response.raise_for_status()
+
+    def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        if not self.bot_token:
+            return
+        response = self._client_instance().post(
+            f"{self.base_url}/sendChatAction",
+            json={"chat_id": chat_id, "action": action},
+        )
+        response.raise_for_status()
+
+    def close(self) -> None:
+        with self._client_lock:
+            client = self._client
+            self._client = None
+        if client is not None:
+            client.close()
+
+    def _client_instance(self) -> httpx.Client:
+        with self._client_lock:
+            if self._client is None:
+                self._client = self._create_client()
+            return self._client
+
+    def _create_client(self) -> httpx.Client:
+        client_kwargs: dict[str, object] = {
+            "timeout": httpx.Timeout(self.timeout_seconds),
+            "follow_redirects": True,
+        }
+        if self.proxy_mode == "manual" and self.proxy_url:
+            client_kwargs["proxy"] = self.proxy_url
+            client_kwargs["trust_env"] = False
+        elif self.proxy_mode == "off":
+            client_kwargs["trust_env"] = False
+        else:
+            client_kwargs["trust_env"] = True
+        return httpx.Client(**client_kwargs)
 
 
 class TelegramService:
@@ -128,11 +181,13 @@ class TelegramService:
         transport: TelegramTransport | None = None,
         offset_store: TelegramOffsetStore | None = None,
         handler: Callable[[str], str | None] | None = None,
+        classifier: Callable[[str, str], str] | None = None,
     ) -> None:
         self.settings = settings
         self.transport = transport
         self.offset_store = offset_store or TelegramOffsetStore()
         self.handler = handler
+        self.classifier = classifier
         self._offset: int | None = self.offset_store.load_offset()
         self._configuration_signature = self._current_configuration_signature()
         self._connected = False
@@ -146,15 +201,30 @@ class TelegramService:
         self._pending_update_ids_set: set[int] = set()
         self._completed_update_ids_set: set[int] = set()
         self._inflight_dispatches = 0
-        self._dispatch_pool = ThreadPoolExecutor(
-            max_workers=DEFAULT_DISPATCH_WORKERS,
-            thread_name_prefix="telegram-dispatch",
-        )
+        self._typing_lock = threading.Lock()
+        self._last_chat_action_at: dict[int, float] = {}
+        self._resetting = False
+        self._fast_dispatch_pool: ThreadPoolExecutor | None = None
+        self._ai_dispatch_pool: ThreadPoolExecutor | None = None
+        self._create_dispatch_pools()
 
     def pause_for_reset(self) -> None:
+        self._resetting = True
         with self._state_lock:
             self._connected = False
             self._last_error = ""
+        with self._typing_lock:
+            self._last_chat_action_at.clear()
+        with self._offset_lock:
+            self._pending_update_ids_set.clear()
+            self._completed_update_ids_set.clear()
+        self._shutdown_dispatch_pools(cancel_futures=True)
+        self._create_dispatch_pools()
+        if self.transport is not None and hasattr(self.transport, "close"):
+            try:
+                self.transport.close()
+            except Exception:
+                pass
         self.transport = None
 
     def telegram_user_id(self) -> str:
@@ -225,9 +295,11 @@ class TelegramService:
         previous_token = self._configuration_signature[0]
         next_token = next_signature[0]
         self._configuration_signature = next_signature
-        if previous_token != next_token:
+        if previous_token != next_token or self.transport is None:
             self._connected = False
             self._refresh_http_transport(next_token)
+            return True
+        self._refresh_http_transport(next_token)
         return True
 
     def is_authorized(self, user_id: int | str) -> bool:
@@ -248,6 +320,8 @@ class TelegramService:
                 self.offset_store.save_offset(self._offset)
 
     def poll_once(self, *, async_dispatch: bool = False) -> list[TelegramDispatchResult]:
+        if self._resetting:
+            return []
         if self.transport is None:
             with self._state_lock:
                 self._connected = False
@@ -286,7 +360,7 @@ class TelegramService:
 
         if async_dispatch:
             for update in filtered_updates:
-                self._submit_dispatch(update)
+                self._submit_dispatch(update, self._dispatch_lane(update))
             return [
                 TelegramDispatchResult(
                     update_id=update.update_id,
@@ -307,6 +381,15 @@ class TelegramService:
         return results
 
     def process_update(self, update: TelegramUpdate) -> TelegramDispatchResult:
+        if self._resetting:
+            return TelegramDispatchResult(
+                update_id=update.update_id,
+                chat_id=update.chat_id,
+                user_id=update.user_id,
+                authorized=False,
+                handled=False,
+                error="resetting",
+            )
         authorized = self.is_authorized(update.user_id)
         if not authorized:
             return TelegramDispatchResult(
@@ -340,8 +423,9 @@ class TelegramService:
 
         with self._state_lock:
             self._last_command = text
+        status_callback = self._status_callback(update.chat_id)
         try:
-            reply = self._call_handler(text, update.chat_id)
+            reply = self._call_handler(text, update.chat_id, status_callback)
         except Exception as exc:
             with self._state_lock:
                 self._connected = False
@@ -392,6 +476,11 @@ class TelegramService:
         )
 
     def send_message(self, chat_id: int | str, text: str) -> bool:
+        if self._resetting:
+            with self._state_lock:
+                self._connected = False
+                self._last_error = "resetting"
+            return False
         if self.transport is None:
             with self._state_lock:
                 self._connected = False
@@ -425,6 +514,8 @@ class TelegramService:
             self._connected = True
             self._last_reply = payload
             self._last_error = ""
+        with self._typing_lock:
+            self._last_chat_action_at.pop(normalized_chat_id, None)
         return True
 
     def send_test_message(
@@ -436,13 +527,20 @@ class TelegramService:
         target_chat_id = chat_id if chat_id is not None else self.telegram_user_id()
         return self.send_message(target_chat_id, text)
 
-    def _call_handler(self, text: str, chat_id: int) -> str | None:
+    def _call_handler(
+        self,
+        text: str,
+        chat_id: int,
+        status_callback: Callable[[str], None] | None = None,
+    ) -> str | None:
         if self.handler is None:
             return None
         try:
             parameter_count = len(inspect.signature(self.handler).parameters)
         except (TypeError, ValueError):
             parameter_count = 1
+        if parameter_count >= 3:
+            return self.handler(text, str(chat_id), status_callback)
         if parameter_count >= 2:
             return self.handler(text, str(chat_id))
         return self.handler(text)
@@ -452,13 +550,32 @@ class TelegramService:
             return dict(self.settings.get_registration())
         return {}
 
-    def _current_configuration_signature(self) -> tuple[str, str]:
-        return (self.bot_token(), self.telegram_user_id())
+    def _current_configuration_signature(self) -> tuple[str, str, float, str, str]:
+        network = {}
+        if hasattr(self.settings, "get"):
+            network = self.settings.get("network", {}) or {}
+        timeout_value = network.get("timeout_seconds", 12.0) if isinstance(network, dict) else 12.0
+        proxy_mode = str(network.get("proxy_mode", "system")).strip().lower() if isinstance(network, dict) else "system"
+        if proxy_mode not in {"system", "manual", "off"}:
+            proxy_mode = "system"
+        proxy_url = str(network.get("proxy_url", "")).strip() if isinstance(network, dict) else ""
+        try:
+            timeout = float(timeout_value)
+        except (TypeError, ValueError):
+            timeout = 12.0
+        timeout = max(3.0, timeout)
+        return (self.bot_token(), self.telegram_user_id(), timeout, proxy_mode, proxy_url)
 
     def _refresh_http_transport(self, token: str) -> None:
         if self.transport is not None and not isinstance(self.transport, HttpTelegramTransport):
             return
+        if self.transport is not None and hasattr(self.transport, "close"):
+            try:
+                self.transport.close()
+            except Exception:
+                pass
         self.transport = self._create_http_transport(token)
+        self._resetting = False
         self.load_offset()
 
     def _create_http_transport(self, token: str) -> HttpTelegramTransport | None:
@@ -469,12 +586,21 @@ class TelegramService:
         if hasattr(self.settings, "get"):
             network = self.settings.get("network", {}) or {}
         timeout_value = network.get("timeout_seconds", 12.0) if isinstance(network, dict) else 12.0
+        proxy_mode = str(network.get("proxy_mode", "system")).strip().lower() if isinstance(network, dict) else "system"
+        if proxy_mode not in {"system", "manual", "off"}:
+            proxy_mode = "system"
+        proxy_url = str(network.get("proxy_url", "")).strip() if isinstance(network, dict) else ""
         try:
             timeout = float(timeout_value)
         except (TypeError, ValueError):
             timeout = 12.0
         timeout = max(3.0, timeout)
-        return HttpTelegramTransport(token, timeout_seconds=timeout)
+        return HttpTelegramTransport(
+            token,
+            timeout_seconds=timeout,
+            proxy_mode=proxy_mode,
+            proxy_url=proxy_url,
+        )
 
     def _format_error(self, exc: Exception) -> str:
         message = str(exc).strip()
@@ -500,6 +626,8 @@ class TelegramService:
     def _finalize_dispatch_result(self, result: TelegramDispatchResult) -> None:
         with self._offset_lock:
             self._pending_update_ids_set.discard(result.update_id)
+            if self._resetting:
+                return
             if not self._should_acknowledge_result(result):
                 return
             self._completed_update_ids_set.add(result.update_id)
@@ -510,22 +638,31 @@ class TelegramService:
         if current_offset is not None and self.offset_store is not None:
             self.offset_store.save_offset(current_offset)
 
-    def _submit_dispatch(self, update: TelegramUpdate) -> None:
+    def _submit_dispatch(self, update: TelegramUpdate, lane: str = "fast") -> None:
         with self._dispatch_lock:
             self._inflight_dispatches += 1
-        future = self._dispatch_pool.submit(self._process_update_safe, update)
+        pool = self._ai_dispatch_pool if lane == "ai" else self._fast_dispatch_pool
+        if pool is None:
+            with self._dispatch_lock:
+                self._inflight_dispatches = max(0, self._inflight_dispatches - 1)
+            return
+        future = pool.submit(self._process_update_safe, update)
         future.add_done_callback(lambda completed, update_id=update.update_id: self._dispatch_done(completed, update_id))
 
     def _dispatch_done(self, future: Future[TelegramDispatchResult], update_id: int) -> None:
         try:
             result = future.result()
             self._finalize_dispatch_result(result)
+        except CancelledError:
+            with self._offset_lock:
+                self._pending_update_ids_set.discard(update_id)
         except Exception as exc:  # noqa: BLE001
             with self._offset_lock:
                 self._pending_update_ids_set.discard(update_id)
-            with self._state_lock:
-                self._connected = False
-                self._last_error = self._format_error(exc)
+            if not self._resetting:
+                with self._state_lock:
+                    self._connected = False
+                    self._last_error = self._format_error(exc)
         finally:
             with self._dispatch_lock:
                 self._inflight_dispatches = max(0, self._inflight_dispatches - 1)
@@ -546,3 +683,51 @@ class TelegramService:
                 handled=False,
                 error=error,
             )
+
+    def _dispatch_lane(self, update: TelegramUpdate) -> str:
+        if self.classifier is None:
+            return "fast"
+        try:
+            lane = self.classifier(update.text, str(update.chat_id))
+        except Exception:
+            return "fast"
+        return "ai" if str(lane or "").strip().casefold() == "ai" else "fast"
+
+    def _status_callback(self, chat_id: int) -> Callable[[str], None]:
+        def notify(_stage: str) -> None:
+            self._send_chat_action_if_due(chat_id)
+
+        return notify
+
+    def _send_chat_action_if_due(self, chat_id: int, action: str = "typing") -> None:
+        transport = self.transport
+        if self._resetting or transport is None or not hasattr(transport, "send_chat_action"):
+            return
+        now = time.monotonic()
+        with self._typing_lock:
+            last_sent_at = self._last_chat_action_at.get(chat_id, 0.0)
+            if now - last_sent_at < DEFAULT_CHAT_ACTION_INTERVAL_SECONDS:
+                return
+            self._last_chat_action_at[chat_id] = now
+        try:
+            transport.send_chat_action(chat_id, action)
+        except Exception:
+            pass
+
+    def _create_dispatch_pools(self) -> None:
+        self._fast_dispatch_pool = ThreadPoolExecutor(
+            max_workers=DEFAULT_FAST_DISPATCH_WORKERS,
+            thread_name_prefix="telegram-fast",
+        )
+        self._ai_dispatch_pool = ThreadPoolExecutor(
+            max_workers=DEFAULT_AI_DISPATCH_WORKERS,
+            thread_name_prefix="telegram-ai",
+        )
+
+    def _shutdown_dispatch_pools(self, *, cancel_futures: bool) -> None:
+        for attribute in ("_fast_dispatch_pool", "_ai_dispatch_pool"):
+            pool = getattr(self, attribute, None)
+            setattr(self, attribute, None)
+            if pool is None:
+                continue
+            pool.shutdown(wait=False, cancel_futures=cancel_futures)

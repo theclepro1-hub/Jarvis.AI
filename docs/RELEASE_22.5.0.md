@@ -1,53 +1,64 @@
 # JARVIS Unity 22.5.0
 
-22.5.0 — это уже не промежуточная сборка с экспериментами в интерфейсе, а выровненный релиз под обычного пользователя: короче onboarding, чище настройки, честный private-режим и локальный runtime без giant installer.
+22.5.0 — это финальная замена релиза с выровненным интерфейсом, локальным private/runtime-контуром и добитым Telegram-path без лишней технической свалки для пользователя.
 
-## Что изменилось
+## Что вошло в релиз
 
-- Упрощён первый запуск:
-  - обязательные поля сведены к реальному минимуму;
-  - выбор AI-режима остаётся в конце onboarding;
-  - для `private` больше не требуется ключ Groq на завершение регистрации, достаточно Telegram bot token и Telegram ID.
-- Private-режим стал реально подготавливаемым для обычного пользователя:
-  - приложение сначала пытается поднять portable Ollama через официальный Windows zip;
-  - runtime и модели складываются в `%LOCALAPPDATA%\JarvisAi_Unity\runtime`;
-  - если portable-путь не поднялся, открывается официальный `OllamaSetup.exe` как fallback;
-  - в обычном UX это сведено к одной кнопке `Подготовить локальный режим`.
-- Локальная диагностика больше не тормозит экран настроек:
-  - passive probe локальной модели больше не стартует сам по себе на каждый рендер;
-  - диагностика запускается только по явному действию пользователя;
-  - это убирает лишние лаги и закрывает lifecycle-crash полного `pytest` на Windows.
-- Settings снова выровнены под обычного пользователя:
-  - секции по умолчанию свёрнуты;
-  - `Для опытных` оставляет только дополнительные облачные ключи;
-  - ручной `llama.cpp/.gguf` путь больше не торчит как обязательная часть пользовательского сценария.
-- Nubik снова ведёт себя как навигатор, а не как шум:
-  - подсказки остаются короткими;
-  - help подхватывается не только по hover, но и по клику на секции и настройки.
-- Wake/voice-контур стал устойчивее к шуму и типовым ослышкам:
-  - захват речи больше не стартует по одиночному шумовому всплеску;
-  - ручной и wake-capture больше не принуждают `latency="low"` в `sounddevice`;
-  - команды после wake теперь восстанавливают типовые формы вроде `сотру ютуб`, `сорту ютуб`, `сокрыт тупо` обратно в локальное открытие `YouTube`.
+- Первый запуск и настройки остались короткими и пользовательскими.
+- Private/local runtime больше не выглядит фейковым режимом: локальная модель и runtime проверяются честно.
+- Wake и voice-контур уже выровнены под обычный сценарий без лишнего UI-мусора.
+- Дополнительные провайдерные и runtime-настройки остаются глубже и не лезут в основной UX.
 
-## Что осталось внутри, но не навязывается пользователю
+## Что исправлено в Telegram
 
-- Поддержка `llama.cpp` и ручной локальной модели остаётся в коде как advanced/fallback слой.
-- Managed local runtime идёт через Ollama как основной пользовательский путь.
-- Старый compatibility-слой настроек пока не вырезан полностью, чтобы не ломать апдейт существующим пользователям.
+- Telegram теперь разделяет быстрые локальные команды и AI-ответы:
+  - команды вроде `открой ютуб`, `следующее`, `пауза`, `напомни` больше не должны ждать обычную болтовню;
+  - AI-диалог идёт отдельной полосой обработки.
+- Transport переведён на один долгоживущий `httpx.Client`:
+  - меньше лишних переподключений;
+  - reuse соединения для `getUpdates`, `sendMessage` и `sendChatAction`;
+  - предсказуемее работает timeout и proxy.
+- Telegram получил короткую память по `chat_id`:
+  - короткий контекст последних сообщений учитывается только внутри конкретного Telegram-чата;
+  - память не смешивается с desktop chat.
+- Для AI-ответов добавлен компактный Telegram-стиль:
+  - ответ короче и суше;
+  - меньше лишней “ассистентской воды”.
+- Для длинного AI-пути включён промежуточный `typing`-сигнал через `sendChatAction`.
+- `proxy_mode`, `proxy_url` и `timeout_seconds` теперь реально участвуют в пересоздании Telegram transport без необходимости менять токен или перезапускать приложение.
+- Reset-path стал безопаснее:
+  - при `Удалить все данные` Telegram transport закрывается;
+  - offset/state не должны дописываться поверх сброса из завершившихся фоновых dispatch-задач.
+
+## Внутренние изменения
+
+- `core/services/service_container.py`
+  - command-first обработка Telegram вынесена в явный fast/ai split;
+  - добавлена короткая in-memory history по `telegram_chat_id`;
+  - Telegram transport теперь получает network proxy settings полностью.
+- `core/telegram/telegram_service.py`
+  - persistent `httpx.Client`;
+  - fast/ai dispatch pools;
+  - `sendChatAction` throttle;
+  - refresh transport при изменении network settings;
+  - reset-guard для transport и offset persistence.
 
 ## Проверка
 
-- `ruff check .`
-- `python -m compileall -q app core tests tools`
-- `pytest -q` → `330 passed`
+- `python -m pytest -q tests/unit tests/integration` → `328 passed`
+- `python -m pytest -q tests/ui/test_shell_ui.py` → `12 passed`
+- `python -m pytest -q tests/unit/test_telegram_service.py tests/unit/test_service_container.py tests/unit/test_release_acceptance_contract.py tests/unit/test_app_background_services.py` → `49 passed`
+- `python -m ruff check .` → `All checks passed`
+- `python -m compileall -q app core tests tools` → OK
 - `powershell -ExecutionPolicy Bypass -File .\build\build_release.ps1` → OK
-- packaged portable smoke:
-  - `QT_QPA_PLATFORM=offscreen`
-  - `JARVIS_UNITY_DISABLE_STARTUP_REGISTRY=1`
-  - `JARVIS_UNITY_DISABLE_WAKE=1`
-  - приложение успешно стартовало из `dist\JarvisAi_Unity\JarvisAi_Unity.exe` и прожило smoke-окно без падения (`SMOKE_OK`)
+
+## Примечание по полному pytest
+
+- Агрегированный `pytest -q` в этом окружении остаётся нестабильным из-за нативного Qt/PySide access violation в общем прогоне.
+- Сам проблемный UI-набор `tests/ui/test_shell_ui.py` отдельно проходит полностью.
+- Для этого релизного прохода ориентир — зелёные unit/integration и отдельный зелёный UI-shell прогон.
 
 ## Артефакты Windows
 
-- GitHub release публикует один основной артефакт: `JarvisAi_Unity_22.5.0_windows_installer.exe`
-- `portable` и `onefile` собираются как внутренние release-артефакты для проверки и диагностики, но не навязываются пользователю на странице скачивания.
+- Основной GitHub-артефакт для пользователя: `JarvisAi_Unity_22.5.0_windows_installer.exe`
+- `portable` и `onefile` остаются внутренними release-артефактами для диагностики и smoke-проверок.

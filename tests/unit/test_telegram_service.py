@@ -51,6 +51,8 @@ class FakeTransport:
     def __post_init__(self) -> None:
         self.requested_offsets: list[int | None] = []
         self.sent_messages: list[tuple[int, str]] = []
+        self.sent_chat_actions: list[tuple[int, str]] = []
+        self.closed = False
 
     def get_updates(self, offset: int | None = None) -> list[TelegramUpdate]:
         self.requested_offsets.append(offset)
@@ -64,6 +66,12 @@ class FakeTransport:
         if self.fail_send_message is not None:
             raise self.fail_send_message
         self.sent_messages.append((chat_id, text))
+
+    def send_chat_action(self, chat_id: int, action: str = "typing") -> None:
+        self.sent_chat_actions.append((chat_id, action))
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_authorized_telegram_command_routes_through_handler(tmp_path: Path) -> None:
@@ -164,7 +172,7 @@ def test_telegram_poll_interval_contract_is_fast_without_busy_loop() -> None:
     assert 750 <= service.poll_interval_ms() <= DEFAULT_POLL_INTERVAL_MS
 
 
-def test_http_transport_uses_short_long_poll_timeout(monkeypatch) -> None:
+def test_http_transport_uses_persistent_client_and_short_long_poll_timeout(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class Response:
@@ -174,21 +182,47 @@ def test_http_transport_uses_short_long_poll_timeout(monkeypatch) -> None:
         def json(self) -> dict[str, object]:
             return {"ok": True, "result": []}
 
-    def fake_get(url, params, timeout):  # noqa: ANN001, ANN202
-        captured["url"] = url
-        captured["params"] = params
-        captured["timeout"] = timeout
-        return Response()
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:  # noqa: ANN003
+            captured["client_kwargs"] = kwargs
+            captured["client_inits"] = int(captured.get("client_inits", 0)) + 1
 
-    monkeypatch.setattr("core.telegram.telegram_service.httpx.get", fake_get)
-    transport = HttpTelegramTransport("bot_secret", timeout_seconds=12.0, poll_timeout_seconds=2.0)
+        def get(self, url, params=None):  # noqa: ANN001, ANN202
+            captured["get_url"] = url
+            captured["get_params"] = params
+            captured["get_client_id"] = id(self)
+            return Response()
+
+        def post(self, url, json=None):  # noqa: ANN001, ANN202
+            captured.setdefault("posts", []).append((id(self), url, json))
+            return Response()
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+    monkeypatch.setattr("core.telegram.telegram_service.httpx.Client", FakeClient)
+    transport = HttpTelegramTransport(
+        "bot_secret",
+        timeout_seconds=12.0,
+        poll_timeout_seconds=2.0,
+        proxy_mode="manual",
+        proxy_url="http://127.0.0.1:8080",
+    )
 
     assert transport.get_updates(offset=40) == []
+    transport.send_message(777, "ok")
+    transport.send_chat_action(777)
+    transport.close()
 
-    assert captured["params"]["timeout"] == 2
-    assert captured["params"]["offset"] == 40
-    assert captured["timeout"] == 12.0
-    assert "bot_secret" in captured["url"]
+    assert captured["client_inits"] == 1
+    assert captured["get_params"]["timeout"] == 2
+    assert captured["get_params"]["offset"] == 40
+    assert "bot_secret" in captured["get_url"]
+    assert len(captured["posts"]) == 2
+    assert all(post[0] == captured["get_client_id"] for post in captured["posts"])
+    assert captured["client_kwargs"]["proxy"] == "http://127.0.0.1:8080"
+    assert captured["client_kwargs"]["trust_env"] is False
+    assert captured["closed"] is True
 
 
 def test_refresh_configuration_rebuilds_http_transport_without_restart() -> None:
@@ -206,6 +240,48 @@ def test_refresh_configuration_rebuilds_http_transport_without_restart() -> None
     assert service.transport.bot_token == "new_token"
     assert service.is_authorized("456") is True
     assert service.is_authorized("123") is False
+
+
+def test_refresh_configuration_rebuilds_http_transport_when_network_changes() -> None:
+    settings = FakeSettings(telegram_user_id="123", telegram_bot_token="stable_token")
+    service = TelegramService(
+        settings,
+        transport=HttpTelegramTransport("stable_token", proxy_mode="off"),
+        offset_store=FakeOffsetStore(offset=7),
+    )
+    previous_transport = service.transport
+    settings._settings["network"] = {
+        "timeout_seconds": 25.0,
+        "proxy_mode": "manual",
+        "proxy_url": "http://127.0.0.1:8080",
+    }
+
+    assert service.refresh_configuration() is True
+    assert service.transport is not previous_transport
+    assert isinstance(service.transport, HttpTelegramTransport)
+    assert service.transport.timeout_seconds == 25.0
+    assert service.transport.proxy_mode == "manual"
+    assert service.transport.proxy_url == "http://127.0.0.1:8080"
+
+
+def test_async_dispatch_uses_ai_lane_when_classifier_marks_update() -> None:
+    updates = [TelegramUpdate(update_id=71, chat_id=777, user_id=123456789, text="explain this")]
+    transport = FakeTransport(updates)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=71),
+        handler=lambda text: f"ok:{text}",
+        classifier=lambda text, chat_id: "ai",
+    )
+    submitted: list[tuple[int, str]] = []
+
+    service._submit_dispatch = lambda update, lane="fast": submitted.append((update.update_id, lane))  # type: ignore[method-assign]  # noqa: SLF001,E731
+
+    queued = service.poll_once(async_dispatch=True)
+
+    assert queued[0].error == "queued"
+    assert submitted == [(71, "ai")]
 
 
 def test_telegram_status_snapshot_tracks_last_command_reply_and_poll() -> None:
@@ -246,6 +322,58 @@ def test_telegram_service_exposes_failure_status_and_can_send_test_message() -> 
 
     assert service.send_test_message("777", "проверка telegram") is False
     assert "RuntimeError" in service.last_error()
+
+
+def test_handler_status_callback_throttles_typing_chat_action(monkeypatch) -> None:
+    updates = [TelegramUpdate(update_id=22, chat_id=777, user_id=123456789, text="привет")]
+    transport = FakeTransport(updates)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=FakeOffsetStore(offset=22),
+        handler=lambda text, chat_id, status_callback: (
+            status_callback("thinking"),
+            status_callback("still-thinking"),
+            "ok",
+        )[-1],
+    )
+    ticks = iter((100.0, 101.0))
+
+    monkeypatch.setattr("core.telegram.telegram_service.time.monotonic", lambda: next(ticks))
+
+    results = service.poll_once()
+
+    assert results[0].handled is True
+    assert transport.sent_chat_actions == [(777, "typing")]
+    assert transport.sent_messages == [(777, "ok")]
+
+
+def test_pause_for_reset_closes_transport_and_blocks_offset_persistence() -> None:
+    transport = FakeTransport([])
+    offset_store = FakeOffsetStore(offset=500)
+    service = TelegramService(
+        FakeSettings(),
+        transport=transport,
+        offset_store=offset_store,
+        handler=lambda text: f"ok:{text}",
+    )
+    service._pending_update_ids_set.add(500)  # noqa: SLF001
+    service.pause_for_reset()
+
+    service._finalize_dispatch_result(  # noqa: SLF001
+        TelegramDispatchResult(
+            update_id=500,
+            chat_id=777,
+            user_id=123456789,
+            authorized=True,
+            handled=True,
+            reply_text="ok",
+        )
+    )
+
+    assert transport.closed is True
+    assert offset_store.saved == []
+    assert service.poll_once(async_dispatch=False) == []
 
 
 def test_telegram_service_send_test_message_uses_configured_user_id() -> None:
