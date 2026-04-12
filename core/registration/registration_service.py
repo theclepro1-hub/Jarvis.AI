@@ -11,6 +11,21 @@ class RegistrationService:
         payload = self.settings.get_registration()
         return RegistrationModel(**payload)
 
+    def requires_groq_for_completion(self) -> bool:
+        mode = str(self.settings.get("assistant_mode", "standard")).strip().casefold()
+        return mode != "private"
+
+    def is_complete(self, record: RegistrationModel | None = None) -> bool:
+        current = record or self.load()
+        telegram_ready = bool(
+            current.telegram_user_id.strip() and current.telegram_bot_token.strip()
+        )
+        if not telegram_ready:
+            return False
+        if self.requires_groq_for_completion():
+            return bool(current.groq_api_key.strip())
+        return True
+
     def save(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> RegistrationModel:
         payload = {
             "groq_api_key": groq_api_key.strip(),

@@ -64,8 +64,11 @@ class SettingsBridge(QObject):
         self._local_runtime_status_code = ""
         self._local_runtime_feedback = ""
         self._local_llm_diagnostics_cache: LocalLLMDiagnostics | None = None
+        self._local_llm_diagnostics_requested = False
+        self._local_llm_diagnostics_loaded = False
         self._local_llm_refresh_lock = threading.Lock()
         self._local_llm_refresh_inflight = False
+        self._shutting_down = False
         self._update_summary_cache: str | None = None
         self._update_status_cache: dict[str, object] | None = None
         self._operation_lock = threading.Lock()
@@ -108,11 +111,23 @@ class SettingsBridge(QObject):
             return service
         return LocalRuntimeService(self.services.settings)
 
+    def _local_llm_probe_requested(self) -> bool:
+        return (
+            self._local_llm_diagnostics_requested
+            or self._local_runtime_busy
+            or bool(self._local_runtime_status_code)
+            or bool(self._local_runtime_feedback)
+        )
+
     def _local_llm_diagnostics(self) -> LocalLLMDiagnostics:
         if self._local_llm_diagnostics_cache is not None:
+            if self._local_llm_probe_requested() and not self._local_llm_diagnostics_loaded:
+                self._schedule_local_llm_refresh()
             return self._local_llm_diagnostics_cache
         self._local_llm_diagnostics_cache = self._placeholder_local_llm_diagnostics()
-        self._schedule_local_llm_refresh()
+        self._local_llm_diagnostics_loaded = False
+        if self._local_llm_probe_requested():
+            self._schedule_local_llm_refresh()
         return self._local_llm_diagnostics_cache
 
     def _placeholder_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
@@ -142,7 +157,7 @@ class SettingsBridge(QObject):
             ready=False,
             backend="auto",
             model_path=model,
-            detail="Проверяю локальный runtime...",
+            detail="Проверяю локальный пакет...",
             user_status="Проверяю локальную модель...",
             action_label="",
             action_url="",
@@ -156,7 +171,7 @@ class SettingsBridge(QObject):
                 ready=False,
                 backend="auto",
                 model_path="",
-                detail="Локальный runtime недоступен.",
+                detail="Локальный пакет недоступен.",
                 user_status="Локальная модель не готова.",
                 action_label="",
                 action_url="",
@@ -164,10 +179,14 @@ class SettingsBridge(QObject):
 
     def _refresh_local_llm_diagnostics(self) -> LocalLLMDiagnostics:
         self._local_llm_diagnostics_cache = self._placeholder_local_llm_diagnostics()
-        self._schedule_local_llm_refresh()
+        self._local_llm_diagnostics_loaded = False
+        if self._local_llm_probe_requested():
+            self._schedule_local_llm_refresh()
         return self._local_llm_diagnostics_cache
 
     def _schedule_local_llm_refresh(self) -> None:
+        if self._shutting_down or not self._local_llm_probe_requested():
+            return
         with self._local_llm_refresh_lock:
             if self._local_llm_refresh_inflight:
                 return
@@ -179,12 +198,19 @@ class SettingsBridge(QObject):
             finally:
                 with self._local_llm_refresh_lock:
                     self._local_llm_refresh_inflight = False
+            if self._shutting_down:
+                return
             self._local_llm_diagnostics_cache = diagnostics
+            self._local_llm_diagnostics_loaded = True
             self.localReadinessChanged.emit()
             self.assistantUserStatusChanged.emit()
             self.assistantModeSummaryChanged.emit()
 
-        threading.Thread(target=worker, name="settings-local-llm-refresh", daemon=True).start()
+        try:
+            self._worker_pool.submit(worker)
+        except RuntimeError:
+            with self._local_llm_refresh_lock:
+                self._local_llm_refresh_inflight = False
 
     def _refresh_update_snapshot(self) -> None:
         updates = self._updates_service_if_ready()
@@ -340,6 +366,10 @@ class SettingsBridge(QObject):
     @Property(str, notify=assistantUserStatusChanged)
     def assistantUserStatus(self) -> str:
         mode = self.assistantMode
+        if not self._local_llm_probe_requested():
+            if mode == "private":
+                return "Локальный режим не установлен"
+            return "Работает через облако"
         diagnostics = self._local_llm_diagnostics()
         if diagnostics.ready:
             return "Локально готово"
@@ -356,6 +386,7 @@ class SettingsBridge(QObject):
         backend = self._normalize_local_backend(value)
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("local_llm_backend", backend)
+        self._local_llm_diagnostics_requested = True
         self._refresh_local_llm_diagnostics()
         self.localLlmBackendChanged.emit()
         self.localReadinessChanged.emit()
@@ -378,6 +409,7 @@ class SettingsBridge(QObject):
     def localLlmModel(self, value: str) -> None:
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("local_llm_model", str(value or "").strip())
+        self._local_llm_diagnostics_requested = True
         self._refresh_local_llm_diagnostics()
         self.localLlmModelChanged.emit()
         self.localReadinessChanged.emit()
@@ -386,10 +418,14 @@ class SettingsBridge(QObject):
 
     @Property(str, notify=localReadinessChanged)
     def localReadiness(self) -> str:
+        if not self._local_llm_probe_requested():
+            return ""
         return self._local_llm_diagnostics().user_status
 
     @Property(bool, notify=localReadinessChanged)
     def localLlmReady(self) -> bool:
+        if not self._local_llm_probe_requested():
+            return False
         return bool(self._local_llm_diagnostics().ready)
 
     @Property(bool, notify=localRuntimeBusyChanged)
@@ -756,6 +792,7 @@ class SettingsBridge(QObject):
             )
             self.services.settings.set("local_llm_backend", self._normalize_local_backend(local_llm_backend))
             self.services.settings.set("local_llm_model", str(local_llm_model or "").strip())
+        self._local_llm_diagnostics_requested = True
         self._refresh_local_llm_diagnostics()
         self._connection_feedback = "Дополнительные подключения сохранены."
         self.localLlmBackendChanged.emit()
@@ -773,6 +810,7 @@ class SettingsBridge(QObject):
             if self._local_runtime_busy:
                 return False
             self._local_runtime_busy = True
+        self._local_llm_diagnostics_requested = True
         self._local_runtime_feedback = "Готовлю локальную модель..."
         self.localRuntimeBusyChanged.emit()
         self.localReadinessChanged.emit()
@@ -780,7 +818,7 @@ class SettingsBridge(QObject):
         def worker() -> None:
             ok = False
             status_code = "runtime_failed"
-            message = "Не удалось подготовить локальный runtime."
+            message = "Не удалось подготовить локальный пакет."
             try:
                 result = self._local_runtime_service().ensure_ready(self.localLlmModel)
                 ok = bool(getattr(result, "ok", False))
@@ -953,6 +991,9 @@ class SettingsBridge(QObject):
         self._refresh_telegram_transport()
         if self.app_bridge is not None and hasattr(self.app_bridge, "restartRegistration"):
             self.app_bridge.restartRegistration()
+        self._local_llm_diagnostics_requested = False
+        self._local_runtime_status_code = ""
+        self._local_runtime_feedback = ""
         self._refresh_local_llm_diagnostics()
         self._refresh_update_snapshot()
         self._connection_feedback = "Все данные удалены. Нужна повторная регистрация."
@@ -1057,12 +1098,32 @@ class SettingsBridge(QObject):
     def _on_local_runtime_finished(self, _ok: bool, status_code: str, feedback: str) -> None:
         with self._operation_lock:
             self._local_runtime_busy = False
+        self._local_llm_diagnostics_requested = True
         self._local_runtime_status_code = str(status_code or "").strip()
         self._local_runtime_feedback = str(feedback or "").strip()
         self._local_llm_diagnostics_cache = self._load_local_llm_diagnostics()
+        self._local_llm_diagnostics_loaded = True
         self.localRuntimeBusyChanged.emit()
         self.localLlmBackendChanged.emit()
         self.localLlmModelChanged.emit()
         self.localReadinessChanged.emit()
         self.assistantModeSummaryChanged.emit()
         self.assistantUserStatusChanged.emit()
+
+    @Slot()
+    def requestLocalDiagnostics(self) -> None:
+        if self._shutting_down:
+            return
+        self._local_llm_diagnostics_requested = True
+        self._refresh_local_llm_diagnostics()
+        self.localReadinessChanged.emit()
+        self.assistantUserStatusChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+
+    @Slot()
+    def shutdown(self) -> None:
+        self._shutting_down = True
+        try:
+            self._worker_pool.shutdown(wait=True, cancel_futures=True)
+        except RuntimeError:
+            pass

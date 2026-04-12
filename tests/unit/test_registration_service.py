@@ -34,6 +34,19 @@ def test_registration_completes_when_all_fields_are_filled():
     service = RegistrationService(settings)
     result = service.save("fake_groq_key", "123", "bot_token")
     assert result.is_complete is True
+    assert service.is_complete(result) is True
+
+
+def test_private_registration_can_complete_without_groq():
+    settings = SettingsService(FakeStore())
+    settings.set("assistant_mode", "private")
+    service = RegistrationService(settings)
+
+    result = service.save("", "123", "bot_token")
+
+    assert result.is_complete is False
+    assert service.requires_groq_for_completion() is False
+    assert service.is_complete(result) is True
 
 
 def test_registration_can_be_skipped():

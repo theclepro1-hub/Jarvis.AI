@@ -70,7 +70,9 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Для старта нужны только ключ Groq, Telegram bot token и Telegram ID. Режим можно выбрать сразу или позже в настройках."
+                        text: settingsBridge.assistantMode === "private"
+                              ? "Для приватного режима нужен Telegram. Локальный пакет можно подготовить позже одной кнопкой в настройках."
+                              : "Для старта нужны только ключ Groq, токен Telegram-бота и Telegram ID. Режим можно выбрать сразу или позже в настройках."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
@@ -81,6 +83,7 @@ Rectangle {
                     InputField {
                         id: groqField
                         objectName: "groqField"
+                        visible: settingsBridge.assistantMode !== "private"
                         Layout.fillWidth: true
                         label: "Ключ Groq"
                         text: registrationBridge.registration["groq_api_key"] || ""
@@ -89,6 +92,7 @@ Rectangle {
                     }
 
                     Text {
+                        visible: settingsBridge.assistantMode !== "private"
                         text: 'Получить ключ можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://console.groq.com/keys">https://console.groq.com/keys</a>'
                         textFormat: Text.RichText
                         color: Theme.Colors.textSoft
@@ -179,6 +183,17 @@ Rectangle {
                                 textRole: "title"
                                 currentIndex: registrationRoot.assistantModeIndex()
                                 onActivated: (index) => settingsBridge.assistantMode = model[index].key
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: settingsBridge.assistantMode === "private"
+                                      ? "Ключ Groq не нужен. После первого запуска включите локальный режим одной кнопкой в настройках."
+                                      : "Если позже захотите полную локальную работу, режим можно сменить в настройках."
+                                color: Theme.Colors.textSoft
+                                font.family: Theme.Typography.bodyFamily
+                                font.pixelSize: Theme.Typography.small
+                                wrapMode: Text.WordWrap
                             }
                         }
                     }

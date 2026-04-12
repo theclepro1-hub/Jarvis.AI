@@ -328,6 +328,7 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         yield app, runtime, window
     finally:
         runtime.voice_bridge.shutdown()
+        runtime.settings_bridge.shutdown()
         window.close()
         runtime.engine.collectGarbage()
         runtime.engine.deleteLater()
@@ -342,13 +343,30 @@ def test_registration_requires_all_fields_and_save_path_works(ui_runtime) -> Non
     runtime.registration_bridge.saveRegistration("", "", "")
     _pump(app, 120)
     assert runtime.state.currentScreen == "registration"
-    assert "Нужны все три поля" in _find(window, "registrationFeedback").property("text")
+    assert "Нужны три поля" in _find(window, "registrationFeedback").property("text")
 
     assert _find(window, "registrationSaveButton") is not None
 
     _complete_registration(runtime, app, window)
     _wait_for(app, lambda: runtime.state.currentScreen == "chat")
     assert runtime.services.registration.load().is_complete is True
+    assert "Подключение сохранено" in runtime.registration_bridge.feedback
+
+
+def test_private_registration_can_continue_without_groq(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    runtime.settings_bridge.assistantMode = "private"
+    _pump(app, 120)
+
+    groq_field = _find(window, "groqField")
+    assert groq_field.property("visible") is False
+
+    runtime.registration_bridge.saveRegistration("", "123456789", "123:abc")
+    _pump(app, 120)
+
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    assert runtime.services.registration.is_complete(runtime.services.registration.load()) is True
     assert "Подключение сохранено" in runtime.registration_bridge.feedback
 
 

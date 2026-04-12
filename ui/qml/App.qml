@@ -55,7 +55,9 @@ ApplicationWindow {
     function screenSubtitle() {
         switch (appBridge.currentScreen) {
         case "registration":
-            return "Сначала подключите Groq и Telegram. Режим AI выбирается в конце формы."
+            return settingsBridge.assistantMode === "private"
+                   ? "Сначала подключите Telegram. Локальный режим можно подготовить позже одной кнопкой."
+                   : "Сначала подключите Groq и Telegram. Режим выбирается в конце формы."
         case "voice":
             return "Настройте микрофон, слово активации и проверку понимания."
         case "apps":

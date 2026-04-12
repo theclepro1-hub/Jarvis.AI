@@ -169,6 +169,7 @@ def test_settings_bridge_exposes_assistant_mode_and_local_llm_copy(monkeypatch) 
             action_url="https://docs.ollama.com/",
         ),
     )
+    bridge._local_llm_diagnostics_requested = True
 
     assert bridge.assistantMode == "private"
     assert [item["key"] for item in bridge.assistantModeOptions] == [
@@ -181,6 +182,44 @@ def test_settings_bridge_exposes_assistant_mode_and_local_llm_copy(monkeypatch) 
     assert bridge.assistantUserStatus == "Локально готово"
     assert bridge.localLlmBackend == "ollama"
     assert bridge.localLlmModel == "llama3.2:1b"
+    assert bridge.localReadiness == "Локальная модель готова."
+
+
+def test_settings_bridge_does_not_probe_local_model_until_requested(monkeypatch) -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    calls = {"count": 0}
+
+    class FakeLocalLLMService:
+        def __init__(self, _settings) -> None:  # noqa: ANN001
+            pass
+
+        def diagnostics(self):  # noqa: ANN201
+            calls["count"] += 1
+            return SimpleNamespace(
+                ready=True,
+                backend="ollama",
+                model_path="llama3.2:1b",
+                detail="Ollama-модель готова.",
+                user_status="Локальная модель готова.",
+                action_label="Открыть Ollama",
+                action_url="https://docs.ollama.com/",
+            )
+
+    monkeypatch.setattr("ui.bridge.settings_bridge.LocalLLMService", FakeLocalLLMService)
+    bridge._worker_pool = SimpleNamespace(submit=lambda fn: fn())
+
+    assert bridge.assistantUserStatus == "Работает через облако"
+    assert bridge.localReadiness == ""
+    assert calls["count"] == 0
+
+    bridge.requestLocalDiagnostics()
+
+    assert calls["count"] == 1
+    assert bridge.assistantUserStatus == "Локально готово"
     assert bridge.localReadiness == "Локальная модель готова."
 
 

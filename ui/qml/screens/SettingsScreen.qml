@@ -97,7 +97,7 @@ Rectangle {
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Telegram bot token"
+                    title: "Telegram-бот"
                     description: "Токен личного бота для Telegram."
                     helpText: "Это токен от @BotFather для вашего личного бота."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -177,6 +177,11 @@ Rectangle {
                 description: "Один выбор без лишней технички."
                 helpText: "Обычно хватает одного режима. Слово активации всегда остаётся локальным."
                 expanded: false
+                onToggled: (expanded) => {
+                    if (expanded) {
+                        settingsBridge.requestLocalDiagnostics()
+                    }
+                }
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
                 onHelpCleared: settingsRoot.helpCleared()
 
@@ -195,7 +200,13 @@ Rectangle {
                         model: settingsBridge.assistantModeOptions
                         textRole: "title"
                         currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.assistantMode)
-                        onActivated: (index) => settingsBridge.assistantMode = model[index].key
+                        onActivated: (index) => {
+                            const mode = model[index].key
+                            settingsBridge.assistantMode = mode
+                            if (mode === "private") {
+                                settingsBridge.requestLocalDiagnostics()
+                            }
+                        }
                     }
                 }
 
@@ -419,7 +430,7 @@ Rectangle {
                 objectName: "settingsSection_advanced"
                 Layout.fillWidth: true
                 title: "Для опытных"
-                description: "Дополнительные провайдеры и локальная Llama."
+                description: "Дополнительные провайдеры для ручной тонкой настройки."
                 helpText: "Это тонкие настройки, которые обычному пользователю не нужны."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -482,57 +493,19 @@ Rectangle {
                     }
                 }
 
-                SettingRow {
-                    Layout.fillWidth: true
-                    title: "Локальная Llama"
-                    description: "Нужна только для приватного режима или локального text AI."
-                    helpText: "Если локальная модель не готова, JARVIS должен честно об этом говорить."
-                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
-                    onHelpCleared: settingsRoot.helpCleared()
-
-                    AppComboBox {
-                        id: localBackendCombo
-                        objectName: "localLlmBackendCombo"
-                        Layout.preferredWidth: 220
-                        model: settingsBridge.localLlmBackendOptions
-                        textRole: "title"
-                        currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.localLlmBackend)
-                        onActivated: (index) => settingsBridge.localLlmBackend = model[index].key
-                    }
-
-                    InputField {
-                        id: localModelField
-                        objectName: "localLlmModelField"
-                        Layout.fillWidth: true
-                        label: "Модель или путь"
-                        text: settingsBridge.localLlmModel
-                        placeholderText: "Например: llama3.2:1b или C:/models/model.gguf"
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: settingsBridge.localReadiness
-                    visible: settingsBridge.localReadiness.length > 0
-                    color: Theme.Colors.textSoft
-                    font.family: Theme.Typography.bodyFamily
-                    font.pixelSize: Theme.Typography.small
-                    wrapMode: Text.WordWrap
-                }
-
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
 
                     PrimaryButton {
                         objectName: "settingsAdvancedSaveButton"
-                        text: "Сохранить для опытных"
+                        text: "Сохранить ключи"
                         onClicked: settingsBridge.saveAdvancedConnections(
                                        geminiField.text,
                                        cerebrasField.text,
                                        openRouterField.text,
-                                       localBackendCombo.model[localBackendCombo.currentIndex].key,
-                                       localModelField.text
+                                       settingsBridge.localLlmBackend,
+                                       settingsBridge.localLlmModel
                                    )
                     }
 

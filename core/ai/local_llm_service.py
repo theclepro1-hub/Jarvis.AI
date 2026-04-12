@@ -9,6 +9,7 @@ import httpx
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.2:1b"
+OLLAMA_DIAGNOSTIC_TIMEOUT = httpx.Timeout(connect=0.2, read=0.35, write=0.35, pool=0.35)
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,7 +133,7 @@ class LocalLLMService:
 
     def _ollama_status(self, *, allow_first_model: bool) -> LocalLLMStatus:
         try:
-            response = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=2.5)
+            response = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=OLLAMA_DIAGNOSTIC_TIMEOUT)
             response.raise_for_status()
             payload = response.json()
         except Exception as exc:  # noqa: BLE001

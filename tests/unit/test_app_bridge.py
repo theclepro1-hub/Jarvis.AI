@@ -15,6 +15,9 @@ class _Registration:
     def load(self):  # noqa: ANN201
         return SimpleNamespace(is_complete=True, skipped=False)
 
+    def is_complete(self, registration) -> bool:  # noqa: ANN001
+        return bool(getattr(registration, "is_complete", False))
+
 
 class _RaisingUpdates:
     @property

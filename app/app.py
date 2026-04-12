@@ -116,6 +116,7 @@ class JarvisUnityApplication:
     def start(self) -> None:
         _boot_log("app:start:begin")
         self.qapp.aboutToQuit.connect(self.voice_bridge.shutdown)
+        self.qapp.aboutToQuit.connect(self.settings_bridge.shutdown)
         if self.single_instance is not None:
             self.single_instance.attach_show_handler(self.show_window)
             self.qapp.aboutToQuit.connect(self.single_instance.stop)

@@ -22,7 +22,7 @@ class AppBridge(QObject):
             {"id": "settings", "title": "Настройки"},
         ]
         registration = self.services.registration.load()
-        if registration.is_complete:
+        if self.services.registration.is_complete(registration):
             self.state.registrationRequired = False
             self.state.currentScreen = "chat"
         else:

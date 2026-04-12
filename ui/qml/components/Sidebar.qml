@@ -13,7 +13,7 @@ Rectangle {
     property string hoverHelpText: ""
     signal navigate(string screen)
 
-    readonly property string defaultHelpText: "Наведи на раздел или настройку, и я коротко объясню, зачем она нужна."
+    readonly property string defaultHelpText: "Наведи или нажми на раздел и настройку, и я коротко объясню, что это и зачем."
     readonly property string visibleHelpText: hoverHelpText.length > 0
                                            ? hoverHelpText
                                            : (contextHelpText.length > 0 ? contextHelpText : defaultHelpText)

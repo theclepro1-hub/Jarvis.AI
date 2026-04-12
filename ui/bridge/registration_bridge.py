@@ -30,11 +30,14 @@ class RegistrationBridge(QObject):
     @Slot(str, str, str)
     def saveRegistration(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> None:
         record = self.services.registration.save(groq_api_key, telegram_user_id, telegram_bot_token)
-        if record.is_complete:
+        if self.services.registration.is_complete(record):
             self._feedback = "Подключение сохранено. Можно переходить в JARVIS."
             self.feedbackChanged.emit()
             self.registrationChanged.emit()
             self.app_bridge.finishRegistration()
             return
-        self._feedback = "Нужны все три поля: ключ Groq, Telegram ID и Telegram bot token."
+        if self.services.registration.requires_groq_for_completion():
+            self._feedback = "Нужны три поля: ключ Groq, Telegram ID и токен Telegram-бота."
+        else:
+            self._feedback = "Для приватного режима нужны Telegram ID и токен Telegram-бота."
         self.feedbackChanged.emit()
