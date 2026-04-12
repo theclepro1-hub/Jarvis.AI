@@ -121,6 +121,7 @@ class WakeService:
                 device=self.voice._resolve_input_device(),
                 channels=1,
                 callback=callback,
+                latency="low",
             ):
                 self._running = True
                 self._set_phase("waiting_wake", "Жду «Джарвис»", ready=True)

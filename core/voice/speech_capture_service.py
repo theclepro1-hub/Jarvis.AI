@@ -51,6 +51,7 @@ class SpeechCaptureService:
                 dtype="int16",
                 device=self._resolve_input_device(),
                 blocksize=self._config.block_frames,
+                latency="low",
             ) as stream:
                 for _ in range(max_iterations):
                     if self._stop_event.is_set():

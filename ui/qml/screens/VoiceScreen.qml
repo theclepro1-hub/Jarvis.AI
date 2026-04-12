@@ -101,21 +101,6 @@ Rectangle {
                 border.width: 1
                 implicitHeight: checkColumn.implicitHeight + 24
 
-                HoverHandler {
-                    onHoveredChanged: {
-                        if (hovered) {
-                            voiceRoot.helpRequested("Здесь можно быстро проверить, что JARVIS услышал, но без выполнения команды.")
-                        } else {
-                            voiceRoot.helpCleared()
-                        }
-                    }
-                }
-
-                TapHandler {
-                    acceptedButtons: Qt.LeftButton
-                    onTapped: voiceRoot.helpRequested("Здесь можно быстро проверить, что JARVIS услышал, но без выполнения команды.")
-                }
-
                 ColumnLayout {
                     id: checkColumn
                     anchors.fill: parent
@@ -254,6 +239,41 @@ Rectangle {
                     Text {
                         objectName: "voiceTestResult"
                         text: voiceBridge.testResult
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        objectName: "voiceTestHeardText"
+                        visible: !!voiceBridge.voiceTest.heardText && voiceBridge.voiceTest.heardText.length > 0
+                        text: "Услышал: " + voiceBridge.voiceTest.heardText
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        objectName: "voiceTestRecognizedText"
+                        visible: !!voiceBridge.voiceTest.recognizedText
+                                 && voiceBridge.voiceTest.recognizedText.length > 0
+                                 && voiceBridge.voiceTest.recognizedText !== voiceBridge.voiceTest.heardText
+                        text: "Распознал: " + voiceBridge.voiceTest.recognizedText
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        objectName: "voiceTestCommandText"
+                        visible: !!voiceBridge.voiceTest.command && voiceBridge.voiceTest.command.length > 0
+                        text: "Что сделаю: " + voiceBridge.voiceTest.command
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small

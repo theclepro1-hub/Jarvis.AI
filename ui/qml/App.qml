@@ -126,15 +126,13 @@ ApplicationWindow {
 
                     ColumnLayout {
                         Layout.alignment: Qt.AlignTop | Qt.AlignRight
-                        Layout.preferredWidth: 140
-                        Layout.minimumWidth: 0
                         spacing: 6
 
                         StatusPill {
                             Layout.alignment: Qt.AlignRight
                             text: appBridge.currentScreen === "registration"
                                   ? "Подключения"
-                                  : appBridge.assistantStatus
+                                  : "Готов"
                         }
                     }
                 }

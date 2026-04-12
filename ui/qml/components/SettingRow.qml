@@ -19,16 +19,6 @@ Rectangle {
 
     implicitHeight: Math.max(78, wrapper.implicitHeight + 26)
 
-    HoverHandler {
-        onHoveredChanged: {
-            if (hovered && root.helpText.length > 0) {
-                root.helpRequested(root.helpText)
-            } else {
-                root.helpCleared()
-            }
-        }
-    }
-
     TapHandler {
         acceptedButtons: Qt.LeftButton
         onTapped: {

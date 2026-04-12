@@ -176,16 +176,16 @@ def test_voice_bridge_deliver_transcribed_text_sets_handoff_status():
     assert bridge.recordingHint == "Команда распознана. Передаю в обработку..."
 
 
-def test_voice_bridge_strips_wake_word_before_chat_submit():
+def test_voice_bridge_preserves_recognized_text_when_wake_hint_is_active():
     services = _Services()
     chat_bridge = _ChatBridge()
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=chat_bridge)
 
-    bridge._wake_hint = "Джарвис услышан. Захватываю команду..."  # noqa: SLF001
+    bridge._wake_hint = "Джарвис услышан. Подхватываю команду..."  # noqa: SLF001
     bridge._deliver_transcribed_text("Джарвис, открой ютуб")  # noqa: SLF001
 
-    assert chat_bridge.received == ["открой ютуб"]
+    assert chat_bridge.received == ["Джарвис, открой ютуб"]
     assert bridge.wakeHint == ""
 
 

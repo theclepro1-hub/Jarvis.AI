@@ -180,20 +180,6 @@ Rectangle {
                                 currentIndex: registrationRoot.assistantModeIndex()
                                 onActivated: (index) => settingsBridge.assistantMode = model[index].key
                             }
-
-                            StatusPill {
-                                objectName: "registrationAssistantStatus"
-                                text: settingsBridge.assistantUserStatus
-                            }
-
-                            Text {
-                                text: settingsBridge.assistantModeSummary
-                                color: Theme.Colors.textSoft
-                                font.family: Theme.Typography.bodyFamily
-                                font.pixelSize: Theme.Typography.small
-                                wrapMode: Text.WordWrap
-                                Layout.fillWidth: true
-                            }
                         }
                     }
 

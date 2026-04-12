@@ -189,6 +189,16 @@ def test_release_gate_wake_notes_do_not_become_chat_bubbles() -> None:
     assert state.status == "Не расслышал"
 
 
+def test_release_gate_chat_footer_keeps_transient_wake_handoff_status() -> None:
+    root = Path(__file__).resolve().parents[2]
+    composer_source = (root / "ui" / "qml" / "components" / "Composer.qml").read_text(encoding="utf-8")
+    chat_source = (root / "ui" / "qml" / "screens" / "ChatScreen.qml").read_text(encoding="utf-8")
+
+    assert 'property string wakeHint' in composer_source
+    assert 'hasPriorityWakeHint' in composer_source
+    assert 'wakeHint: voiceBridge.wakeHint' in chat_source
+
+
 def test_release_gate_local_commands_do_not_call_llm() -> None:
     class Actions:
         def __init__(self) -> None:

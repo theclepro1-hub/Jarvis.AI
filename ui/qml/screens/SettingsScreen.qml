@@ -197,17 +197,12 @@ Rectangle {
                         currentIndex: settingsRoot.findKeyIndex(model, settingsBridge.assistantMode)
                         onActivated: (index) => settingsBridge.assistantMode = model[index].key
                     }
-
-                    StatusPill {
-                        objectName: "assistantStatusPill"
-                        text: settingsBridge.assistantUserStatus
-                    }
                 }
 
                 Text {
                     objectName: "assistantModeSummary"
                     Layout.fillWidth: true
-                    text: settingsBridge.assistantModeSummary
+                    text: settingsBridge.assistantUserStatus
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
@@ -487,12 +482,14 @@ Rectangle {
                         label: "Модель или путь"
                         text: settingsBridge.localLlmModel
                         placeholderText: "Например: llama3.2:1b или C:/models/model.gguf"
+                        visible: settingsBridge.localLlmBackend !== "auto" || text.length > 0
                     }
                 }
 
                 Text {
                     Layout.fillWidth: true
                     text: settingsBridge.localReadiness
+                    visible: settingsBridge.localLlmBackend !== "auto" || settingsBridge.localLlmModel.length > 0
                     color: Theme.Colors.textSoft
                     font.family: Theme.Typography.bodyFamily
                     font.pixelSize: Theme.Typography.small
@@ -501,7 +498,7 @@ Rectangle {
 
                 PrimaryButton {
                     objectName: "settingsAdvancedSaveButton"
-                    text: "Сохранить для опытных"
+                    text: "Сохранить"
                     Layout.alignment: Qt.AlignLeft
                     onClicked: settingsBridge.saveAdvancedConnections(
                                    geminiField.text,

@@ -10,11 +10,14 @@ Rectangle {
 
     property bool recording: false
     property string recordingHint: ""
+    property string wakeHint: ""
     property bool busy: false
     property string busyHint: ""
     property string idleHint: ""
 
     readonly property string defaultRecordingIdleHint: "Ручной микрофон готов."
+    readonly property bool hasPriorityWakeHint: wakeHint.length > 0
+                                              && wakeHint !== defaultRecordingIdleHint
 
     color: Theme.Colors.cardAlt
     radius: Theme.Spacing.radius
@@ -80,12 +83,15 @@ Rectangle {
         Text {
             objectName: "composerStatusText"
             Layout.fillWidth: true
-            text: root.recording
-                  ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
-                  : root.busy
-                    ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
-                    : (root.idleHint.length ? root.idleHint : "Введите сообщение или нажмите микрофон.")
-            color: root.recording || root.busy
+            text: root.hasPriorityWakeHint
+                  ? root.wakeHint
+                  : root.recording
+                    ? (root.recordingHint.length ? root.recordingHint : "Слушаю...")
+                    : root.busy
+                      ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
+                      : (root.idleHint.length ? root.idleHint
+                        : (root.recordingHint.length ? root.recordingHint : "Введите сообщение или нажмите микрофон."))
+            color: root.hasPriorityWakeHint || root.recording || root.busy
                    ? Theme.Colors.accent
                    : Theme.Colors.textSoft
             font.family: Theme.Typography.bodyFamily

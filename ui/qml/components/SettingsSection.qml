@@ -21,25 +21,6 @@ Rectangle {
     border.width: 1
     implicitHeight: wrapper.implicitHeight + 28
 
-    HoverHandler {
-        onHoveredChanged: {
-            if (hovered && root.helpText.length > 0) {
-                root.helpRequested(root.helpText)
-            } else {
-                root.helpCleared()
-            }
-        }
-    }
-
-    TapHandler {
-        acceptedButtons: Qt.LeftButton
-        onTapped: {
-            if (root.helpText.length > 0) {
-                root.helpRequested(root.helpText)
-            }
-        }
-    }
-
     ColumnLayout {
         id: wrapper
         anchors.fill: parent
@@ -56,6 +37,12 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onEntered: {
+                    if (root.helpText.length > 0) {
+                        root.helpRequested(root.helpText)
+                    }
+                }
+                onExited: root.helpCleared()
                 onClicked: {
                     if (root.helpText.length > 0) {
                         root.helpRequested(root.helpText)

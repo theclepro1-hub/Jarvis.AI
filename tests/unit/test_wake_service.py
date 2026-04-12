@@ -56,17 +56,15 @@ def test_wake_service_detects_wake_word_in_partial_payload():
     assert wake._contains_wake(alias_payload, partial=True) is True  # noqa: SLF001
 
 
-def test_wake_service_accepts_common_wake_mishears_in_partial_payload():
+def test_wake_service_ignores_short_wake_aliases_in_strict_partial_detection():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
 
-    payload = json.dumps({"partial": "гарви с открой steam"}, ensure_ascii=False)
-    assert wake._contains_wake(payload, partial=True) is True  # noqa: SLF001
     short_alias_payload = json.dumps({"partial": "гарви открой steam"}, ensure_ascii=False)
-    assert wake._contains_wake(short_alias_payload, partial=True) is True  # noqa: SLF001
+    assert wake._contains_wake(short_alias_payload, partial=True) is False  # noqa: SLF001
     clipped_alias_payload = json.dumps({"partial": "джарви открой steam"}, ensure_ascii=False)
-    assert wake._contains_wake(clipped_alias_payload, partial=True) is True  # noqa: SLF001
+    assert wake._contains_wake(clipped_alias_payload, partial=True) is False  # noqa: SLF001
 
 
 def test_wake_service_ignores_non_matching_payload():

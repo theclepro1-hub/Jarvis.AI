@@ -12,6 +12,10 @@ Rectangle {
     property string selectedCategory: "music"
     property bool manualFormOpen: false
     property bool scanCoolingDown: false
+    property var filteredCatalogCache: []
+    property var categoryCountCache: ({})
+    property var discoveryPreviewCache: []
+    property var musicItemsCache: []
     signal helpRequested(string text)
     signal helpCleared()
 
@@ -20,6 +24,29 @@ Rectangle {
         interval: 1400
         repeat: false
         onTriggered: root.scanCoolingDown = false
+    }
+
+    Component.onCompleted: {
+        rebuildCatalogCaches()
+        rebuildDiscoveryPreviewCache()
+    }
+
+    onSelectedCategoryChanged: rebuildCatalogCaches()
+
+    Connections {
+        target: appsBridge
+
+        function onCatalogChanged() {
+            root.rebuildCatalogCaches()
+        }
+
+        function onDiscoveredChanged() {
+            root.rebuildDiscoveryPreviewCache()
+        }
+
+        function onDefaultMusicAppChanged() {
+            root.rebuildCatalogCaches()
+        }
     }
 
     function normalizeDiscoveryTitle(title) {
@@ -118,34 +145,94 @@ Rectangle {
     }
 
     function filteredCatalog() {
-        const source = appsBridge.catalog || []
-        const selected = root.selectedCategory
-        const result = []
-        for (let i = 0; i < source.length; i++) {
-            const item = source[i]
-            if (!item || !matchesCategory(item, selected)) {
-                continue
-            }
-            result.push(item)
-        }
-        result.sort(function(left, right) {
-            return (left.title || "").toString().localeCompare((right.title || "").toString())
-        })
-        return result
+        return root.filteredCatalogCache
     }
 
     function categoryCount(category) {
-        const source = appsBridge.catalog || []
-        let count = 0
-        for (let i = 0; i < source.length; i++) {
-            if (matchesCategory(source[i], category)) {
-                count += 1
-            }
-        }
-        return count
+        return Number(root.categoryCountCache[category] || 0)
     }
 
     function discoveryPreview() {
+        return root.discoveryPreviewCache
+    }
+
+    function visibleDiscoveryCount() {
+        return root.discoveryPreviewCache.length
+    }
+
+    function musicItems() {
+        return root.musicItemsCache
+    }
+
+    function defaultMusicItem() {
+        const items = musicItems()
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].id === appsBridge.defaultMusicAppId) {
+                return items[i]
+            }
+        }
+        return null
+    }
+
+    function musicDefaultLabel() {
+        const item = defaultMusicItem()
+        return item ? item.title : "не выбрано"
+    }
+
+    function rebuildCatalogCaches() {
+        const source = appsBridge.catalog || []
+        const selected = root.selectedCategory
+        const filtered = []
+        const music = []
+        const counts = {
+            music: 0,
+            steam: 0,
+            launcher: 0,
+            web: 0,
+            app: 0
+        }
+
+        for (let i = 0; i < source.length; i++) {
+            const item = source[i]
+            if (!item) {
+                continue
+            }
+            if (matchesCategory(item, "music")) {
+                counts.music += 1
+            }
+            if (matchesCategory(item, "steam")) {
+                counts.steam += 1
+            }
+            if (matchesCategory(item, "launcher")) {
+                counts.launcher += 1
+            }
+            if (matchesCategory(item, "web")) {
+                counts.web += 1
+            }
+            if (matchesCategory(item, "app")) {
+                counts.app += 1
+            }
+            if (matchesCategory(item, selected)) {
+                filtered.push(item)
+                if (catalogSection(item) === "music") {
+                    music.push(item)
+                }
+            }
+        }
+
+        filtered.sort(function(left, right) {
+            return (left.title || "").toString().localeCompare((right.title || "").toString())
+        })
+        music.sort(function(left, right) {
+            return (left.title || "").toString().localeCompare((right.title || "").toString())
+        })
+
+        root.categoryCountCache = counts
+        root.filteredCatalogCache = filtered
+        root.musicItemsCache = music
+    }
+
+    function rebuildDiscoveryPreviewCache() {
         const source = appsBridge.discovered || []
         const seen = {}
         const result = []
@@ -164,37 +251,7 @@ Rectangle {
                 break
             }
         }
-        return result
-    }
-
-    function visibleDiscoveryCount() {
-        return discoveryPreview().length
-    }
-
-    function musicItems() {
-        const source = filteredCatalog()
-        const result = []
-        for (let i = 0; i < source.length; i++) {
-            if (catalogSection(source[i]) === "music") {
-                result.push(source[i])
-            }
-        }
-        return result
-    }
-
-    function defaultMusicItem() {
-        const items = musicItems()
-        for (let i = 0; i < items.length; i++) {
-            if (items[i].id === appsBridge.defaultMusicAppId) {
-                return items[i]
-            }
-        }
-        return null
-    }
-
-    function musicDefaultLabel() {
-        const item = defaultMusicItem()
-        return item ? item.title : "не выбрано"
+        root.discoveryPreviewCache = result
     }
 
     FileDialog {
@@ -228,21 +285,6 @@ Rectangle {
                 border.color: Theme.Colors.border
                 border.width: 1
                 implicitHeight: addColumn.implicitHeight + 24
-
-                HoverHandler {
-                    onHoveredChanged: {
-                        if (hovered) {
-                            helpRequested("Здесь можно найти приложение автоматически или добавить его вручную.")
-                        } else {
-                            helpCleared()
-                        }
-                    }
-                }
-
-                TapHandler {
-                    acceptedButtons: Qt.LeftButton
-                    onTapped: helpRequested("Здесь можно найти приложение автоматически или добавить его вручную.")
-                }
 
                 ColumnLayout {
                     id: addColumn
@@ -381,21 +423,6 @@ Rectangle {
                 border.width: 1
                 implicitHeight: discoveredColumn.implicitHeight + 28
 
-                HoverHandler {
-                    onHoveredChanged: {
-                        if (hovered) {
-                            helpRequested("Это найденные приложения. Их можно добавить в каталог одним кликом.")
-                        } else {
-                            helpCleared()
-                        }
-                    }
-                }
-
-                TapHandler {
-                    acceptedButtons: Qt.LeftButton
-                    onTapped: helpRequested("Это найденные приложения. Их можно добавить в каталог одним кликом.")
-                }
-
                 ColumnLayout {
                     id: discoveredColumn
                     anchors.fill: parent
@@ -411,7 +438,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: "Найдено: " + visibleDiscoveryCount() + ". Добавляйте только нужные варианты."
+                        text: "Найдено: " + root.discoveryPreviewCache.length + ". Добавляйте только нужные варианты."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.small
@@ -420,7 +447,7 @@ Rectangle {
                     }
 
                     Repeater {
-                        model: discoveryPreview()
+                        model: root.discoveryPreviewCache
 
                         Rectangle {
                             id: candidateCard
@@ -479,21 +506,6 @@ Rectangle {
                 border.width: 1
                 implicitHeight: categoryColumn.implicitHeight + 28
 
-                HoverHandler {
-                    onHoveredChanged: {
-                        if (hovered) {
-                            helpRequested("Выберите категорию, чтобы быстро увидеть подключённые приложения.")
-                        } else {
-                            helpCleared()
-                        }
-                    }
-                }
-
-                TapHandler {
-                    acceptedButtons: Qt.LeftButton
-                    onTapped: helpRequested("Выберите категорию, чтобы быстро увидеть подключённые приложения.")
-                }
-
                 ColumnLayout {
                     id: categoryColumn
                     anchors.fill: parent
@@ -546,7 +558,7 @@ Rectangle {
                     }
 
                     Text {
-                        visible: root.selectedCategory === "music" && appsBridge.defaultMusicAppId.length === 0 && musicItems().length > 1
+                        visible: root.selectedCategory === "music" && appsBridge.defaultMusicAppId.length === 0 && root.musicItemsCache.length > 1
                         Layout.fillWidth: true
                         text: "Выберите основное музыкальное приложение. Тогда команда «включи музыку» перестанет спрашивать в чате."
                         color: Theme.Colors.accent
@@ -556,7 +568,7 @@ Rectangle {
                     }
 
                     Repeater {
-                        model: filteredCatalog()
+                        model: root.filteredCatalogCache
 
                         Rectangle {
                             id: appCard
@@ -567,16 +579,6 @@ Rectangle {
                             border.color: Theme.Colors.borderSoft
                             border.width: 1
                             implicitHeight: row.implicitHeight + 24
-
-                            HoverHandler {
-                                onHoveredChanged: {
-                                    if (hovered) {
-                                        helpRequested("Здесь можно запустить, закрепить или назначить основное приложение.")
-                                    } else {
-                                        helpCleared()
-                                    }
-                                }
-                            }
 
                             RowLayout {
                                 id: row
@@ -693,7 +695,7 @@ Rectangle {
                     }
 
                     Text {
-                        visible: filteredCatalog().length === 0
+                        visible: root.filteredCatalogCache.length === 0
                         Layout.fillWidth: true
                         text: "В этой категории пока ничего нет. Добавьте вручную или найдите автоматически."
                         color: Theme.Colors.textSoft

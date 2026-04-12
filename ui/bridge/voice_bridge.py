@@ -49,6 +49,7 @@ class VoiceBridge(QObject):
         self._summary_cache = ""
         self._runtime_status_cache: dict[str, str] = {}
         self._warmup_lock = threading.Lock()
+        self._wake_runtime_lock = threading.Lock()
         self._warmup_started = False
         self.voiceTestTextReady.connect(self._handle_voice_test_text)
         self.voiceTestNoteReady.connect(self._handle_voice_test_note)
@@ -98,7 +99,7 @@ class VoiceBridge(QObject):
         if value:
             self.startWakeRuntime()
         else:
-            self.services.wake.stop()
+            self._request_wake_runtime_update()
         self._refresh_voice_status_cache()
         self.wakeWordEnabledChanged.emit()
         self.summaryChanged.emit()
@@ -201,8 +202,7 @@ class VoiceBridge(QObject):
         self.summaryChanged.emit()
         self.statusChanged.emit()
         if self.wakeWordEnabled and not self.services.voice.is_recording:
-            self.services.wake.stop()
-            self.startWakeRuntime()
+            self._request_wake_runtime_update(restart=True)
 
     @Property(str, notify=selectedOutputDeviceChanged)
     def selectedOutputDevice(self) -> str:
@@ -374,9 +374,20 @@ class VoiceBridge(QObject):
     def shutdown(self) -> None:
         self.services.wake.stop()
 
+    def _request_wake_runtime_update(self, restart: bool = False) -> None:
+        def worker() -> None:
+            with self._wake_runtime_lock:
+                self.services.wake.stop()
+                if restart and self.services.settings.get("wake_word_enabled", True) and not self.services.voice.is_recording:
+                    self.services.wake.start(self._emit_wake_detected, self._emit_wake_status_updated)
+            self._refresh_voice_status_cache()
+            self.summaryChanged.emit()
+            self.statusChanged.emit()
+
+        threading.Thread(target=worker, name="wake-runtime-update", daemon=True).start()
+
     def _deliver_transcribed_text(self, text: str) -> None:
         raw_text = text.strip()
-        normalized_text = self._strip_voice_test_wake_word(raw_text) if self._wake_hint else raw_text
         self._recording_hint = "Команда распознана. Передаю в обработку..."
         self.recordingHintChanged.emit()
         self.state.status = "Передаю команду в обработку"
@@ -386,7 +397,7 @@ class VoiceBridge(QObject):
         self.voiceTimingsChanged.emit()
         self._refresh_voice_status_cache()
         if self._chat_bridge is not None:
-            self._chat_bridge.submitTranscribedText(normalized_text)
+            self._chat_bridge.submitTranscribedText(raw_text)
         if self._wake_hint:
             self.clearWakeHint()
 
@@ -435,7 +446,7 @@ class VoiceBridge(QObject):
     def _handle_wake_detected(self, pre_roll: bytes) -> None:
         if self.services.voice.is_recording:
             return
-        self._wake_hint = "Джарвис услышан. Захватываю команду..."
+        self._wake_hint = "Джарвис услышан. Подхватываю команду..."
         self.wakeHintChanged.emit()
         self.state.status = "Слушаю команду"
         self.statusChanged.emit()

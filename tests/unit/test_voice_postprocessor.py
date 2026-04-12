@@ -14,6 +14,5 @@ class _ActionRegistryStub:
 def test_voice_postprocessor_normalizes_common_open_mishears():
     processor = VoiceCommandPostProcessor(_ActionRegistryStub())
 
-    assert processor.normalize("сотру ютуб").normalized == "открой ютуб"
-    assert processor.normalize("сорту ютуб").normalized == "открой ютуб"
-    assert processor.normalize("сокрыт браузер").normalized == "открой браузер"
+    assert processor.normalize("откры ютуб").normalized == "открой ютуб"
+    assert processor.normalize("откри браузер").normalized == "открой браузер"

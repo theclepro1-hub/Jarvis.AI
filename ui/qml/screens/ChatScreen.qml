@@ -25,21 +25,6 @@ Rectangle {
             border.color: Qt.rgba(0.41, 0.94, 0.82, 0.22)
             border.width: 1
 
-            HoverHandler {
-                onHoveredChanged: {
-                    if (hovered) {
-                        helpRequested("Очередь выполнения показывает, что JARVIS делает прямо сейчас.")
-                    } else {
-                        helpCleared()
-                    }
-                }
-            }
-
-            TapHandler {
-                acceptedButtons: Qt.LeftButton
-                onTapped: helpRequested("Очередь выполнения показывает, что JARVIS делает прямо сейчас.")
-            }
-
             ColumnLayout {
                 id: queueColumn
                 anchors.fill: parent
@@ -95,16 +80,6 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 10
 
-            HoverHandler {
-                onHoveredChanged: {
-                    if (hovered) {
-                        helpRequested("Быстрые действия запускают частые команды без набора текста.")
-                    } else {
-                        helpCleared()
-                    }
-                }
-            }
-
             QuickActionStrip {
                 Layout.fillWidth: true
                 model: chatBridge.quickActions
@@ -131,16 +106,6 @@ Rectangle {
             border.color: Theme.Colors.borderSoft
             border.width: 1
             clip: true
-
-            HoverHandler {
-                onHoveredChanged: {
-                    if (hovered) {
-                        helpRequested("Здесь лежит история диалога. Прокрутка нужна только для старых сообщений.")
-                    } else {
-                        helpCleared()
-                    }
-                }
-            }
 
             ListView {
                 id: listView
@@ -350,6 +315,7 @@ Rectangle {
             Layout.preferredHeight: 96
             busy: chatBridge.thinking
             busyHint: chatBridge.thinkingLabel
+            wakeHint: voiceBridge.wakeHint
             idleHint: chatBridge.lastResponseHint
             recording: voiceBridge.isRecording
             recordingHint: voiceBridge.recordingHint

@@ -18,7 +18,12 @@ WAKE_PREFIX_ALIASES = (
     "jarvis",
 )
 
-STRICT_WAKE_ALIASES = WAKE_PREFIX_ALIASES
+STRICT_WAKE_ALIASES = (
+    "джарвис",
+    "жарвис",
+    "джервис",
+    "jarvis",
+)
 
 COMMAND_FRAGMENT_TOKENS = (
     "открой",
