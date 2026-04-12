@@ -220,3 +220,45 @@ def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
     bridge.aiProfile = "local"
     assert settings.get("ai_mode") == "auto"
     assert settings.get("ai_provider") == "auto"
+
+
+def test_settings_bridge_can_prepare_local_runtime(monkeypatch) -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    settings.set("assistant_mode", "private")
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    class FakeRuntime:
+        def ensure_ready(self, _requested_model: str):  # noqa: ANN001, ANN201
+            settings.bulk_update({"local_llm_backend": "ollama", "local_llm_model": "llama3.2:1b"})
+            return SimpleNamespace(
+                ok=True,
+                ready=True,
+                status_code="portable_ready",
+                message="Локальная модель llama3.2:1b скачана и готова.",
+            )
+
+    monkeypatch.setattr(bridge, "_local_runtime_service", lambda: FakeRuntime())
+    monkeypatch.setattr(
+        bridge,
+        "_load_local_llm_diagnostics",
+        lambda: SimpleNamespace(
+            ready=True,
+            backend="ollama",
+            model_path="llama3.2:1b",
+            detail="Ollama-модель готова.",
+            user_status="Локальная модель готова.",
+            action_label="Открыть Ollama",
+            action_url="https://docs.ollama.com/",
+        ),
+    )
+    bridge._worker_pool = SimpleNamespace(submit=lambda fn: fn())
+
+    assert bridge.installLocalRuntime() is True
+    assert bridge.localRuntimeBusy is False
+    assert bridge.localLlmReady is True
+    assert bridge.localRuntimeStatus == "Локальный режим готов."
+    assert bridge.localRuntimeActionVisible is False
+    assert bridge.localLlmBackend == "ollama"
+    assert bridge.localLlmModel == "llama3.2:1b"

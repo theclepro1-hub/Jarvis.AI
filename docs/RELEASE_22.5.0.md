@@ -26,11 +26,17 @@
   - `auto` не врёт о готовности `llama.cpp` или `Ollama`;
   - статус локальной модели зависит от реального runtime на машине;
   - для обычного пользователя служебные статусы снова краткие и понятные.
+- Приватный режим теперь можно подготовить без giant installer:
+  - приложение сначала пытается поднять portable local runtime через официальный Windows zip от Ollama;
+  - runtime и локальные модели складываются в `%LOCALAPPDATA%\\JarvisAi_Unity\\runtime`;
+  - если portable-путь не поднялся, приложение открывает официальный `OllamaSetup.exe` как fallback;
+  - обычному пользователю это показывается как одна кнопка `Подготовить локальный режим`, а не как набор backend-ручек.
 
 ## Проверка
 
 - `ruff check .`
-- `pytest -q` → `310 passed`
+- `pytest -q` → `315 passed`
+- packaged offscreen smoke → `EXITED:0`
 - релизная сборка Windows:
   - `JarvisAi_Unity_22.5.0_windows_installer.exe`
   - `JarvisAi_Unity_22.5.0_windows_portable.zip`

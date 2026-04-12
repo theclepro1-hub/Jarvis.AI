@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import os
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from core.ai.ai_service import SUPPORTED_AI_MODES, SUPPORTED_AI_PROFILES
 from core.ai.local_llm_service import LocalLLMDiagnostics, LocalLLMService
+from core.ai.local_runtime_service import LocalRuntimeService
 from core.policy.assistant_mode import ASSISTANT_MODES, STT_OVERRIDES, TEXT_OVERRIDES, resolve_assistant_mode
 from core.version import DEFAULT_VERSION
 
@@ -28,6 +30,7 @@ class SettingsBridge(QObject):
     localLlmBackendOptionsChanged = Signal()
     localLlmModelChanged = Signal()
     localReadinessChanged = Signal()
+    localRuntimeBusyChanged = Signal()
     textBackendOverrideChanged = Signal()
     textBackendOverrideOptionsChanged = Signal()
     sttBackendOverrideChanged = Signal()
@@ -46,6 +49,7 @@ class SettingsBridge(QObject):
     updateCheckBusyChanged = Signal()
     _telegramTestFinished = Signal(bool, str)
     _updateCheckFinished = Signal(bool)
+    _localRuntimeFinished = Signal(bool, str, str)
 
     def __init__(self, state, services, app_bridge, chat_bridge=None) -> None:
         super().__init__()
@@ -56,6 +60,9 @@ class SettingsBridge(QObject):
         self._connection_feedback = ""
         self._telegram_test_busy = False
         self._update_check_busy = False
+        self._local_runtime_busy = False
+        self._local_runtime_status_code = ""
+        self._local_runtime_feedback = ""
         self._local_llm_diagnostics_cache: LocalLLMDiagnostics | None = None
         self._local_llm_refresh_lock = threading.Lock()
         self._local_llm_refresh_inflight = False
@@ -65,6 +72,7 @@ class SettingsBridge(QObject):
         self._worker_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="settings-bridge")
         self._telegramTestFinished.connect(self._on_telegram_test_finished)
         self._updateCheckFinished.connect(self._on_update_check_finished)
+        self._localRuntimeFinished.connect(self._on_local_runtime_finished)
 
     def _updates_service_if_ready(self):  # noqa: ANN202
         if hasattr(self.services, "_updates"):
@@ -93,6 +101,12 @@ class SettingsBridge(QObject):
         if hasattr(self.services, "__dict__") and "ai" in vars(self.services):
             return vars(self.services).get("ai")
         return None
+
+    def _local_runtime_service(self) -> LocalRuntimeService:
+        service = getattr(self.services, "local_runtime", None)
+        if service is not None and hasattr(service, "ensure_ready"):
+            return service
+        return LocalRuntimeService(self.services.settings)
 
     def _local_llm_diagnostics(self) -> LocalLLMDiagnostics:
         if self._local_llm_diagnostics_cache is not None:
@@ -330,7 +344,7 @@ class SettingsBridge(QObject):
         if diagnostics.ready:
             return "Локально готово"
         if mode == "private":
-            return "Нужна локальная модель"
+            return "Локальный режим не установлен"
         return "Работает через облако"
 
     @Property(str, notify=localLlmBackendChanged)
@@ -373,6 +387,46 @@ class SettingsBridge(QObject):
     @Property(str, notify=localReadinessChanged)
     def localReadiness(self) -> str:
         return self._local_llm_diagnostics().user_status
+
+    @Property(bool, notify=localReadinessChanged)
+    def localLlmReady(self) -> bool:
+        return bool(self._local_llm_diagnostics().ready)
+
+    @Property(bool, notify=localRuntimeBusyChanged)
+    def localRuntimeBusy(self) -> bool:
+        return self._local_runtime_busy
+
+    @Property(str, notify=localReadinessChanged)
+    def localRuntimeActionText(self) -> str:
+        if self.localLlmReady:
+            return ""
+        if self._local_runtime_busy:
+            return "Подготавливаю локальный режим..."
+        if self._local_runtime_status_code == "installer_started":
+            return "Продолжить подготовку"
+        if self._local_runtime_status_code == "model_pull_failed":
+            return "Повторить подготовку"
+        return "Подготовить локальный режим"
+
+    @Property(bool, notify=localReadinessChanged)
+    def localRuntimeActionVisible(self) -> bool:
+        return os.name == "nt" and not self.localLlmReady
+
+    @Property(str, notify=localReadinessChanged)
+    def localRuntimeStatus(self) -> str:
+        if self._local_runtime_busy:
+            return "Скачиваю и настраиваю локальный режим. Это может занять несколько минут."
+        if self.localLlmReady:
+            return "Локальный режим готов."
+        if self._local_runtime_status_code == "installer_started":
+            return "Запущен установщик локального движка. После завершения нажмите ещё раз."
+        if self._local_runtime_status_code == "model_pull_failed":
+            return "Не удалось догрузить локальную модель. Попробуйте ещё раз."
+        if self._local_runtime_status_code == "runtime_failed":
+            return "Не удалось подготовить локальный режим. Попробуйте ещё раз."
+        if self.assistantMode == "private":
+            return "Для приватного режима нужен локальный пакет. Его можно подготовить одной кнопкой."
+        return ""
 
     @Property(str, notify=textBackendOverrideChanged)
     def textBackendOverride(self) -> str:
@@ -713,6 +767,40 @@ class SettingsBridge(QObject):
         self.connectionFeedbackChanged.emit()
         return True
 
+    @Slot(result=bool)
+    def installLocalRuntime(self) -> bool:
+        with self._operation_lock:
+            if self._local_runtime_busy:
+                return False
+            self._local_runtime_busy = True
+        self._local_runtime_feedback = "Готовлю локальную модель..."
+        self.localRuntimeBusyChanged.emit()
+        self.localReadinessChanged.emit()
+
+        def worker() -> None:
+            ok = False
+            status_code = "runtime_failed"
+            message = "Не удалось подготовить локальный runtime."
+            try:
+                result = self._local_runtime_service().ensure_ready(self.localLlmModel)
+                ok = bool(getattr(result, "ok", False))
+                status_code = str(getattr(result, "status_code", "") or "runtime_finished")
+                message = str(getattr(result, "message", "") or message)
+            except Exception as exc:  # noqa: BLE001
+                message = str(exc) or message
+            self._localRuntimeFinished.emit(ok, status_code, message)
+
+        try:
+            self._worker_pool.submit(worker)
+        except RuntimeError:
+            with self._operation_lock:
+                self._local_runtime_busy = False
+            self._local_runtime_feedback = "Не удалось запустить подготовку локальной модели."
+            self.localRuntimeBusyChanged.emit()
+            self.localReadinessChanged.emit()
+            return False
+        return True
+
     @Slot()
     def clearTelegramConnection(self) -> None:
         registration = self._registration()
@@ -964,3 +1052,17 @@ class SettingsBridge(QObject):
         self.updateCheckBusyChanged.emit()
         self._refresh_update_snapshot()
         self.updateSummaryChanged.emit()
+
+    @Slot(bool, str, str)
+    def _on_local_runtime_finished(self, _ok: bool, status_code: str, feedback: str) -> None:
+        with self._operation_lock:
+            self._local_runtime_busy = False
+        self._local_runtime_status_code = str(status_code or "").strip()
+        self._local_runtime_feedback = str(feedback or "").strip()
+        self._local_llm_diagnostics_cache = self._load_local_llm_diagnostics()
+        self.localRuntimeBusyChanged.emit()
+        self.localLlmBackendChanged.emit()
+        self.localLlmModelChanged.emit()
+        self.localReadinessChanged.emit()
+        self.assistantModeSummaryChanged.emit()
+        self.assistantUserStatusChanged.emit()

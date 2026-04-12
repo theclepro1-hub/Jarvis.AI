@@ -14,6 +14,7 @@ from core.settings.settings_store import SettingsStore
 if TYPE_CHECKING:
     from core.actions.action_registry import ActionRegistry
     from core.ai.ai_service import AIService
+    from core.ai.local_runtime_service import LocalRuntimeService
     from core.pc_control.service import PcControlService
     from core.registration.registration_service import RegistrationService
     from core.reminders.reminder_service import ReminderService
@@ -29,6 +30,7 @@ ActionRegistry = None
 BatchRouter = None
 CommandRouter = None
 HttpTelegramTransport = None
+LocalRuntimeService = None
 PcControlService = None
 RegistrationService = None
 ReminderService = None
@@ -87,6 +89,7 @@ class ServiceContainer:
         self._wake = None
         self._updates = None
         self._ai = None
+        self._local_runtime = None
         self._actions = None
         self._batch_router = None
         self._pc_control = None
@@ -121,6 +124,21 @@ class ServiceContainer:
                         ai_service_cls = _AIService
                     self._ai = ai_service_cls(self.settings)
         return self._ai
+
+    @property
+    def local_runtime(self) -> LocalRuntimeService:
+        if self._local_runtime is None:
+            with self._ensure_lazy_lock():
+                if self._local_runtime is None:
+                    _boot_log("services:lazy:local-runtime")
+                    local_runtime_cls = LocalRuntimeService
+                    if local_runtime_cls is None:
+                        from core.ai.local_runtime_service import LocalRuntimeService as _LocalRuntimeService
+
+                        globals()["LocalRuntimeService"] = _LocalRuntimeService
+                        local_runtime_cls = _LocalRuntimeService
+                    self._local_runtime = local_runtime_cls(self.settings)
+        return self._local_runtime
 
     @property
     def actions(self) -> ActionRegistry:

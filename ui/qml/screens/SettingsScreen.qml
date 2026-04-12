@@ -208,6 +208,32 @@ Rectangle {
                     font.pixelSize: Theme.Typography.small
                     wrapMode: Text.WordWrap
                 }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: settingsBridge.assistantMode === "private" && settingsBridge.localRuntimeActionVisible
+                    spacing: 10
+
+                    PrimaryButton {
+                        objectName: "assistantInstallLocalRuntimeButton"
+                        text: settingsBridge.localRuntimeActionText
+                        enabled: !settingsBridge.localRuntimeBusy
+                        onClicked: settingsBridge.installLocalRuntime()
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
+                Text {
+                    objectName: "assistantLocalRuntimeStatus"
+                    Layout.fillWidth: true
+                    visible: settingsBridge.assistantMode === "private" && settingsBridge.localRuntimeStatus.length > 0
+                    text: settingsBridge.localRuntimeStatus
+                    color: Theme.Colors.textSoft
+                    font.family: Theme.Typography.bodyFamily
+                    font.pixelSize: Theme.Typography.small
+                    wrapMode: Text.WordWrap
+                }
             }
 
             SettingsSection {
