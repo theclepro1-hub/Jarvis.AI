@@ -58,6 +58,7 @@ class SettingsBridge(QObject):
         self.app_bridge = app_bridge
         self.chat_bridge = chat_bridge
         self._connection_feedback = ""
+        self._data_safety_feedback = ""
         self._telegram_test_busy = False
         self._update_check_busy = False
         self._local_runtime_busy = False
@@ -698,6 +699,10 @@ class SettingsBridge(QObject):
     def connectionFeedback(self) -> str:
         return self._connection_feedback
 
+    @Property(str, notify=dataSafetyChanged)
+    def dataSafetyFeedback(self) -> str:
+        return self._data_safety_feedback
+
     @Property(bool, notify=telegramTestBusyChanged)
     def telegramTestBusy(self) -> bool:
         return self._telegram_test_busy
@@ -975,13 +980,31 @@ class SettingsBridge(QObject):
             self.services.chat_history.clear()
         if self.chat_bridge is not None and hasattr(self.chat_bridge, "clearHistory"):
             self.chat_bridge.clearHistory()
+        self._data_safety_feedback = "История чата очищена."
         self.dataSafetyChanged.emit()
 
     @Slot()
     def deleteAllData(self) -> dict[str, object]:
-        with _SETTINGS_WRITE_LOCK:
-            result = self.services.settings.clear_runtime_data()
-            self.services.settings.reload()
+        try:
+            prepare_reset = getattr(self.services, "prepare_for_data_reset", None)
+            if callable(prepare_reset):
+                prepare_reset()
+            with _SETTINGS_WRITE_LOCK:
+                result = self.services.settings.clear_runtime_data()
+                self.services.settings.reload()
+        except Exception as exc:  # noqa: BLE001
+            result = {
+                "ok": False,
+                "restart_required": True,
+                "registration_required": True,
+                "error": str(exc),
+            }
+            self._data_safety_feedback = "Не удалось удалить все данные. Закройте активные процессы и попробуйте еще раз."
+            self._connection_feedback = self._data_safety_feedback
+            self.connectionFeedbackChanged.emit()
+            self.telegramStatusChanged.emit()
+            self.dataSafetyChanged.emit()
+            return result
         if hasattr(self.services, "actions"):
             self.services.actions.catalog = self.services.actions._merged_catalog()
         if hasattr(self.services, "chat_history"):
@@ -996,6 +1019,8 @@ class SettingsBridge(QObject):
         self._local_runtime_feedback = ""
         self._refresh_local_llm_diagnostics()
         self._refresh_update_snapshot()
+        if result.get("ok", True):
+            self._data_safety_feedback = "Все данные удалены. Нужна повторная регистрация."
         self._connection_feedback = "Все данные удалены. Нужна повторная регистрация."
         self.themeModeChanged.emit()
         self.startupEnabledChanged.emit()
@@ -1113,6 +1138,8 @@ class SettingsBridge(QObject):
     @Slot()
     def requestLocalDiagnostics(self) -> None:
         if self._shutting_down:
+            return
+        if self._local_llm_diagnostics_requested and self._local_llm_diagnostics_loaded and not self._local_runtime_busy:
             return
         self._local_llm_diagnostics_requested = True
         self._refresh_local_llm_diagnostics()

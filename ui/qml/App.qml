@@ -56,7 +56,7 @@ ApplicationWindow {
         switch (appBridge.currentScreen) {
         case "registration":
             return settingsBridge.assistantMode === "private"
-                   ? "Сначала подключите Telegram. Локальный режим можно подготовить позже одной кнопкой."
+                   ? "Сначала подключите Telegram. Локальный режим можно подготовить позже одной кнопкой в настройках."
                    : "Сначала подключите Groq и Telegram. Режим выбирается в конце формы."
         case "voice":
             return "Настройте микрофон, слово активации и проверку понимания."

@@ -293,6 +293,41 @@ class ServiceContainer:
         telegram.transport = self._create_telegram_transport()
         telegram.load_offset()
 
+    def prepare_for_data_reset(self) -> None:
+        wake = getattr(self, "_wake", None)
+        if wake is not None and hasattr(wake, "stop"):
+            try:
+                wake.stop()
+            except Exception:
+                pass
+
+        voice = getattr(self, "_voice", None)
+        if voice is not None:
+            if hasattr(voice, "stop_manual_capture"):
+                try:
+                    voice.stop_manual_capture()
+                except Exception:
+                    pass
+            if hasattr(voice, "cancel_active_pipeline"):
+                try:
+                    voice.cancel_active_pipeline()
+                except Exception:
+                    pass
+
+        telegram = getattr(self, "_telegram", None)
+        if telegram is not None and hasattr(telegram, "pause_for_reset"):
+            try:
+                telegram.pause_for_reset()
+            except Exception:
+                pass
+
+        local_runtime = getattr(self, "_local_runtime", None)
+        if local_runtime is not None and hasattr(local_runtime, "shutdown"):
+            try:
+                local_runtime.shutdown()
+            except Exception:
+                pass
+
     def _create_telegram_transport(self) -> HttpTelegramTransport | None:
         registration = self.settings.get_registration()
         token = str(registration.get("telegram_bot_token", "")).strip()

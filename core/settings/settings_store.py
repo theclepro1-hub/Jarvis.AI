@@ -169,6 +169,7 @@ class SettingsStore:
 
         resolved_base_dir.mkdir(parents=True, exist_ok=True)
         return {
+            "ok": True,
             "base_dir": str(resolved_base_dir),
             "deleted_files": deleted_files,
             "deleted_dirs": deleted_dirs,
@@ -293,17 +294,49 @@ class SettingsStore:
         if resolved_entry.is_dir():
             for child in sorted(resolved_entry.iterdir(), key=lambda path: path.name):
                 deleted_files, deleted_dirs = self._delete_entry(child, deleted_files, deleted_dirs)
-            shutil.rmtree(resolved_entry, ignore_errors=False)
+            self._rmtree_with_retry(resolved_entry)
             return deleted_files, deleted_dirs + 1
 
-        resolved_entry.unlink(missing_ok=True)
+        self._unlink_with_retry(resolved_entry)
         return deleted_files + 1, deleted_dirs
 
+    def _unlink_with_retry(self, target: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:
+        last_error: Exception | None = None
+        for attempt in range(max(1, attempts)):
+            try:
+                target.unlink(missing_ok=True)
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError as exc:
+                last_error = exc
+                if getattr(exc, "winerror", None) != 32 or attempt + 1 >= attempts:
+                    raise
+                time.sleep(delay_seconds * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+
+    def _rmtree_with_retry(self, target: Path, attempts: int = 10, delay_seconds: float = 0.05) -> None:
+        last_error: Exception | None = None
+        for attempt in range(max(1, attempts)):
+            try:
+                shutil.rmtree(target, ignore_errors=False)
+                return
+            except FileNotFoundError:
+                return
+            except PermissionError as exc:
+                last_error = exc
+                if getattr(exc, "winerror", None) != 32 or attempt + 1 >= attempts:
+                    raise
+                time.sleep(delay_seconds * (attempt + 1))
+        if last_error is not None:
+            raise last_error
+
     def _is_safe_runtime_dir(self, resolved_path: Path) -> bool:
-        if resolved_path.name != "JarvisAi_Unity":
-            return False
         if os.environ.get("JARVIS_UNITY_DATA_DIR"):
             return True
+        if resolved_path.name != "JarvisAi_Unity":
+            return False
         appdata = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
         if not appdata:
             return False

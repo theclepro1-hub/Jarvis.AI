@@ -556,12 +556,14 @@ class VoiceService:
         return self.audio_devices.normalize_output_selection(value)
 
     def _wake_capture_tuning(self) -> tuple[float, float, float, float]:
-        mode = str(self.settings.get("voice_mode", "balance")).strip().casefold()
+        mode = resolve_assistant_mode(self.settings)
         command_style = str(self.settings.get("command_style", "one_shot")).strip().casefold()
-        if mode == "quality":
+        if mode == "smart":
             max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 5.0, 0.55, 145.0, 0.4
         elif mode == "private":
             max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.0, 0.45, 150.0, 0.3
+        elif mode == "fast":
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.0, 0.32, 170.0, 0.22
         else:
             max_seconds, silence_seconds, energy_threshold, pre_roll_grace = (
                 self.WAKE_MAX_SECONDS,

@@ -186,6 +186,8 @@ def test_voice_bridge_preserves_recognized_text_when_wake_hint_is_active():
     bridge._deliver_transcribed_text("Джарвис, открой ютуб")  # noqa: SLF001
 
     assert chat_bridge.received == ["Джарвис, открой ютуб"]
+    assert bridge.wakeHint == "Джарвис услышан. Подхватываю команду..."
+    bridge._finalize_capture()  # noqa: SLF001
     assert bridge.wakeHint == ""
 
 
@@ -201,17 +203,13 @@ def test_voice_bridge_preserves_failure_note_through_finalize():
     assert bridge.recordingHint == "Не расслышал команду после слова активации."
 
 
-def test_voice_bridge_keeps_wake_hint_until_explicit_clear():
+def test_voice_bridge_clears_wake_hint_when_capture_finishes():
     services = _Services()
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
 
     bridge._wake_hint = "Услышал «Джарвис». Подхватываю начало команды..."  # noqa: SLF001
     bridge._finalize_capture()  # noqa: SLF001
-
-    assert bridge.wakeHint == "Услышал «Джарвис». Подхватываю начало команды..."
-
-    bridge.clearWakeHint()
 
     assert bridge.wakeHint == ""
 
@@ -238,6 +236,30 @@ def test_voice_bridge_marks_wake_command_as_recognizing_before_handoff():
     assert services.voice.handoff_calls == 1
     assert chat_bridge.received == ["открой параметры"]
     assert state.status == "Готов"
+
+
+def test_voice_bridge_treats_wake_capture_as_active_recording_until_finalize():
+    services = _Services()
+    chat_bridge = _ChatBridge()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=chat_bridge)
+
+    class _WakeResult:
+        ok = True
+        text = "открой ютуб"
+
+    services.voice.capture_after_wake_result = lambda _pre_roll: _WakeResult()  # noqa: E731
+
+    bridge._handle_wake_detected(b"wake")  # noqa: SLF001
+
+    assert bridge.isRecording is True
+    assert "Джарвис" in bridge.recordingHint
+
+    bridge._finish_after_wake(b"wake")  # noqa: SLF001
+
+    assert bridge.isRecording is False
+    assert bridge.recordingHint == "Ручной микрофон готов."
+    assert chat_bridge.received == ["открой ютуб"]
 
 
 def test_voice_bridge_runtime_status_keeps_command_backend_and_exposes_wake_model():

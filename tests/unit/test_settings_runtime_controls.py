@@ -25,6 +25,7 @@ class InMemoryStore:
 class FakeTelegram:
     def __init__(self) -> None:
         self.refreshes = 0
+        self.paused = 0
 
     def is_configured(self) -> bool:
         return True
@@ -32,6 +33,9 @@ class FakeTelegram:
     def refresh_configuration(self) -> bool:
         self.refreshes += 1
         return True
+
+    def pause_for_reset(self) -> None:
+        self.paused += 1
 
 
 class FakeChatBridge:
@@ -81,20 +85,63 @@ def test_settings_bridge_can_clear_chat_and_wipe_runtime_state(monkeypatch, tmp_
     chat_bridge = FakeChatBridge()
     telegram = FakeTelegram()
     actions = ActionRegistry(service)
-    services = SimpleNamespace(settings=service, telegram=telegram, chat_history=FakeChatHistory(), actions=actions)
-    bridge = SettingsBridge(state=SimpleNamespace(), services=services, app_bridge=SimpleNamespace(restartRegistration=lambda: None), chat_bridge=chat_bridge)
+    prepare_calls = []
+    services = SimpleNamespace(
+        settings=service,
+        telegram=telegram,
+        chat_history=FakeChatHistory(),
+        actions=actions,
+        prepare_for_data_reset=lambda: prepare_calls.append("prepared"),
+    )
+    bridge = SettingsBridge(
+        state=SimpleNamespace(),
+        services=services,
+        app_bridge=SimpleNamespace(restartRegistration=lambda: None),
+        chat_bridge=chat_bridge,
+    )
 
     bridge.clearChatHistory()
     assert chat_bridge.clear_calls == 1
 
     result = bridge.deleteAllData()
 
+    assert prepare_calls == ["prepared"]
     assert result["restart_required"] is True
     assert result["registration_required"] is True
     assert service.get_pinned_commands() == []
     assert service.save_history_enabled() is True
     assert chat_bridge.clear_calls >= 2
     assert services.chat_history.cleared >= 1
+
+
+def test_settings_bridge_delete_all_data_failure_does_not_fake_success() -> None:
+    _ensure_app()
+    service = SettingsService(InMemoryStore())
+    actions = ActionRegistry(service)
+    chat_bridge = FakeChatBridge()
+    telegram = FakeTelegram()
+    restart_calls = []
+
+    service.clear_runtime_data = lambda: (_ for _ in ()).throw(PermissionError("busy"))  # type: ignore[method-assign]
+    services = SimpleNamespace(
+        settings=service,
+        telegram=telegram,
+        chat_history=FakeChatHistory(),
+        actions=actions,
+        prepare_for_data_reset=lambda: None,
+    )
+    bridge = SettingsBridge(
+        state=SimpleNamespace(),
+        services=services,
+        app_bridge=SimpleNamespace(restartRegistration=lambda: restart_calls.append("restart")),
+        chat_bridge=chat_bridge,
+    )
+
+    result = bridge.deleteAllData()
+
+    assert result["ok"] is False
+    assert restart_calls == []
+    assert "Не удалось удалить все данные" in bridge.connectionFeedback
 
 
 def test_settings_bridge_pins_and_unpins_commands() -> None:

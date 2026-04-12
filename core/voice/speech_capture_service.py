@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
@@ -19,6 +20,12 @@ class CaptureConfig:
     silence_seconds: float = 0.9
     energy_threshold: float = 160.0
     pre_roll_grace_seconds: float = 0.0
+    min_start_frames: int = 2
+    noise_floor_frames: int = 6
+    noise_margin: float = 28.0
+    noise_ratio: float = 1.18
+    max_adaptive_threshold: float = 270.0
+    end_threshold_ratio: float = 0.72
 
 
 class SpeechCaptureService:
@@ -38,11 +45,15 @@ class SpeechCaptureService:
 
     def capture_until_silence(self, pre_roll: bytes = b"") -> SpeechCaptureResult:
         chunks: list[bytes] = [pre_roll] if pre_roll else []
-        speech_started = bool(pre_roll and self._chunk_energy(pre_roll) > self._config.energy_threshold)
+        speech_started = bool(pre_roll)
         silence_for = 0.0
         frame_seconds = self._config.block_frames / self._config.sample_rate
         grace_for = self._config.pre_roll_grace_seconds if pre_roll else 0.0
         max_iterations = int(self._config.max_seconds * self._config.sample_rate / self._config.block_frames)
+        start_threshold = self._config.energy_threshold
+        end_threshold = self._end_threshold(start_threshold)
+        speech_frames = 0
+        noise_floor: deque[float] = deque(maxlen=max(1, self._config.noise_floor_frames))
 
         try:
             with sd.RawInputStream(
@@ -51,7 +62,6 @@ class SpeechCaptureService:
                 dtype="int16",
                 device=self._resolve_input_device(),
                 blocksize=self._config.block_frames,
-                latency="low",
             ) as stream:
                 for _ in range(max_iterations):
                     if self._stop_event.is_set():
@@ -67,8 +77,19 @@ class SpeechCaptureService:
                     chunks.append(raw)
 
                     energy = self._chunk_energy(raw)
-                    if energy > self._config.energy_threshold:
-                        speech_started = True
+                    if not speech_started:
+                        if energy >= start_threshold:
+                            speech_frames += 1
+                            if speech_frames >= max(1, self._config.min_start_frames):
+                                speech_started = True
+                                silence_for = 0.0
+                                grace_for = 0.0
+                        else:
+                            speech_frames = 0
+                            noise_floor.append(energy)
+                            start_threshold = self._adaptive_threshold(noise_floor)
+                            end_threshold = self._end_threshold(start_threshold)
+                    elif energy > end_threshold:
                         silence_for = 0.0
                         grace_for = 0.0
                     elif speech_started:
@@ -103,3 +124,20 @@ class SpeechCaptureService:
         if samples.size == 0:
             return 0.0
         return float(np.sqrt(np.mean(samples * samples)))
+
+    def _adaptive_threshold(self, noise_floor: deque[float]) -> float:
+        if not noise_floor:
+            return self._config.energy_threshold
+        ambient = float(np.percentile(np.asarray(noise_floor, dtype=np.float32), 75))
+        adaptive = max(
+            self._config.energy_threshold,
+            ambient + self._config.noise_margin,
+            ambient * self._config.noise_ratio,
+        )
+        return min(self._config.max_adaptive_threshold, adaptive)
+
+    def _end_threshold(self, start_threshold: float) -> float:
+        return max(
+            self._config.energy_threshold * self._config.end_threshold_ratio,
+            start_threshold * self._config.end_threshold_ratio,
+        )

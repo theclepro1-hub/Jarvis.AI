@@ -59,6 +59,7 @@ class AppBridge(QObject):
         if self.state.registrationRequired and screen not in {"registration", "settings"}:
             return
         self.state.currentScreen = screen
+        self.currentScreenChanged.emit()
 
     @Slot()
     def openSettings(self) -> None:
@@ -68,8 +69,12 @@ class AppBridge(QObject):
     def finishRegistration(self) -> None:
         self.state.registrationRequired = False
         self.state.currentScreen = "chat"
+        self.registrationRequiredChanged.emit()
+        self.currentScreenChanged.emit()
 
     @Slot()
     def restartRegistration(self) -> None:
         self.state.registrationRequired = True
         self.state.currentScreen = "registration"
+        self.registrationRequiredChanged.emit()
+        self.currentScreenChanged.emit()

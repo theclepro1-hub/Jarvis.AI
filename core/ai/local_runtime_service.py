@@ -110,6 +110,22 @@ class LocalRuntimeService:
                 action_required=True,
             )
 
+    def shutdown(self) -> None:
+        with self._lock:
+            process = self._portable_process
+            self._portable_process = None
+        if process is None or process.poll() is not None:
+            return
+        try:
+            process.terminate()
+            process.wait(timeout=5.0)
+        except Exception:  # noqa: BLE001
+            try:
+                process.kill()
+                process.wait(timeout=2.0)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _persist_ready_runtime(self, model_name: str) -> None:
         self.settings.bulk_update(
             {

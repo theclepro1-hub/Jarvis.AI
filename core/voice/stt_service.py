@@ -366,11 +366,14 @@ class STTService:
             segments, _info = model.transcribe(
                 str(temp_path),
                 language="ru",
-                beam_size=1,
-                best_of=1,
+                beam_size=2,
+                best_of=2,
                 temperature=0.0,
                 vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 180},
+                vad_parameters={
+                    "min_silence_duration_ms": 320,
+                    "speech_pad_ms": 160,
+                },
                 condition_on_previous_text=False,
                 initial_prompt=COMMAND_PROMPT,
             )
@@ -557,14 +560,7 @@ class STTService:
         override = str(self.settings.get("stt_backend_override", "auto")).strip().casefold()
         if override in {"groq_whisper", "local_faster_whisper", "local_vosk"}:
             return (override,)
-        route = self._assistant_policy().stt_route
-        legacy_voice_mode = str(self.settings.get("voice_mode", "balance")).strip().casefold()
-        if legacy_voice_mode == "balance":
-            local_route = tuple(step for step in route if step in {"local_faster_whisper", "local_vosk"})
-            cloud_route = tuple(step for step in route if step == "groq_whisper")
-            if "local_vosk" in local_route:
-                return ("local_vosk",) + tuple(step for step in local_route if step != "local_vosk") + cloud_route
-        return route
+        return self._assistant_policy().stt_route
 
     def _backend_available(self, backend: str) -> bool:
         if backend == "groq_whisper":

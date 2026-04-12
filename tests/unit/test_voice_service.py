@@ -402,3 +402,20 @@ def test_capture_after_wake_can_be_cancelled_during_transcription(monkeypatch):
     assert worker.is_alive() is False
     assert result.status == "cancelled"
     assert voice.runtime_status()["wakeWord"] == "Запись остановлена."
+
+
+def test_wake_capture_tuning_follows_assistant_mode() -> None:
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    settings.set("assistant_mode", "fast")
+    fast = voice._wake_capture_tuning()  # noqa: SLF001
+
+    settings.set("assistant_mode", "smart")
+    smart = voice._wake_capture_tuning()  # noqa: SLF001
+
+    settings.set("assistant_mode", "private")
+    private = voice._wake_capture_tuning()  # noqa: SLF001
+
+    assert fast[2] > smart[2]
+    assert private[0] < smart[0]

@@ -48,6 +48,16 @@ NOISY_VOLUME_REPLACEMENTS = (
     ("потише", "тише"),
     ("по тише", "тише"),
 )
+NOISY_OPEN_REPLACEMENTS = (
+    ("сотру", "открой"),
+    ("сорту", "открой"),
+    ("сокрыт", "открой"),
+    ("сокрой", "открой"),
+    ("сокрои", "открой"),
+)
+COMMON_TARGET_REPLACEMENTS = {
+    "ютуб": {"ютюб", "юту", "ютаб", "утуб", "тупо"},
+}
 
 
 @dataclass(slots=True)
@@ -76,9 +86,22 @@ class VoiceCommandPostProcessor:
 
     def _normalize_noisy_transcript(self, text: str) -> str:
         normalized = strip_leading_command_fillers(text)
+        normalized = self._normalize_open_mishear(normalized)
         normalized = self._normalize_volume_inflections(normalized)
         normalized = self._normalize_open_prefix_fragment(normalized)
+        normalized = self._normalize_common_target_aliases(normalized)
         return normalized
+
+    def _normalize_open_mishear(self, text: str) -> str:
+        parts = text.split(" ", 1)
+        if not parts:
+            return text
+        first = parts[0].casefold()
+        for source, target in NOISY_OPEN_REPLACEMENTS:
+            if first == source:
+                tail = f" {parts[1]}" if len(parts) > 1 and parts[1] else ""
+                return f"{target}{tail}"
+        return text
 
     def _normalize_volume_inflections(self, text: str) -> str:
         normalized = text
@@ -96,6 +119,18 @@ class VoiceCommandPostProcessor:
         if first in NOISY_OPEN_PREFIXES:
             parts[0] = "открой"
             return " ".join(parts)
+        return text
+
+    def _normalize_common_target_aliases(self, text: str) -> str:
+        parts = text.split(" ", 1)
+        if len(parts) < 2:
+            return text
+        if parts[0].casefold() not in OPEN_VERBS:
+            return text
+        tail = normalize_text(parts[1]).casefold()
+        for canonical, aliases in COMMON_TARGET_REPLACEMENTS.items():
+            if tail in aliases:
+                return f"{parts[0]} {canonical}"
         return text
 
     def _normalize_open_multi_target(self, text: str) -> str:

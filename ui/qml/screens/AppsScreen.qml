@@ -96,7 +96,7 @@ Rectangle {
     function categoryIntro(category) {
         switch (category) {
         case "music":
-            return "Что откроется по команде «включи музыку». Галочка справа задаёт основное приложение."
+            return "Команда «включи музыку». Галочка справа задаёт основное приложение."
         case "steam":
             return "Игры и ярлыки Steam."
         case "launcher":
@@ -106,7 +106,7 @@ Rectangle {
         case "app":
             return "Остальные приложения и команды."
         default:
-            return "Что откроется по команде «включи музыку». Галочка справа задаёт основное приложение."
+            return "Команда «включи музыку». Галочка справа задаёт основное приложение."
         }
     }
 
@@ -276,21 +276,21 @@ Rectangle {
 
         ColumnLayout {
             width: appsScroll.availableWidth
-            spacing: 14
+            spacing: 12
 
             Rectangle {
                 Layout.fillWidth: true
                 color: "#0d1522"
-                radius: 24
+                radius: 22
                 border.color: Theme.Colors.border
                 border.width: 1
-                implicitHeight: addColumn.implicitHeight + 24
+                implicitHeight: addColumn.implicitHeight + 20
 
                 ColumnLayout {
                     id: addColumn
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 10
+                    anchors.margins: 12
+                    spacing: 8
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -309,7 +309,7 @@ Rectangle {
                             }
 
                             Text {
-                                text: "Сначала найдите автоматически или выберите файл. Ручной ввод нужен только для ссылок и редких команд."
+                                text: "Сначала найдите автоматически или выберите файл. Ручной ввод — для ссылок и редких команд."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily
                                 font.pixelSize: Theme.Typography.small
@@ -321,6 +321,7 @@ Rectangle {
                         SecondaryButton {
                             objectName: "appsAutoScanButton"
                             text: "Найти автоматически"
+                            compact: true
                             enabled: !root.scanCoolingDown
                             onClicked: {
                                 root.scanCoolingDown = true
@@ -329,20 +330,22 @@ Rectangle {
                             }
                         }
 
-                    SecondaryButton {
-                        objectName: "customAppManualButton"
-                        text: root.manualFormOpen ? "Скрыть ручной ввод" : "Добавить вручную"
-                        onClicked: root.manualFormOpen = !root.manualFormOpen
-                    }
-
-                    SecondaryButton {
-                        objectName: "customAppChooseFileButton"
-                        text: "Выбрать файл..."
-                        onClicked: {
-                            root.manualFormOpen = true
-                            appFileDialog.open()
+                        SecondaryButton {
+                            objectName: "customAppManualButton"
+                            text: root.manualFormOpen ? "Скрыть ручной ввод" : "Добавить вручную"
+                            compact: true
+                            onClicked: root.manualFormOpen = !root.manualFormOpen
                         }
-                    }
+
+                        SecondaryButton {
+                            objectName: "customAppChooseFileButton"
+                            text: "Выбрать файл..."
+                            compact: true
+                            onClicked: {
+                                root.manualFormOpen = true
+                                appFileDialog.open()
+                            }
+                        }
 
                 }
 
@@ -418,16 +421,16 @@ Rectangle {
                 visible: appsBridge.discovered.length > 0
                 Layout.fillWidth: true
                 color: Theme.Colors.card
-                radius: 22
+                radius: 20
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
-                implicitHeight: discoveredColumn.implicitHeight + 28
+                implicitHeight: discoveredColumn.implicitHeight + 24
 
                 ColumnLayout {
                     id: discoveredColumn
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 10
+                    anchors.margins: 12
+                    spacing: 8
 
                     Text {
                         text: "Найдено автоматически"
@@ -501,16 +504,16 @@ Rectangle {
             Rectangle {
                 Layout.fillWidth: true
                 color: Theme.Colors.card
-                radius: 22
+                radius: 20
                 border.color: Theme.Colors.borderSoft
                 border.width: 1
-                implicitHeight: categoryColumn.implicitHeight + 28
+                implicitHeight: categoryColumn.implicitHeight + 24
 
                 ColumnLayout {
                     id: categoryColumn
                     anchors.fill: parent
-                    anchors.margins: 14
-                    spacing: 12
+                    anchors.margins: 12
+                    spacing: 10
 
                     Text {
                         text: "Категории"
@@ -522,7 +525,7 @@ Rectangle {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 8
+                        spacing: 6
 
                         Repeater {
                             model: categoryTabs()
@@ -534,7 +537,7 @@ Rectangle {
                                 kind: root.selectedCategory === modelData.id ? "primary" : "nav"
                                 selected: root.selectedCategory === modelData.id
                                 compact: true
-                                Layout.preferredWidth: Math.min(220, Math.max(100, implicitWidth))
+                                Layout.preferredWidth: Math.min(200, Math.max(96, implicitWidth))
                                 onClicked: root.selectedCategory = modelData.id
                             }
                         }
@@ -575,16 +578,16 @@ Rectangle {
                             required property var modelData
                             Layout.fillWidth: true
                             color: Theme.Colors.cardAlt
-                            radius: 22
+                            radius: 20
                             border.color: Theme.Colors.borderSoft
                             border.width: 1
-                            implicitHeight: row.implicitHeight + 24
+                            implicitHeight: row.implicitHeight + 20
 
                             RowLayout {
                                 id: row
                                 anchors.fill: parent
-                                anchors.margins: 14
-                                spacing: 14
+                                anchors.margins: 12
+                                spacing: 12
 
                                 Rectangle {
                                     visible: appCard.modelData.category === "music"

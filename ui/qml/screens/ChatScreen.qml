@@ -13,13 +13,13 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 14
+        spacing: 12
 
         Rectangle {
             objectName: "chatQueueCard"
             visible: chatBridge.queueItems.length > 0 || chatBridge.thinking
             Layout.fillWidth: true
-            implicitHeight: visible ? queueColumn.implicitHeight + 24 : 0
+            implicitHeight: visible ? queueColumn.implicitHeight + 20 : 0
             color: "#0d1522"
             radius: 24
             border.color: Qt.rgba(0.41, 0.94, 0.82, 0.22)
@@ -28,8 +28,8 @@ Rectangle {
             ColumnLayout {
                 id: queueColumn
                 anchors.fill: parent
-                anchors.margins: 14
-                spacing: 8
+                anchors.margins: 12
+                spacing: 6
 
                 Text {
                     text: "Очередь выполнения"
@@ -78,7 +78,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: 8
 
             QuickActionStrip {
                 Layout.fillWidth: true
@@ -92,7 +92,7 @@ Rectangle {
                 objectName: "clearChatButton"
                 text: "Очистить чат"
                 compact: true
-                Layout.preferredWidth: 150
+                Layout.preferredWidth: 140
                 enabled: !chatBridge.thinking
                 onClicked: chatBridge.clearHistory()
             }
@@ -102,7 +102,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: "#0b111c"
-            radius: 28
+            radius: 26
             border.color: Theme.Colors.borderSoft
             border.width: 1
             clip: true
@@ -141,8 +141,8 @@ Rectangle {
                 }
 
                 anchors.fill: parent
-                anchors.margins: 18
-                spacing: 16
+                anchors.margins: 14
+                spacing: 12
                 clip: true
                 model: chatBridge.messages
                 orientation: ListView.Vertical
@@ -218,13 +218,13 @@ Rectangle {
 
                     Rectangle {
                         id: bubble
-                        width: Math.max(260, Math.min(listView.width * 0.72, Math.min(640, listView.width - 28)))
-                        implicitHeight: bubbleColumn.implicitHeight + 32
+                        width: Math.max(240, Math.min(listView.width * 0.78, Math.min(680, listView.width - 24)))
+                        implicitHeight: bubbleColumn.implicitHeight + 28
                         anchors.right: isUser ? parent.right : undefined
                         anchors.left: isUser ? undefined : parent.left
                         anchors.rightMargin: isUser ? 4 : 0
                         anchors.leftMargin: isUser ? 0 : 4
-                        radius: 22
+                        radius: 20
                         color: isUser ? Qt.rgba(0.21, 0.85, 1.0, 0.16) : Theme.Colors.card
                         border.color: isUser ? Qt.rgba(0.21, 0.85, 1.0, 0.32) : Theme.Colors.border
                         border.width: 1
@@ -232,8 +232,8 @@ Rectangle {
                         ColumnLayout {
                             id: bubbleColumn
                             anchors.fill: parent
-                            anchors.margins: 16
-                            spacing: 10
+                            anchors.margins: 14
+                            spacing: 8
 
                             ColumnLayout {
                                 visible: isExecution
@@ -312,7 +312,7 @@ Rectangle {
         Composer {
             objectName: "chatComposer"
             Layout.fillWidth: true
-            Layout.preferredHeight: 96
+            Layout.preferredHeight: 92
             busy: chatBridge.thinking
             busyHint: chatBridge.thinkingLabel
             wakeHint: voiceBridge.wakeHint

@@ -567,6 +567,17 @@ def test_command_router_strips_short_wake_alias_before_open_command() -> None:
     assert result.execution_result.steps[0].kind == "open_items"
 
 
+def test_command_router_recovers_noisy_wake_command_after_alias() -> None:
+    router, actions, _pc_control = make_router()
+
+    result = router.handle("гарви сокрыт тупо", source="voice")
+
+    assert result.kind == "local"
+    assert actions.opened == ["youtube"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
 def test_command_router_keeps_wake_only_phrase_out_of_ai_path() -> None:
     router, _actions, _pc_control = make_router()
 

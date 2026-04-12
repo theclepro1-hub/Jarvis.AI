@@ -4,11 +4,12 @@ import sys
 import threading
 import time
 import types
+from array import array
 
 from core.settings.settings_service import SettingsService
 from core.voice.faster_whisper_runtime import clear_faster_whisper_model_cache, load_faster_whisper_model
 from core.voice.model_paths import MODEL_DIR_NAME
-from core.voice.speech_capture_service import SpeechCaptureService
+from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
 from core.voice.stt_service import STTService
 from core.voice.tts_service import TTSService
 from core.voice.voice_models import TranscriptionResult
@@ -65,6 +66,105 @@ def test_speech_capture_reports_mic_open_failed(monkeypatch):
 
     assert result.status == "mic_open_failed"
     assert "Не удалось открыть микрофон" in result.detail
+
+
+def test_speech_capture_uses_default_stream_latency(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeStream:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            captured.update(kwargs)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN002, ANN003
+            return False
+
+        def read(self, blocksize):  # noqa: ANN001
+            return b"\x00" * (blocksize * 2), False
+
+    monkeypatch.setattr("core.voice.speech_capture_service.sd.RawInputStream", FakeStream)
+
+    service = SpeechCaptureService(lambda: None, threading.Event())
+    result = service.capture_until_silence()
+
+    assert result.status == "no_speech"
+    assert "latency" not in captured
+
+
+def test_speech_capture_ignores_single_noise_spike_before_speech(monkeypatch):
+    frames = 1600
+
+    def pcm_block(amplitude: int) -> bytes:
+        return array("h", [amplitude] * frames).tobytes()
+
+    blocks = iter(
+        (
+            pcm_block(205),  # short spike
+            pcm_block(0),
+            pcm_block(0),
+            pcm_block(0),
+        )
+    )
+
+    class FakeStream:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN002, ANN003
+            return False
+
+        def read(self, blocksize):  # noqa: ANN001
+            return next(blocks, pcm_block(0)), False
+
+    monkeypatch.setattr("core.voice.speech_capture_service.sd.RawInputStream", FakeStream)
+
+    service = SpeechCaptureService(
+        lambda: None,
+        threading.Event(),
+        config=CaptureConfig(max_seconds=0.4, silence_seconds=0.2, energy_threshold=160.0),
+    )
+    result = service.capture_until_silence()
+
+    assert result.status == "no_speech"
+
+
+def test_speech_capture_treats_wake_pre_roll_as_active_speech(monkeypatch):
+    frames = 1600
+
+    def pcm_block(amplitude: int) -> bytes:
+        return array("h", [amplitude] * frames).tobytes()
+
+    blocks = iter((pcm_block(0), pcm_block(0), pcm_block(0)))
+
+    class FakeStream:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN002, ANN003
+            return False
+
+        def read(self, blocksize):  # noqa: ANN001
+            return next(blocks, pcm_block(0)), False
+
+    monkeypatch.setattr("core.voice.speech_capture_service.sd.RawInputStream", FakeStream)
+
+    service = SpeechCaptureService(
+        lambda: None,
+        threading.Event(),
+        config=CaptureConfig(max_seconds=0.3, silence_seconds=0.1, energy_threshold=160.0, pre_roll_grace_seconds=0.1),
+    )
+    result = service.capture_until_silence(pre_roll=pcm_block(180))
+
+    assert result.status == "ok"
+    assert result.speech_started is True
 
 
 def test_stt_service_reports_missing_model_without_key(tmp_path):
@@ -177,7 +277,7 @@ def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(mo
     assert result.backend_trace == ("local_vosk",)
 
 
-def test_stt_service_balance_mode_prefers_vosk_before_heavier_whisper(tmp_path):
+def test_stt_service_balance_mode_prefers_faster_whisper_before_vosk(tmp_path):
     settings = SettingsService(FakeStore())
     settings.set("stt_engine", "auto")
     settings.set("voice_mode", "balance")
@@ -210,7 +310,8 @@ def test_stt_service_balance_mode_prefers_vosk_before_heavier_whisper(tmp_path):
     result = service.transcribe_pcm_bytes(b"\x00" * 3200)
 
     assert result.ok is True
-    assert order == ["local_vosk"]
+    assert order == ["local_faster_whisper"]
+    assert result.backend_trace == ("local_faster_whisper",)
 
 
 def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeypatch, tmp_path):

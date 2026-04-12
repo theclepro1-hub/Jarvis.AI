@@ -151,6 +151,12 @@ class TelegramService:
             thread_name_prefix="telegram-dispatch",
         )
 
+    def pause_for_reset(self) -> None:
+        with self._state_lock:
+            self._connected = False
+            self._last_error = ""
+        self.transport = None
+
     def telegram_user_id(self) -> str:
         registration = self._registration()
         return str(registration.get("telegram_user_id", "")).strip()

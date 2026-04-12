@@ -24,6 +24,10 @@
 - Nubik снова ведёт себя как навигатор, а не как шум:
   - подсказки остаются короткими;
   - help подхватывается не только по hover, но и по клику на секции и настройки.
+- Wake/voice-контур стал устойчивее к шуму и типовым ослышкам:
+  - захват речи больше не стартует по одиночному шумовому всплеску;
+  - ручной и wake-capture больше не принуждают `latency="low"` в `sounddevice`;
+  - команды после wake теперь восстанавливают типовые формы вроде `сотру ютуб`, `сорту ютуб`, `сокрыт тупо` обратно в локальное открытие `YouTube`.
 
 ## Что осталось внутри, но не навязывается пользователю
 
@@ -35,7 +39,7 @@
 
 - `ruff check .`
 - `python -m compileall -q app core tests tools`
-- `pytest -q` → `318 passed`
+- `pytest -q` → `327 passed`
 - `powershell -ExecutionPolicy Bypass -File .\build\build_release.ps1` → OK
 - packaged portable smoke:
   - `QT_QPA_PLATFORM=offscreen`

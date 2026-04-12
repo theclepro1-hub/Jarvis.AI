@@ -142,9 +142,51 @@ def test_delete_all_data_clears_only_safe_runtime_dir(monkeypatch, tmp_path) -> 
 
     result = store.delete_all_data()
 
+    assert result["ok"] is True
     assert result["restart_required"] is True
     assert result["registration_required"] is True
     assert outside_file.exists()
+    assert store.base_dir.exists()
+    assert list(store.base_dir.iterdir()) == []
+
+
+def test_delete_all_data_retries_transient_locked_files(monkeypatch, tmp_path) -> None:
+    runtime_dir = tmp_path / "JarvisAi_Unity"
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(runtime_dir))
+    store = SettingsStore()
+
+    target = store.base_dir / "chat_history.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("[]", encoding="utf-8")
+
+    attempts = {"count": 0}
+    original_unlink = Path.unlink
+
+    def flaky_unlink(self: Path, *args, **kwargs) -> None:
+        if self == target and attempts["count"] < 2:
+            attempts["count"] += 1
+            error = PermissionError("locked")
+            error.winerror = 32
+            raise error
+        return original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+    result = store.delete_all_data()
+
+    assert result["ok"] is True
+    assert attempts["count"] == 2
+
+
+def test_delete_all_data_accepts_custom_runtime_dir_name(monkeypatch, tmp_path) -> None:
+    runtime_dir = tmp_path / "jarvis-custom-runtime"
+    monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(runtime_dir))
+    store = SettingsStore()
+    (store.base_dir / "settings.json").write_text("{}", encoding="utf-8")
+
+    result = store.delete_all_data()
+
+    assert result["ok"] is True
     assert store.base_dir.exists()
     assert list(store.base_dir.iterdir()) == []
 

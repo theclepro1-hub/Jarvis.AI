@@ -177,11 +177,6 @@ Rectangle {
                 description: "Один выбор без лишней технички."
                 helpText: "Обычно хватает одного режима. Слово активации всегда остаётся локальным."
                 expanded: false
-                onToggled: (expanded) => {
-                    if (expanded) {
-                        settingsBridge.requestLocalDiagnostics()
-                    }
-                }
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
                 onHelpCleared: settingsRoot.helpCleared()
 
@@ -225,25 +220,23 @@ Rectangle {
                     visible: settingsBridge.assistantMode === "private" && settingsBridge.localRuntimeActionVisible
                     spacing: 10
 
+                    Text {
+                        Layout.fillWidth: true
+                        text: settingsBridge.localRuntimeStatus.length > 0
+                              ? settingsBridge.localRuntimeStatus
+                              : "Подготовьте локальный режим одной кнопкой."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                    }
+
                     PrimaryButton {
                         objectName: "assistantInstallLocalRuntimeButton"
                         text: settingsBridge.localRuntimeActionText
                         enabled: !settingsBridge.localRuntimeBusy
                         onClicked: settingsBridge.installLocalRuntime()
                     }
-
-                    Item { Layout.fillWidth: true }
-                }
-
-                Text {
-                    objectName: "assistantLocalRuntimeStatus"
-                    Layout.fillWidth: true
-                    visible: settingsBridge.assistantMode === "private" && settingsBridge.localRuntimeStatus.length > 0
-                    text: settingsBridge.localRuntimeStatus
-                    color: Theme.Colors.textSoft
-                    font.family: Theme.Typography.bodyFamily
-                    font.pixelSize: Theme.Typography.small
-                    wrapMode: Text.WordWrap
                 }
             }
 
@@ -391,6 +384,16 @@ Rectangle {
                         onClicked: settingsBridge.deleteAllData()
                     }
 
+                    Text {
+                        visible: settingsBridge.dataSafetyFeedback.length > 0
+                        Layout.fillWidth: true
+                        text: settingsBridge.dataSafetyFeedback
+                        color: Theme.Colors.accent
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                    }
+
                     Item { Layout.fillWidth: true }
                 }
             }
@@ -497,6 +500,15 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 10
 
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Ключи сохраняются локально. Если ничего не меняли, этот блок можно не трогать."
+                        color: Theme.Colors.textSoft
+                        font.family: Theme.Typography.bodyFamily
+                        font.pixelSize: Theme.Typography.small
+                        wrapMode: Text.WordWrap
+                    }
+
                     PrimaryButton {
                         objectName: "settingsAdvancedSaveButton"
                         text: "Сохранить ключи"
@@ -508,8 +520,6 @@ Rectangle {
                                        settingsBridge.localLlmModel
                                    )
                     }
-
-                    Item { Layout.fillWidth: true }
                 }
             }
 
