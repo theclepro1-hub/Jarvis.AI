@@ -70,6 +70,20 @@ class _AiWithResult(_Ai):
         )
 
 
+class _AiWithMarkdownResult(_Ai):
+    def generate_reply_result(self, text: str, _history: list[dict[str, object]], *, status_callback=None) -> AIReplyResult:  # noqa: ANN001
+        _ = status_callback
+        self.received.append(text)
+        return AIReplyResult(
+            text="**Сводка**\n| A | B |\n|---|---|\n| 1 | 2 |\n\n- Первый\n- Второй\n- Третий\n- Четвертый\n- Пятый\n- Шестой",
+            mode="fast",
+            provider="groq",
+            provider_label="Groq",
+            model="openai/gpt-oss-20b",
+            elapsed_ms=145,
+        )
+
+
 class _Voice:
     def __init__(self, enabled: bool = False) -> None:
         self.enabled = enabled
@@ -123,7 +137,7 @@ def _route_with_steps(steps: list[ExecutionStep], assistant_lines: list[str] | N
     )
 
 
-def test_local_execution_result_always_renders_as_execution_card() -> None:
+def test_local_execution_result_with_one_simple_action_renders_as_plain_text() -> None:
     route = _route_with_steps(
         [
             ExecutionStep(
@@ -139,9 +153,8 @@ def test_local_execution_result_always_renders_as_execution_card() -> None:
 
     bridge.sendMessage("открой ютуб")
 
-    assert bridge.messages[-1]["type"] == "execution"
-    assert bridge.messages[-1]["title"] == "Открываю YouTube"
-    assert bridge.messages[-1]["steps"][0]["status"] == "готово"
+    assert bridge.messages[-1]["type"] == "text"
+    assert bridge.messages[-1]["text"] == "Открываю YouTube"
 
 
 def test_mixed_execution_result_uses_plan_title_instead_of_first_step_title() -> None:
@@ -292,6 +305,39 @@ def test_chat_bridge_exposes_last_response_hint_from_ai_result(monkeypatch) -> N
     assert services.ai.received == ["как дела"]
     assert bridge.lastResponseHint == "Быстро: Groq · 0.1 с"
     assert bridge.thinkingLabel == ""
+
+
+def test_chat_bridge_sanitizes_ai_markdown_before_appending(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["что-то"], assistant_lines=[], queue_items=["что-то"], execution_result=None)
+    bridge, services = _bridge_for(route)
+    services.ai = _AiWithMarkdownResult()
+
+    bridge.sendMessage("что-то")
+
+    assert services.ai.received == ["что-то"]
+    assert bridge.messages[-1]["role"] == "assistant"
+    assert bridge.messages[-1]["text"].startswith("Сводка")
+    assert "|" not in bridge.messages[-1]["text"]
+    assert "**" not in bridge.messages[-1]["text"]
+
+
+def test_chat_bridge_keeps_short_followup_for_ai_when_router_marks_it_as_ai(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["раз больше"], assistant_lines=[], queue_items=["раз больше"], execution_result=None)
+    bridge, services = _bridge_for(route)
+
+    bridge.sendMessage("раз больше")
+
+    assert services.ai.received == ["раз больше"]
+    assert bridge.messages[-1]["role"] == "assistant"
+    assert bridge.messages[-1]["text"] == "AI fallback: раз больше"
 
 
 def test_chat_bridge_clears_wake_hint_when_execution_result_is_appended() -> None:

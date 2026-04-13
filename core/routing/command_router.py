@@ -11,10 +11,14 @@ from core.routing.text_rules import (
     clarification_question,
     looks_like_broken_command,
     looks_like_conversation,
+    looks_like_explicit_conversation,
     looks_like_system_command,
     normalize_text,
     strip_leading_wake_prefix,
 )
+
+VOICE_SOURCES = {"voice", "wake", "speech"}
+VOICE_RETRY_PROMPT = "Не расслышал команду. Скажите ещё раз."
 
 
 @dataclass(slots=True)
@@ -116,8 +120,35 @@ class CommandRouter:
                 queue_items=queue_items,
             )
 
-        if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands):
+        if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands, source=source):
             return RouteResult("ai", [clean_text], [], [clean_text])
+
+        if unsupported and not actionable_plans and not clarification_steps and self._should_clarify_unsupported_only(
+            commands,
+            source=source,
+        ):
+            return self._clarification_route(
+                clean_text,
+                self._planner_clarification_message([], unsupported),
+                execute=execute,
+                detail="Фраза не похожа на надёжную команду. Нужна более точная формулировка.",
+                queue_items=queue_items,
+            )
+
+        if self._should_retry_voice_fragment(
+            commands=commands,
+            actionable_plans=actionable_plans,
+            clarification_steps=clarification_steps,
+            unsupported=unsupported,
+            source=source,
+        ):
+            return self._clarification_route(
+                clean_text,
+                VOICE_RETRY_PROMPT,
+                execute=execute,
+                detail="Фраза выглядит как короткий шумный или обрывочный фрагмент речи.",
+                queue_items=queue_items,
+            )
 
         if self._should_abort_for_clarification(
             commands=commands,
@@ -215,7 +246,7 @@ class CommandRouter:
         )
         return RouteResult("local" if execute else "preview", queue, result.assistant_lines, queue, result)
 
-    def _should_fallback_to_ai(self, commands: list[str]) -> bool:
+    def _should_fallback_to_ai(self, commands: list[str], *, source: str = "ui") -> bool:
         normalized = [normalize_text(command) for command in commands if normalize_text(command)]
         if not normalized:
             return False
@@ -223,7 +254,19 @@ class CommandRouter:
             return False
         if any(looks_like_system_command(command) for command in normalized):
             return False
+        if source.casefold() in VOICE_SOURCES:
+            return all(looks_like_explicit_conversation(command) for command in normalized)
         return all(looks_like_conversation(command) for command in normalized)
+
+    def _should_clarify_unsupported_only(self, commands: list[str], *, source: str) -> bool:
+        if source.casefold() in VOICE_SOURCES:
+            return False
+        normalized = [normalize_text(command) for command in commands if normalize_text(command)]
+        if not normalized:
+            return False
+        if any(looks_like_conversation(command) for command in normalized):
+            return False
+        return all(len(command.split()) <= 2 for command in normalized)
 
     def _normalize_incoming_text(self, text: str, *, source: str) -> str:
         # Voice transcripts often miss commas/joins; post-process before planner.
@@ -252,6 +295,32 @@ class CommandRouter:
         if source.casefold() in {"voice", "wake", "speech"}:
             return True
         return len(commands) > 1
+
+    def _should_retry_voice_fragment(
+        self,
+        *,
+        commands: list[str],
+        actionable_plans: list[ExecutionPlan],
+        clarification_steps: list[ExecutionStep],
+        unsupported: list[str],
+        source: str,
+    ) -> bool:
+        if source.casefold() not in VOICE_SOURCES:
+            return False
+        if actionable_plans or clarification_steps or not unsupported:
+            return False
+        return all(self._looks_like_voice_fragment(command) for command in commands)
+
+    def _looks_like_voice_fragment(self, command: str) -> bool:
+        text = normalize_text(command).casefold()
+        if not text:
+            return False
+        if looks_like_system_command(text) or looks_like_broken_command(text) or looks_like_explicit_conversation(text):
+            return False
+        words = text.split()
+        if len(words) > 4:
+            return False
+        return True
 
     def _planner_confidence(
         self,

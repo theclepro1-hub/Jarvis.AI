@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.ai.ai_service import AIService
+from core.ai.ai_service import AIService, sanitize_ai_reply_text
 
 
 class FakeSettings:
@@ -130,6 +130,43 @@ def test_generate_reply_result_reports_stage_and_timing_hint() -> None:
     assert stages and stages[0].startswith("Быстрый режим: Groq")
 
 
+def test_generate_reply_result_sanitizes_markdown_tables_and_long_lists() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.groq.com/openai/v1": (
+            "**Сводка**\n"
+            "| Пункт | Значение |\n"
+            "|---|---|\n"
+            "| Один | Да |\n\n"
+            "- Первый\n- Второй\n- Третий\n- Четвертый\n- Пятый\n- Шестой"
+        )
+    }
+    service = AIService(
+        FakeSettings({"ai_mode": "fast", "ai_provider": "groq"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    result = service.generate_reply_result("сделай кратко")
+
+    assert result.provider == "groq"
+    assert result.text.startswith("Сводка")
+    assert "|" not in result.text
+    assert "**" not in result.text
+    assert len(result.text.splitlines()) <= 5
+
+
+def test_sanitize_ai_reply_text_removes_tables_and_markdown() -> None:
+    raw = "**Сводка**\n| A | B |\n|---|---|\n1. Первый\n2. Второй\n3. Третий\n4. Четвертый\n5. Пятый\n6. Шестой"
+
+    clean = sanitize_ai_reply_text(raw)
+
+    assert clean.startswith("Сводка")
+    assert "|" not in clean
+    assert "**" not in clean
+    assert len(clean.splitlines()) <= 5
+
+
 def test_quality_mode_prioritizes_quality_plan() -> None:
     service = AIService(FakeSettings({"ai_mode": "quality"}))
 
@@ -228,6 +265,24 @@ def test_missing_provider_keys_uses_fallback(monkeypatch) -> None:
     )
 
     assert "базовом режиме" in service.generate_reply("привет")
+
+
+def test_ai_fallback_does_not_expose_provider_details() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.groq.com/openai/v1": ProviderError(500),
+    }
+    service = AIService(
+        FakeSettings({"ai_mode": "fast", "ai_provider": "groq"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    result = service.generate_reply_result("что-то сломалось")
+
+    assert "Groq" not in result.text
+    assert "HTTP" not in result.text
+    assert result.text == "Сейчас ответ не получился. Попробуйте ещё раз."
 
 
 def test_network_settings_sanitizes_proxy_mode_and_timeout() -> None:

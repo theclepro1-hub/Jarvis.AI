@@ -162,6 +162,19 @@ def test_voice_bridge_warms_up_once_and_starts_wake(monkeypatch):
     assert services.voice.warm_up_calls == 1
 
 
+def test_voice_bridge_prewarm_refreshes_cached_status(monkeypatch):
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    calls = {"refresh": 0}
+    monkeypatch.setattr(bridge, "_refresh_voice_status_cache", lambda: calls.__setitem__("refresh", calls["refresh"] + 1))
+
+    bridge.prewarm()
+
+    assert calls["refresh"] == 1
+
+
 def test_voice_bridge_deliver_transcribed_text_sets_handoff_status():
     services = _Services()
     chat_bridge = _ChatBridge()

@@ -48,6 +48,22 @@ NOISY_VOLUME_REPLACEMENTS = (
     ("потише", "тише"),
     ("по тише", "тише"),
 )
+TRAILING_ACTION_TOKENS = {
+    "громче",
+    "тише",
+    "пауза",
+    "стоп",
+    "следующее",
+    "следующая",
+    "следущий",
+    "следующий",
+    "следущая",
+    "далее",
+    "назад",
+    "назат",
+    "обратно",
+    "mute",
+}
 NOISY_OPEN_REPLACEMENTS = (
     ("сотру", "открой"),
     ("сорту", "открой"),
@@ -88,6 +104,7 @@ class VoiceCommandPostProcessor:
         normalized = strip_leading_command_fillers(text)
         normalized = self._normalize_open_mishear(normalized)
         normalized = self._normalize_volume_inflections(normalized)
+        normalized = self._normalize_trailing_action_fragment(normalized)
         normalized = self._normalize_open_prefix_fragment(normalized)
         normalized = self._normalize_common_target_aliases(normalized)
         return normalized
@@ -221,6 +238,19 @@ class VoiceCommandPostProcessor:
         if len(words) >= 2:
             return [words[0], " ".join(words[1:])]
         return []
+
+    def _normalize_trailing_action_fragment(self, text: str) -> str:
+        parts = [part for part in normalize_text(text).split(" ") if part]
+        if len(parts) < 2 or len(parts) > 4:
+            return text
+        lower_parts = [part.casefold().strip(" ,.:;!?-") for part in parts]
+        if lower_parts[0] in {"как", "что", "почему", "зачем", "когда", "кто", "где"}:
+            return text
+        if lower_parts[0] in OPEN_VERBS or lower_parts[0] in FOLLOWUP_ACTION_VERBS:
+            return text
+        if lower_parts[-1] not in TRAILING_ACTION_TOKENS:
+            return text
+        return lower_parts[-1]
 
     def _item_candidates(self, item: dict[str, str]) -> list[str]:
         raw = [str(item.get("title", "")).strip(), *[str(alias).strip() for alias in item.get("aliases", [])]]

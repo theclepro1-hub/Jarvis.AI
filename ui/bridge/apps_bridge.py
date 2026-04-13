@@ -52,6 +52,17 @@ class AppsBridge(QObject):
     def defaultMusicAppId(self) -> str:
         return str(self.services.settings.get("default_music_app", "")).strip()
 
+    @Slot()
+    def prewarm(self) -> None:
+        try:
+            self.services.actions.app_catalog()
+        except Exception:
+            return
+        try:
+            self.services.actions.pinned_commands()
+        except Exception:
+            pass
+
     @Slot(str, str, str)
     def addCustomApp(self, title: str, target: str, aliases: str) -> None:
         if not title.strip() or not target.strip():

@@ -37,6 +37,81 @@ ApplicationWindow {
         onActivated: palette.open()
     }
 
+    property bool startupPrewarmStarted: false
+    property int startupPrewarmStage: 0
+    property var startupPrewarmItems: []
+    property var startupPrewarmComponents: ({})
+
+    function beginStartupPrewarm() {
+        if (startupPrewarmStarted) {
+            return
+        }
+        startupPrewarmStarted = true
+        startupPrewarmItems = [
+            { key: "voice", url: "screens/VoiceScreen.qml", bridge: voiceBridge },
+            { key: "apps", url: "screens/AppsScreen.qml", bridge: appsBridge },
+            { key: "settings", url: "screens/SettingsScreen.qml", bridge: settingsBridge }
+        ]
+        startupPrewarmTimer.start()
+    }
+
+    function advanceStartupPrewarm() {
+        if (!startupPrewarmStarted) {
+            return
+        }
+        if (startupPrewarmStage >= startupPrewarmItems.length) {
+            return
+        }
+        const item = startupPrewarmItems[startupPrewarmStage]
+        startupPrewarmStage += 1
+        warmStartupComponent(item)
+    }
+
+    function warmStartupComponent(item) {
+        const component = Qt.createComponent(Qt.resolvedUrl(item.url), Component.Asynchronous)
+        if (!component) {
+            startupPrewarmStepTimer.restart()
+            return
+        }
+        startupPrewarmComponents[item.key] = component
+        let finished = false
+
+        const finish = function() {
+            if (finished) {
+                return
+            }
+            if (component.status !== Component.Ready && component.status !== Component.Error) {
+                return
+            }
+            finished = true
+            if (item.bridge && item.bridge.prewarm) {
+                item.bridge.prewarm()
+            }
+            startupPrewarmStepTimer.restart()
+        }
+
+        if (component.status === Component.Ready || component.status === Component.Error) {
+            finish()
+            return
+        }
+
+        component.statusChanged.connect(finish)
+    }
+
+    Timer {
+        id: startupPrewarmTimer
+        interval: 300
+        repeat: false
+        onTriggered: window.advanceStartupPrewarm()
+    }
+
+    Timer {
+        id: startupPrewarmStepTimer
+        interval: 140
+        repeat: false
+        onTriggered: window.advanceStartupPrewarm()
+    }
+
     function screenTitle() {
         switch (appBridge.currentScreen) {
         case "registration":
@@ -57,7 +132,7 @@ ApplicationWindow {
         case "registration":
             return settingsBridge.assistantMode === "private"
                    ? "Сначала подключите Telegram. Локальный режим можно подготовить позже одной кнопкой в настройках."
-                   : "Сначала подключите Groq и Telegram. Режим выбирается в конце формы."
+                   : "Сначала заполните основные подключения. Режим выбирается в конце формы."
         case "voice":
             return "Настройте микрофон, слово активации и проверку понимания."
         case "apps":
@@ -187,4 +262,6 @@ ApplicationWindow {
         onOpenScreen: (screen) => appBridge.navigate(screen)
         onRunAction: (actionId) => chatBridge.triggerQuickAction(actionId)
     }
+
+    Component.onCompleted: beginStartupPrewarm()
 }

@@ -136,7 +136,7 @@ Rectangle {
                 objectName: "settingsSection_connections"
                 Layout.fillWidth: true
                 title: "Подключения"
-                description: "Для старта нужны Groq и Telegram."
+                description: "Для старта нужны основные подключения."
                 helpText: "Здесь лежат основные ключи для обычного пользователя."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)

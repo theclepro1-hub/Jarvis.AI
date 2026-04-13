@@ -21,12 +21,12 @@ class CaptureConfig:
     energy_threshold: float = 160.0
     pre_roll_grace_seconds: float = 0.0
     min_start_frames: int = 2
-    noise_floor_frames: int = 6
-    noise_margin: float = 28.0
-    noise_ratio: float = 1.18
-    max_adaptive_threshold: float = 270.0
-    end_threshold_ratio: float = 0.72
-    speech_gate_ratio: float = 1.22
+    noise_floor_frames: int = 8
+    noise_margin: float = 30.0
+    noise_ratio: float = 1.2
+    max_adaptive_threshold: float = 280.0
+    end_threshold_ratio: float = 0.74
+    speech_gate_ratio: float = 1.24
 
 
 class SpeechCaptureService:

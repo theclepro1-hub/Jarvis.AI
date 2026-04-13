@@ -609,6 +609,50 @@ def test_command_router_keeps_broken_command_as_local_clarification() -> None:
     assert result.execution_result.steps[0].kind == "clarify"
 
 
+def test_command_router_requests_voice_retry_for_short_noise_fragment() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("раз больше", source="voice")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Не расслышал команду. Скажите ещё раз."]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+    assert result.execution_result.steps[0].status == "needs_input"
+
+
+def test_command_router_clarifies_short_text_noise_without_sending_it_to_ai() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("раз больше")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Уточните команду целиком. Не понял: раз больше"]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_keeps_short_plain_topic_as_ai_for_text_input() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("жара без гроша")
+
+    assert result.kind == "ai"
+    assert result.commands == ["жара без гроша"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_voice_garbage_out_of_ai_even_when_phrase_is_longer() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("пер по лбу сейф", source="voice")
+
+    assert result.kind == "local"
+    assert result.assistant_lines == ["Не расслышал команду. Скажите ещё раз."]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+
+
 def test_command_router_clarifies_bare_search_command() -> None:
     router, _actions, _pc_control = make_router()
 

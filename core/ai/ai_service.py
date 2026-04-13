@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 import time
 from typing import Any, Callable
 
@@ -12,10 +13,10 @@ from core.policy.assistant_mode import resolve_assistant_mode, resolve_assistant
 
 SYSTEM_PROMPT = """
 Ты JARVIS Unity.
-Отвечай быстро, умно и по делу.
-Если пользователь просит бытовое действие или компьютерную команду, не болтай лишнего.
+Отвечай быстро, коротко и по делу.
+Не используй markdown-таблицы, длинные списки и простыни.
 Если запрос касается действия на ПК, не утверждай, что оно уже выполнено, пока не получил реальный локальный результат.
-Если данных не хватает, задай короткий вопрос.
+Если данных не хватает, задай один короткий вопрос.
 Тон: спокойный, взрослый, уверенный.
 """.strip()
 
@@ -67,6 +68,64 @@ class AIReplyResult:
     elapsed_ms: int = 0
     fallback_used: bool = False
     error: str = ""
+
+
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+_MARKDOWN_FENCE_PATTERN = re.compile(r"```(?:[\w+-]+\n)?|```")
+_MARKDOWN_MARKERS_PATTERN = re.compile(r"(\*\*|__|~~|`)")
+_LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
+_TABLE_SEPARATOR_PATTERN = re.compile(r"^[\s|:\-]+$")
+
+
+def sanitize_ai_reply_text(text: str, *, max_lines: int = 5, max_chars: int = 800) -> str:
+    clean = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not clean:
+        return ""
+
+    clean = _MARKDOWN_LINK_PATTERN.sub(r"\1", clean)
+    clean = _MARKDOWN_FENCE_PATTERN.sub("", clean)
+    clean = _MARKDOWN_MARKERS_PATTERN.sub("", clean)
+
+    lines: list[str] = []
+    for raw_line in clean.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        if line.count("|") >= 2:
+            if _TABLE_SEPARATOR_PATTERN.fullmatch(line):
+                continue
+            cells = [_MARKDOWN_MARKERS_PATTERN.sub("", cell).strip() for cell in line.strip("|").split("|")]
+            cells = [cell for cell in cells if cell]
+            if not cells:
+                continue
+            line = " — ".join(cells)
+        line = _LIST_PREFIX_PATTERN.sub("", line)
+        line = re.sub(r"\s{2,}", " ", line)
+        if line:
+            lines.append(line)
+
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    compact: list[str] = []
+    for line in lines:
+        if line == "" and (not compact or compact[-1] == ""):
+            continue
+        compact.append(line)
+
+    if not compact:
+        return ""
+    if len(compact) > max_lines:
+        compact = compact[:max_lines]
+        compact[-1] = compact[-1].rstrip(" .") + "…"
+
+    reply = "\n".join(compact).strip()
+    if len(reply) > max_chars:
+        reply = reply[:max_chars].rstrip(" ,;:-") + "…"
+    return reply
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -386,7 +445,7 @@ class AIService:
                     timeout=request_timeout,
                     **request_options,
                 )
-                text = self._extract_text(response)
+                text = sanitize_ai_reply_text(self._extract_text(response))
                 if text:
                     return text, None
                 last_error = f"{spec.label}: empty response"
@@ -455,7 +514,10 @@ class AIService:
 
         service = LocalLLMService(self.settings)
         try:
-            return service.generate(messages), None
+            reply = sanitize_ai_reply_text(service.generate(messages))
+            if reply:
+                return reply, None
+            return None, "Local Llama: empty response"
         except Exception as exc:  # noqa: BLE001
             return None, f"Local Llama: {exc}"
 
@@ -534,6 +596,10 @@ class AIService:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
+            if role == "assistant":
+                text = sanitize_ai_reply_text(text, max_lines=3, max_chars=400)
+                if not text:
+                    continue
             messages.append({"role": role, "content": text})
         messages.append({"role": "user", "content": user_text})
         return messages
@@ -573,12 +639,9 @@ class AIService:
                 "и локальных действий."
             )
         if "настрой" in lower or "регистрац" in lower:
-            return "Откройте настройки подключения: там можно изменить ключи Groq и Telegram."
+            return "Откройте настройки подключения: там можно изменить ключи и режимы."
         if last_error:
-            return f"ИИ сейчас недоступен ({last_error}). Локальные команды продолжают работать."
-        return (
-            "Понял. Сейчас я работаю в базовом режиме без доступного AI-провайдера, "
-            "но локальные команды продолжают работать."
-        )
+            return "Сейчас ответ не получился. Попробуйте ещё раз."
+        return "Сейчас я отвечаю в базовом режиме. Локальные команды продолжают работать."
 
 

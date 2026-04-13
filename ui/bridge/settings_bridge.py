@@ -723,6 +723,12 @@ class SettingsBridge(QObject):
             self._refresh_update_snapshot()
         return dict(self._update_status_cache)
 
+    @Slot()
+    def prewarm(self) -> None:
+        self._refresh_update_snapshot()
+        if self._local_llm_probe_requested():
+            self._refresh_local_llm_diagnostics()
+
     @Slot(str, str, str, str, str, str, result=bool)
     def saveConnections(
         self,

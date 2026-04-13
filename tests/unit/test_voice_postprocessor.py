@@ -19,3 +19,10 @@ def test_voice_postprocessor_normalizes_common_open_mishears():
     assert processor.normalize("сотру ютуб").normalized == "открой ютуб"
     assert processor.normalize("сорту ютуб").normalized == "открой ютуб"
     assert processor.normalize("сокрыт тупо").normalized == "открой ютуб"
+
+
+def test_voice_postprocessor_strips_noise_before_trailing_action_token():
+    processor = VoiceCommandPostProcessor(_ActionRegistryStub())
+
+    assert processor.normalize("радость громче").normalized == "громче"
+    assert processor.normalize("потом тише").normalized == "тише"

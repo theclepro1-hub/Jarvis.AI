@@ -8,7 +8,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
-from core.ai.ai_service import SUPPORTED_AI_MODES
+from core.ai.ai_service import SUPPORTED_AI_MODES, sanitize_ai_reply_text
 
 
 class ChatBridge(QObject):
@@ -219,8 +219,11 @@ class ChatBridge(QObject):
         self.workerReplyReady.emit(reply, signature, reply_hint)
 
     def _append_assistant_message(self, text: str, signature: str = "", reply_hint: str = "") -> None:
-        self._append_message("assistant", text)
-        self._speak_assistant_text(text)
+        clean = sanitize_ai_reply_text(text)
+        if not clean and str(text or "").strip():
+            clean = "Сейчас ответ не получился. Попробуйте ещё раз."
+        self._append_message("assistant", clean)
+        self._speak_assistant_text(clean)
         self._queue_items = []
         self.queueChanged.emit()
         if signature:
@@ -238,6 +241,13 @@ class ChatBridge(QObject):
     def _append_local_result(self, route) -> None:
         execution = getattr(route, "execution_result", None)
         if execution is not None and getattr(execution, "steps", None):
+            if self._should_collapse_single_step_execution(route, execution):
+                line = self._single_step_text(route, execution)
+                if line:
+                    self._append_message("assistant", line)
+                    self._speak_assistant_text(line)
+                    self._clear_wake_hint()
+                    return
             execution_title = self._build_execution_title(route)
             execution_steps = self._build_execution_steps(route)
             self._append_message(
@@ -269,6 +279,31 @@ class ChatBridge(QObject):
         )
         self._speak_assistant_text(execution_title)
         self._clear_wake_hint()
+
+    def _should_collapse_single_step_execution(self, route, execution) -> bool:  # noqa: ANN001
+        steps = list(getattr(execution, "steps", []) or [])
+        if len(steps) != 1:
+            return False
+        if len(getattr(route, "commands", []) or []) > 1:
+            return False
+        step = steps[0]
+        status = str(getattr(step, "status", "")).strip()
+        if status not in {"done", "sent_unverified"}:
+            return False
+        kind = str(getattr(step, "kind", "")).strip()
+        if kind in {"clarify", "unsupported"}:
+            return False
+        return True
+
+    def _single_step_text(self, route, execution) -> str:  # noqa: ANN001
+        lines = [str(line).strip() for line in getattr(route, "assistant_lines", []) or [] if str(line).strip()]
+        if lines:
+            return lines[0]
+        steps = list(getattr(execution, "steps", []) or [])
+        if not steps:
+            return ""
+        title = str(getattr(steps[0], "title", "")).strip()
+        return title
 
     def _build_execution_title(self, route) -> str:
         execution = getattr(route, "execution_result", None)

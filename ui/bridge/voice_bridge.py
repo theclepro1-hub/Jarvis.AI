@@ -278,6 +278,10 @@ class VoiceBridge(QObject):
         return self.services.voice.latest_wake_metrics_summary()
 
     @Slot()
+    def prewarm(self) -> None:
+        self._refresh_voice_status_cache()
+
+    @Slot()
     def runWakeWordTest(self) -> None:
         self._test_result = self.services.voice.test_wake_word()
         self.testResultChanged.emit()

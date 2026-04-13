@@ -44,6 +44,15 @@ COMMAND_FRAGMENT_TOKENS = (
     "поднимай",
     "закрой",
     "сверни",
+    "громче",
+    "тише",
+    "пауза",
+    "стоп",
+    "следующее",
+    "следующий",
+    "назад",
+    "дальше",
+    "далее",
 )
 
 OPEN_COMMAND_TOKENS = ("открой", "открыть", "запусти", "запустить")
@@ -193,7 +202,7 @@ def looks_like_system_command(text: str) -> bool:
     return any(lower.startswith(prefix) for prefix in SYSTEM_COMMAND_PREFIXES)
 
 
-def looks_like_conversation(text: str) -> bool:
+def looks_like_explicit_conversation(text: str) -> bool:
     clean = normalize_text(text)
     lower = clean.casefold()
     if not lower:
@@ -207,6 +216,19 @@ def looks_like_conversation(text: str) -> bool:
     first_word = lower.split(" ", 1)[0]
     if first_word in QUESTION_WORDS:
         return True
-    if len(lower.split()) <= 7 and not any(lower.startswith(f"{token} ") or lower == token for token in COMMAND_FRAGMENT_TOKENS):
-        return True
     return False
+
+
+def looks_like_conversation(text: str) -> bool:
+    clean = normalize_text(text)
+    lower = clean.casefold()
+    if not lower:
+        return False
+    if looks_like_explicit_conversation(lower):
+        return True
+    words = lower.split()
+    if not 3 <= len(words) <= 7:
+        return False
+    if any(lower.startswith(f"{token} ") or lower == token for token in COMMAND_FRAGMENT_TOKENS):
+        return False
+    return True

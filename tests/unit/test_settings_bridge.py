@@ -234,6 +234,22 @@ def test_settings_bridge_update_properties_do_not_force_lazy_update_service() ->
     assert bridge.updateStatus["status_code"] == "idle"
 
 
+def test_settings_bridge_prewarm_refreshes_update_snapshot_without_local_probe(monkeypatch) -> None:
+    store = InMemoryStore()
+    settings = SettingsService(store)
+    services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
+    bridge = SettingsBridge(state=None, services=services, app_bridge=None)
+
+    calls = {"update": 0, "local": 0}
+    monkeypatch.setattr(bridge, "_refresh_update_snapshot", lambda: calls.__setitem__("update", calls["update"] + 1))
+    monkeypatch.setattr(bridge, "_refresh_local_llm_diagnostics", lambda: calls.__setitem__("local", calls["local"] + 1))
+
+    bridge.prewarm()
+
+    assert calls["update"] == 1
+    assert calls["local"] == 0
+
+
 def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
     store = InMemoryStore()
     settings = SettingsService(store)
