@@ -6,6 +6,8 @@ from typing import Callable
 from PySide6.QtCore import QObject, QThread, QTimer
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
+from core.app_identity import WINDOWS_INSTANCE_SERVER
+
 
 ERROR_ALREADY_EXISTS = 183
 
@@ -37,7 +39,7 @@ class _NamedMutex:
 class SingleInstanceService(QObject):
     def __init__(
         self,
-        server_name: str = "JarvisAi_Unity_22_instance",
+        server_name: str = WINDOWS_INSTANCE_SERVER,
         *,
         mutex_name: str | None = None,
     ) -> None:

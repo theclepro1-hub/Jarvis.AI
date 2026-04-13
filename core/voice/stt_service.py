@@ -58,7 +58,7 @@ class STTService:
         policy = self._assistant_policy()
 
         if configured_engine == "groq_whisper":
-            return "распознавание через Groq готово" if groq_key else "Нужен ключ Groq"
+            return "Облачное распознавание готово" if groq_key else "Нужен ключ для облачного распознавания"
         if configured_engine == "local_vosk":
             return "локальная модель Vosk готова" if self._local_vosk_available() else "Локальная модель Vosk не найдена"
         if configured_engine == "local_faster_whisper":
@@ -67,15 +67,15 @@ class STTService:
             if self._local_vosk_available():
                 return "локальное распознавание работает через Vosk"
             if policy.stt_cloud_allowed:
-                return "Нужен ключ Groq или локальный backend распознавания"
-            return "Нужен локальный backend распознавания"
+                return "Нужен ключ для облачного распознавания или локальный backend распознавания речи"
+            return "Нужен локальный backend распознавания речи"
 
         if policy.mode == "private":
             if self._local_faster_whisper_ready():
                 return "локальное распознавание готово"
             if self._local_vosk_available():
                 return "локальное распознавание работает через Vosk"
-            return "Нужен локальный backend распознавания"
+            return "Нужен локальный backend распознавания речи"
 
         if self._local_faster_whisper_ready():
             return "локальное распознавание готово"
@@ -84,8 +84,8 @@ class STTService:
         if groq_key and self._local_faster_whisper_ready():
             return "распознавание готово"
         if groq_key:
-            return "распознавание через Groq готово"
-        return "Нужен ключ Groq или локальный backend распознавания"
+            return "Облачное распознавание готово"
+        return "Нужен ключ для облачного распознавания или локальный backend распознавания речи"
 
     def can_transcribe(self) -> bool:
         configured_engine = self._configured_engine()
@@ -211,9 +211,9 @@ class STTService:
         if last_failure is not None:
             return last_failure
 
-        detail = "Нужен ключ Groq или локальный backend распознавания."
+        detail = "Нужен ключ для облачного распознавания или локальная модель распознавания."
         if "groq_whisper" not in route:
-            detail = "Нужен локальный backend распознавания."
+            detail = "Нужна локальная модель распознавания."
         return TranscriptionResult(
             status="model_missing",
             detail=detail,
@@ -278,7 +278,7 @@ class STTService:
         if not groq_key:
             return TranscriptionResult(
                 status="stt_key_missing",
-                detail="Нужен ключ Groq.",
+                detail="Нужен ключ для облачного распознавания.",
                 engine="groq_whisper",
                 backend_trace=("groq_whisper",),
             )
@@ -325,7 +325,7 @@ class STTService:
         except Exception as exc:
             return TranscriptionResult(
                 status="stt_failed",
-                detail=f"Не удалось распознать речь через Groq: {exc}",
+                detail=f"Не удалось распознать речь через облачный backend: {exc}",
                 engine="groq_whisper",
                 backend_trace=("groq_whisper",),
                 latency_ms=round((time.perf_counter() - started_at) * 1000.0, 1),

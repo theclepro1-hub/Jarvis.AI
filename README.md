@@ -60,8 +60,10 @@ The release build produces:
 
 ## Release Notes
 
-- [Release 22.5.1](docs/RELEASE_22.5.1.md)
-- [Release 22.4.5](docs/RELEASE_22.4.5.md)
+- [Release 20.5.5](docs/RELEASE_20.5.5.md)
+- Legacy notes:
+  - [Release 22.5.1](docs/RELEASE_22.5.1.md)
+  - [Release 22.4.5](docs/RELEASE_22.4.5.md)
 - [Release 22.2.0](docs/RELEASE_22.2.0.md)
 - [Release 22.1.1](docs/RELEASE_22.1.1.md)
 - [Release 22.1.0](docs/RELEASE_22.1.0.md)

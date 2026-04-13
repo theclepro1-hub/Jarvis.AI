@@ -38,7 +38,6 @@ ApplicationWindow {
     }
 
     property bool startupPrewarmStarted: false
-    property int startupPrewarmStage: 0
     property var startupPrewarmItems: []
     property var startupPrewarmComponents: ({})
 
@@ -48,29 +47,18 @@ ApplicationWindow {
         }
         startupPrewarmStarted = true
         startupPrewarmItems = [
-            { key: "voice", url: "screens/VoiceScreen.qml", bridge: voiceBridge },
+            { key: "settings", url: "screens/SettingsScreen.qml", bridge: settingsBridge },
             { key: "apps", url: "screens/AppsScreen.qml", bridge: appsBridge },
-            { key: "settings", url: "screens/SettingsScreen.qml", bridge: settingsBridge }
+            { key: "voice", url: "screens/VoiceScreen.qml", bridge: voiceBridge }
         ]
-        startupPrewarmTimer.start()
-    }
-
-    function advanceStartupPrewarm() {
-        if (!startupPrewarmStarted) {
-            return
+        for (let index = 0; index < startupPrewarmItems.length; ++index) {
+            warmStartupComponent(startupPrewarmItems[index])
         }
-        if (startupPrewarmStage >= startupPrewarmItems.length) {
-            return
-        }
-        const item = startupPrewarmItems[startupPrewarmStage]
-        startupPrewarmStage += 1
-        warmStartupComponent(item)
     }
 
     function warmStartupComponent(item) {
         const component = Qt.createComponent(Qt.resolvedUrl(item.url), Component.Asynchronous)
         if (!component) {
-            startupPrewarmStepTimer.restart()
             return
         }
         startupPrewarmComponents[item.key] = component
@@ -87,7 +75,6 @@ ApplicationWindow {
             if (item.bridge && item.bridge.prewarm) {
                 item.bridge.prewarm()
             }
-            startupPrewarmStepTimer.restart()
         }
 
         if (component.status === Component.Ready || component.status === Component.Error) {
@@ -96,20 +83,6 @@ ApplicationWindow {
         }
 
         component.statusChanged.connect(finish)
-    }
-
-    Timer {
-        id: startupPrewarmTimer
-        interval: 300
-        repeat: false
-        onTriggered: window.advanceStartupPrewarm()
-    }
-
-    Timer {
-        id: startupPrewarmStepTimer
-        interval: 140
-        repeat: false
-        onTriggered: window.advanceStartupPrewarm()
     }
 
     function screenTitle() {

@@ -150,6 +150,36 @@ def test_update_service_is_honest_when_release_has_only_manual_assets(monkeypatc
     assert "installer-asset" in snapshot["apply_hint"]
 
 
+def test_update_service_compares_internal_tag_version_but_shows_display_version(monkeypatch) -> None:
+    def fake_create_http_client(*, proxy_url: str = "", trust_env: bool = True) -> _FakeHttpClient:
+        _ = proxy_url, trust_env
+        return _FakeHttpClient(
+            response=_FakeResponse(
+                {
+                    "tag_name": "v22.5.5",
+                    "name": "JARVIS Unity 20.5.5",
+                    "html_url": "https://example.test/releases/v22.5.5",
+                    "assets": [],
+                },
+                body=b"",
+            )
+        )
+
+    service = UpdateService(settings=None, current_version="22.5.1", current_display_version="20.5.1")
+    monkeypatch.setattr(service, "_create_http_client", fake_create_http_client)
+
+    result = service.check_now()
+    snapshot = service.status_snapshot()
+
+    assert result.ok is True
+    assert result.update_available is True
+    assert result.current_version == "20.5.1"
+    assert result.latest_version == "20.5.5"
+    assert snapshot["current_update_version"] == "22.5.1"
+    assert snapshot["latest_update_version"] == "22.5.5"
+    assert "20.5.5" in result.message
+
+
 def test_update_service_reports_error_honestly(monkeypatch) -> None:
     def fake_create_http_client(*, proxy_url: str = "", trust_env: bool = True) -> _FakeHttpClient:
         _ = proxy_url, trust_env

@@ -279,6 +279,7 @@ class VoiceBridge(QObject):
 
     @Slot()
     def prewarm(self) -> None:
+        self._start_voice_runtime_warmup()
         self._refresh_voice_status_cache()
 
     @Slot()
@@ -564,7 +565,7 @@ class VoiceBridge(QObject):
         return {
             "wakeWord": "Готов",
             "command": "Готов",
-            "ai": "Groq или резервный локальный режим",
+            "ai": "Облачный или локальный режим",
             "model": "не подключена",
             "tts": "Готов",
             "wakeModel": "не загружена",
@@ -602,9 +603,9 @@ class VoiceBridge(QObject):
         if status == "mic_open_failed":
             return "Не удалось открыть микрофон. Проверьте доступ и выбранное устройство."
         if status == "stt_key_missing":
-            return "Нужен ключ Groq для облачного распознавания речи."
+            return "Нужен ключ для облачного распознавания речи."
         if status == "model_missing":
-            return "Нужна локальная или облачная модель распознавания речи."
+            return "Нужна локальная модель или ключ для облачного распознавания речи."
         if status == "no_speech":
             return "Не удалось распознать фразу после слова активации."
         if detail:
@@ -678,7 +679,15 @@ class VoiceBridge(QObject):
             stage = "error_mic"
         elif "не услыш" in lowered or "не удалось распознать" in lowered or "not heard" in lowered:
             stage = "not_heard"
-        elif "groq" in lowered or "stt" in lowered or "ошиб" in lowered or "error" in lowered:
+        elif (
+            "groq" in lowered
+            or "stt" in lowered
+            or "ошиб" in lowered
+            or "error" in lowered
+            or "облачн" in lowered
+            or "локальн" in lowered
+            or "ключ" in lowered
+        ):
             stage = "error_stt"
 
         self._voice_test = {

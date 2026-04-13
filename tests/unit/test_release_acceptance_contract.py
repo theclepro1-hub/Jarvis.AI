@@ -191,13 +191,41 @@ def test_release_gate_wake_notes_do_not_become_chat_bubbles() -> None:
 
 def test_release_gate_chat_footer_keeps_transient_wake_handoff_status() -> None:
     root = Path(__file__).resolve().parents[2]
+    app_source = (root / "ui" / "qml" / "App.qml").read_text(encoding="utf-8")
     composer_source = (root / "ui" / "qml" / "components" / "Composer.qml").read_text(encoding="utf-8")
     chat_source = (root / "ui" / "qml" / "screens" / "ChatScreen.qml").read_text(encoding="utf-8")
+    settings_source = (root / "ui" / "qml" / "screens" / "SettingsScreen.qml").read_text(encoding="utf-8")
 
+    assert 'startupPrewarmItems = [' in app_source
+    assert 'screens/SettingsScreen.qml' in app_source
+    assert 'screens/AppsScreen.qml' in app_source
+    assert 'screens/VoiceScreen.qml' in app_source
+    assert 'startupPrewarmTimer' not in app_source
+    assert 'startupPrewarmStepTimer' not in app_source
     assert 'property string wakeHint' in composer_source
     assert 'readonly property bool hasWakeHint' in composer_source
     assert 'text: root.recording' in composer_source
     assert 'wakeHint: voiceBridge.wakeHint' in chat_source
+    assert 'followBottomPending' not in chat_source
+    assert 'followBottomRetries' not in chat_source
+    assert 'requestFollowBottom()' in chat_source
+    assert 'snapToBottom()' in chat_source
+    assert 'interval: 0' in chat_source
+    assert 'contentY = Math.max(0, contentHeight - height)' in chat_source
+    assert 'function updateReleaseUrl()' in settings_source
+    assert 'visible: settingsBridge.updateStatus.update_available' in settings_source
+    assert 'Qt.openUrlExternally(settingsRoot.updateReleaseUrl())' in settings_source
+
+
+def test_release_gate_settings_updates_keep_install_and_download_actions_visible() -> None:
+    root = Path(__file__).resolve().parents[2]
+    settings_source = (root / "ui" / "qml" / "screens" / "SettingsScreen.qml").read_text(encoding="utf-8")
+
+    assert 'objectName: "checkForUpdatesButton"' in settings_source
+    assert 'objectName: "installUpdateButton"' in settings_source
+    assert 'objectName: "downloadUpdateButton"' in settings_source
+    assert 'text: "Установить обновление"' in settings_source
+    assert 'text: "Скачать обновление"' in settings_source
 
 
 def test_release_gate_local_commands_do_not_call_llm() -> None:

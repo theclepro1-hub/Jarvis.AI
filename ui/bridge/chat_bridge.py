@@ -4,11 +4,29 @@ import os
 import threading
 import time
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
-from core.ai.ai_service import SUPPORTED_AI_MODES, sanitize_ai_reply_text
+
+@lru_cache(maxsize=1)
+def _supported_ai_modes() -> frozenset[str]:
+    from core.ai.reply_text import SUPPORTED_AI_MODES
+
+    return frozenset(str(mode).strip().casefold() for mode in SUPPORTED_AI_MODES)
+
+
+def _sanitize_ai_reply_text(text: str) -> str:
+    from core.ai.reply_text import sanitize_ai_reply_text
+
+    return sanitize_ai_reply_text(text)
+
+
+def _resolve_assistant_mode(settings) -> str:  # noqa: ANN001
+    from core.policy.assistant_mode import resolve_assistant_mode
+
+    return resolve_assistant_mode(settings)
 
 
 class ChatBridge(QObject):
@@ -219,7 +237,7 @@ class ChatBridge(QObject):
         self.workerReplyReady.emit(reply, signature, reply_hint)
 
     def _append_assistant_message(self, text: str, signature: str = "", reply_hint: str = "") -> None:
-        clean = sanitize_ai_reply_text(text)
+        clean = _sanitize_ai_reply_text(text)
         if not clean and str(text or "").strip():
             clean = "Сейчас ответ не получился. Попробуйте ещё раз."
         self._append_message("assistant", clean)
@@ -418,15 +436,19 @@ class ChatBridge(QObject):
         clean = str(text or "").strip().casefold()
         if not clean:
             return True
-        blocked_prefixes = (
-            "слово активации",
-            "не расслышал команду после слова активации",
-            "не удалось разобрать команду после слова активации",
-            "нужен ключ groq для облачного распознавания",
-            "нужен ключ groq или локальная модель",
-            "не удалось открыть микрофон",
-        )
-        return any(clean.startswith(prefix) for prefix in blocked_prefixes)
+        if clean.startswith(
+            (
+                "слово активации",
+                "не расслышал команду после слова активации",
+                "не удалось разобрать команду после слова активации",
+                "не удалось открыть микрофон",
+                "не удалось получить текст. проверьте микрофон",
+                "нужен ключ для облачного распознавания",
+                "нужен локальный backend распознавания",
+            )
+        ):
+            return True
+        return clean.startswith("нужна локальная модель") and "распознавания" in clean
 
     def _speak_assistant_text(self, text: str) -> None:
         clean = str(text or "").strip()
@@ -466,9 +488,28 @@ class ChatBridge(QObject):
 
     def _normalize_ai_mode(self, value: str) -> str:
         mode = str(value or "").strip().lower()
-        if mode in SUPPORTED_AI_MODES:
+        if mode in _supported_ai_modes():
             return mode
         return "auto"
+
+    def _assistant_mode_label(self, mode: str) -> str:
+        return {
+            "fast": "Быстрый режим",
+            "standard": "Стандартный режим",
+            "smart": "Умный режим",
+            "private": "Приватный режим",
+        }.get(str(mode or "").strip().lower(), "")
+
+    def _response_mode_label(self, mode: str) -> str:
+        raw = str(mode or "").strip().lower()
+        assistant_label = self._assistant_mode_label(raw)
+        if assistant_label:
+            return assistant_label.replace(" режим", "")
+        return {
+            "fast": "Быстро",
+            "quality": "Качество",
+            "auto": "Авто",
+        }.get(self._normalize_ai_mode(raw), "ИИ")
 
     def _start_ai_resolution(
         self,
@@ -507,11 +548,15 @@ class ChatBridge(QObject):
         settings = getattr(self.services, "settings", None)
         mode = "auto"
         provider = "auto"
-        if settings is not None and hasattr(settings, "get"):
-            mode = self._normalize_ai_mode(settings.get("ai_mode", "auto"))
-            provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
         if route is not None and getattr(route, "execution_result", None) is not None:
             return "Локально не хватило уверенности, подключаю ИИ…"
+        if settings is not None and hasattr(settings, "get"):
+            assistant_mode = _resolve_assistant_mode(settings)
+            assistant_label = self._assistant_mode_label(assistant_mode)
+            if assistant_label:
+                return f"{assistant_label}: готовлю ответ…"
+            mode = self._normalize_ai_mode(settings.get("ai_mode", "auto"))
+            provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
         if mode == "fast" or provider in {"groq", "cerebras"}:
             return "Быстрый режим: готовлю ответ…"
         if mode == "quality" or provider == "gemini":
@@ -521,14 +566,10 @@ class ChatBridge(QObject):
     def _format_ai_response_hint(self, result) -> str:  # noqa: ANN001
         provider_label = str(getattr(result, "provider_label", "") or "").strip()
         elapsed_ms = int(getattr(result, "elapsed_ms", 0) or 0)
-        mode = self._normalize_ai_mode(getattr(result, "mode", ""))
+        mode = str(getattr(result, "mode", "") or "").strip().lower()
         if not provider_label or elapsed_ms <= 0:
             return ""
-        mode_label = {
-            "fast": "Быстро",
-            "quality": "Качество",
-            "auto": "Авто",
-        }.get(mode, "ИИ")
+        mode_label = self._response_mode_label(mode)
         hint = f"{mode_label}: {provider_label} · {elapsed_ms / 1000.0:.1f} с"
         if bool(getattr(result, "fallback_used", False)):
             return f"{hint} (резерв)"

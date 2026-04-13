@@ -49,6 +49,20 @@ def test_private_registration_can_complete_without_groq():
     assert service.is_complete(result) is True
 
 
+def test_registration_does_not_complete_with_only_non_groq_cloud_key() -> None:
+    store = FakeStore()
+    store.payload["registration"]["gemini_api_key"] = "gemini-key"
+    settings = SettingsService(store)
+    service = RegistrationService(settings)
+
+    result = service.save("", "123", "bot_token")
+
+    assert result.groq_api_key == ""
+    assert result.gemini_api_key == "gemini-key"
+    assert service.requires_groq_for_completion() is True
+    assert service.is_complete(result) is False
+
+
 def test_registration_can_be_skipped():
     settings = SettingsService(FakeStore())
     service = RegistrationService(settings)

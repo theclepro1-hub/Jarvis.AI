@@ -23,7 +23,7 @@ class RegistrationService:
         if not telegram_ready:
             return False
         if self.requires_groq_for_completion():
-            return bool(current.groq_api_key.strip())
+            return current.is_complete
         return True
 
     def save(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> RegistrationModel:

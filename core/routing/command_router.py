@@ -11,8 +11,8 @@ from core.routing.text_rules import (
     clarification_question,
     looks_like_broken_command,
     looks_like_conversation,
-    looks_like_explicit_conversation,
     looks_like_system_command,
+    looks_like_voice_conversation,
     normalize_text,
     strip_leading_wake_prefix,
 )
@@ -255,7 +255,7 @@ class CommandRouter:
         if any(looks_like_system_command(command) for command in normalized):
             return False
         if source.casefold() in VOICE_SOURCES:
-            return all(looks_like_explicit_conversation(command) for command in normalized)
+            return all(looks_like_voice_conversation(command) for command in normalized)
         return all(looks_like_conversation(command) for command in normalized)
 
     def _should_clarify_unsupported_only(self, commands: list[str], *, source: str) -> bool:
@@ -315,7 +315,7 @@ class CommandRouter:
         text = normalize_text(command).casefold()
         if not text:
             return False
-        if looks_like_system_command(text) or looks_like_broken_command(text) or looks_like_explicit_conversation(text):
+        if looks_like_system_command(text) or looks_like_broken_command(text) or looks_like_voice_conversation(text):
             return False
         words = text.split()
         if len(words) > 4:

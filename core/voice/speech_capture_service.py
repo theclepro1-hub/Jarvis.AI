@@ -22,11 +22,11 @@ class CaptureConfig:
     pre_roll_grace_seconds: float = 0.0
     min_start_frames: int = 2
     noise_floor_frames: int = 8
-    noise_margin: float = 30.0
+    noise_margin: float = 24.0
     noise_ratio: float = 1.2
     max_adaptive_threshold: float = 280.0
     end_threshold_ratio: float = 0.74
-    speech_gate_ratio: float = 1.24
+    speech_gate_ratio: float = 1.18
 
 
 class SpeechCaptureService:
@@ -46,7 +46,7 @@ class SpeechCaptureService:
 
     def capture_until_silence(self, pre_roll: bytes = b"") -> SpeechCaptureResult:
         chunks: list[bytes] = [pre_roll] if pre_roll else []
-        speech_started = bool(pre_roll)
+        speech_started = bool(pre_roll and self._chunk_energy(pre_roll) > self._config.energy_threshold)
         silence_for = 0.0
         frame_seconds = self._config.block_frames / self._config.sample_rate
         grace_for = self._config.pre_roll_grace_seconds if pre_roll else 0.0

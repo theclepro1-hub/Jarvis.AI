@@ -305,7 +305,7 @@ def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("JARVIS_UNITY_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_WAKE", "1")
     monkeypatch.setenv("JARVIS_UNITY_DISABLE_STARTUP_REGISTRY", "1")
-    monkeypatch.setattr("app.app.ServiceContainer", _TestServiceContainer)
+    monkeypatch.setattr("core.services.service_container.ServiceContainer", _TestServiceContainer)
 
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QGuiApplication):
@@ -343,7 +343,7 @@ def test_registration_requires_all_fields_and_save_path_works(ui_runtime) -> Non
     runtime.registration_bridge.saveRegistration("", "", "")
     _pump(app, 120)
     assert runtime.state.currentScreen == "registration"
-    assert "Нужны три поля" in _find(window, "registrationFeedback").property("text")
+    assert "Нужны три поля: ключ Groq, Telegram ID и токен Telegram-бота." in _find(window, "registrationFeedback").property("text")
 
     assert _find(window, "registrationSaveButton") is not None
 
@@ -404,6 +404,80 @@ def test_chat_welcome_message_and_paste_work(ui_runtime) -> None:
     _pump(app, 120)
 
     assert composer.property("text") == "проверка буфера ctrl v"
+
+
+def test_chat_autoscroll_tracks_new_messages_when_following_bottom(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _complete_registration(runtime, app, window)
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    list_view = _wait_for_object(app, window, "chatListView")
+    window.setHeight(620)
+    _pump(app, 120)
+
+    def distance_to_bottom() -> float:
+        content_height = float(list_view.property("contentHeight") or 0.0)
+        content_y = float(list_view.property("contentY") or 0.0)
+        height = float(list_view.property("height") or 0.0)
+        return content_height - (content_y + height)
+
+    for index in range(24):
+        runtime.chat_bridge.appendAssistantNote(f"сообщение {index} " + ("текст " * 40))
+        _pump(app, 120)
+
+    _wait_for(app, lambda: float(list_view.property("contentHeight") or 0.0) > float(list_view.property("height") or 0.0))
+    _wait_for(app, lambda: int(list_view.property("currentIndex") or -1) == int(list_view.property("count") or 0) - 1, timeout_ms=5000)
+    _wait_for(app, lambda: distance_to_bottom() <= 240.0, timeout_ms=5000)
+    before = distance_to_bottom()
+
+    runtime.chat_bridge.appendAssistantNote("финальное сообщение " + ("ещё " * 48))
+    _wait_for(app, lambda: int(list_view.property("currentIndex") or -1) == int(list_view.property("count") or 0) - 1, timeout_ms=5000)
+    _wait_for(app, lambda: distance_to_bottom() <= 240.0, timeout_ms=5000)
+
+    assert distance_to_bottom() <= 240.0
+    assert distance_to_bottom() <= before + 64.0
+
+
+def test_chat_autoscroll_pauses_when_user_scrolls_away(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _complete_registration(runtime, app, window)
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    list_view = _wait_for_object(app, window, "chatListView")
+    window.setHeight(620)
+    _pump(app, 120)
+
+    def distance_to_bottom() -> float:
+        content_height = float(list_view.property("contentHeight") or 0.0)
+        content_y = float(list_view.property("contentY") or 0.0)
+        height = float(list_view.property("height") or 0.0)
+        return content_height - (content_y + height)
+
+    for index in range(24):
+        runtime.chat_bridge.appendAssistantNote(f"сообщение {index} " + ("текст " * 40))
+        _pump(app, 100)
+
+    _wait_for(app, lambda: float(list_view.property("contentHeight") or 0.0) > float(list_view.property("height") or 0.0))
+    _wait_for(app, lambda: distance_to_bottom() <= 240.0, timeout_ms=5000)
+    before = distance_to_bottom()
+
+    scrolled_away = False
+    for delta_y in (180, -180):
+        _wheel(app, window, list_view, delta_y)
+        _pump(app, 120)
+        if distance_to_bottom() > before + 48.0:
+            scrolled_away = True
+            break
+
+    assert scrolled_away
+    assert bool(list_view.property("followBottom")) is False
+
+    away_distance = distance_to_bottom()
+    runtime.chat_bridge.appendAssistantNote("после ручной прокрутки " + ("ещё " * 48))
+    _pump(app, 160)
+
+    assert bool(list_view.property("followBottom")) is False
+    assert distance_to_bottom() >= min(away_distance, before) - 24.0
 
 
 def test_voice_controls_and_result_work(ui_runtime) -> None:
@@ -511,6 +585,14 @@ def test_settings_sections_start_collapsed_and_updates_last(ui_runtime) -> None:
     assert source.index('title: "Обновления"') > source.index('title: "Внешний вид"')
     assert source.index('title: "Для опытных"') < source.index('title: "Обновления"')
     assert 'registrationSkipButton' not in registration_source
+    assert "openReleaseButton" not in source
+    assert 'objectName: "installUpdateButton"' in source
+    assert 'objectName: "downloadUpdateButton"' in source
+    assert 'function updateReleaseUrl()' in source
+    assert 'visible: settingsBridge.updateStatus.update_available' in source
+    assert "Ключ Groq" not in source
+    assert "Ключ облачного ИИ" in source
+    assert "Ключ Groq" in registration_source
     assert "Advanced routing" not in source
     assert "Cloud model id" not in source
     assert "Text route" not in source

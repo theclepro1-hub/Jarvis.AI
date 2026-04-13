@@ -33,18 +33,19 @@ class _Router:
 
 
 class _Ai:
-    def __init__(self) -> None:
+    def __init__(self, reply_text: str = "AI") -> None:
         self.received: list[tuple[str, list[dict[str, str]]]] = []
+        self.reply_text = reply_text
 
     def generate_reply(self, text: str, history: list[dict[str, str]]) -> str:
         self.received.append((text, history))
-        return "AI"
+        return self.reply_text
 
     def generate_reply_result(self, text: str, history: list[dict[str, str]], *, status_callback=None):  # noqa: ANN001, ANN201
         self.received.append((text, history))
         if status_callback is not None:
             status_callback("telegram_ai")
-        return SimpleNamespace(text="AI")
+        return SimpleNamespace(text=self.reply_text)
 
 
 def _build_runtime(route) -> ServiceContainer:  # noqa: ANN001
@@ -96,6 +97,69 @@ def test_handle_external_command_uses_short_telegram_history_per_chat() -> None:
         {"role": "user", "text": "hello"},
         {"role": "assistant", "text": "AI"},
     ]
+
+
+def test_handle_external_command_includes_recent_telegram_context_in_prompt() -> None:
+    route = SimpleNamespace(
+        kind="ai",
+        commands=[],
+        assistant_lines=[],
+        queue_items=[],
+        execution_result=None,
+    )
+    runtime = _build_runtime(route)
+
+    first = ServiceContainer.handle_external_command(runtime, "привет", telegram_chat_id="777")
+    second = ServiceContainer.handle_external_command(runtime, "а что дальше?", telegram_chat_id="777")
+
+    assert first == "AI"
+    assert second == "AI"
+    assert "Контекст чата:" in runtime._ai.received[1][0]
+    assert "Пользователь: привет" in runtime._ai.received[1][0]
+    assert "JARVIS: AI" in runtime._ai.received[1][0]
+    assert "Текущий запрос: а что дальше?" in runtime._ai.received[1][0]
+
+
+def test_handle_external_command_compacts_long_telegram_reply() -> None:
+    route = SimpleNamespace(
+        kind="ai",
+        commands=[],
+        assistant_lines=[],
+        queue_items=[],
+        execution_result=None,
+    )
+    runtime = _build_runtime(route)
+    runtime._ai = _Ai("line 1\n\nline 2\nline 3\nline 4\nline 5")
+
+    reply = ServiceContainer.handle_external_command(runtime, "привет", telegram_chat_id="777")
+
+    assert reply == "line 1\nline 2\nline 3\nline 4"
+    assert runtime._ai.received[0][1] == []
+
+
+def test_service_container_classifies_short_followup_as_ai_lane_when_context_exists() -> None:
+    ai_route = SimpleNamespace(
+        kind="ai",
+        commands=[],
+        assistant_lines=[],
+        queue_items=[],
+        execution_result=None,
+    )
+    local_route = SimpleNamespace(
+        kind="local",
+        commands=[],
+        assistant_lines=[],
+        queue_items=[],
+        execution_result=None,
+    )
+    runtime = _build_runtime(ai_route)
+
+    first = ServiceContainer.handle_external_command(runtime, "как дела?", telegram_chat_id="777")
+    runtime._command_router.route = local_route
+    second = ServiceContainer.classify_external_command(runtime, "ок", telegram_chat_id="777")
+
+    assert first == "AI"
+    assert second == "ai"
 
 
 def test_handle_external_command_keeps_telegram_history_isolated_by_chat_id() -> None:

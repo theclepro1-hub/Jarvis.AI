@@ -44,10 +44,21 @@ Rectangle {
         if (status.last_error && status.last_error.length > 0) {
             return status.last_error
         }
+        if (status.update_available && status.can_apply) {
+            return "Найдена новая версия. Можно установить автоматически или скачать релиз."
+        }
         if (status.update_available) {
-            return "Найдена новая версия. Можно открыть релиз и скачать свежий установщик."
+            return "Найдена новая версия. Доступна ручная загрузка с релиза."
         }
         return settingsBridge.updateSummary
+    }
+
+    function updateReleaseUrl() {
+        const status = settingsBridge.updateStatus
+        if (status.release_url && status.release_url.length > 0) {
+            return status.release_url
+        }
+        return "https://github.com/theclepro1-hub/Jarvis.AI/releases/latest"
     }
 
     Popup {
@@ -144,7 +155,7 @@ Rectangle {
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Groq"
+                    title: "Облачный ИИ"
                     description: "Основной ключ для ответов JARVIS."
                     helpText: "Если ключ есть, JARVIS сможет отвечать через облако."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -154,9 +165,9 @@ Rectangle {
                         id: groqConnectionField
                         objectName: "settingsGroqField"
                         Layout.fillWidth: true
-                        label: "Ключ Groq"
+                        label: "Ключ облачного ИИ"
                         text: settingsBridge.groqApiKey
-                        placeholderText: "Вставьте ключ Groq"
+                        placeholderText: "Вставьте ключ облачного ИИ"
                         secret: true
                     }
                 }
@@ -632,11 +643,20 @@ Rectangle {
                         onClicked: settingsBridge.checkForUpdates()
                     }
 
+                    PrimaryButton {
+                        objectName: "installUpdateButton"
+                        text: "Установить обновление"
+                        visible: settingsBridge.updateStatus.update_available && settingsBridge.updateStatus.can_apply
+                        enabled: !settingsBridge.updateCheckBusy && settingsBridge.updateStatus.can_apply
+                        onClicked: settingsBridge.applyUpdate()
+                    }
+
                     SecondaryButton {
-                        objectName: "openReleaseButton"
-                        text: "Открыть релиз"
-                        enabled: settingsBridge.updateStatus.release_url && settingsBridge.updateStatus.release_url.length > 0
-                        onClicked: Qt.openUrlExternally(settingsBridge.updateStatus.release_url)
+                        objectName: "downloadUpdateButton"
+                        text: "Скачать обновление"
+                        visible: settingsBridge.updateStatus.update_available
+                        enabled: !settingsBridge.updateCheckBusy
+                        onClicked: Qt.openUrlExternally(settingsRoot.updateReleaseUrl())
                     }
 
                     Item { Layout.fillWidth: true }

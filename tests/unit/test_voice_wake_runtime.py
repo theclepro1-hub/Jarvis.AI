@@ -108,3 +108,12 @@ def test_wake_service_stop_cancels_active_voice_pipeline():
     wake.stop()
 
     assert calls == ["cancelled"]
+
+
+def test_wake_service_recognizes_common_wake_mishears():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    assert wake._contains_wake('{"text": "жаравис"}') is True  # noqa: SLF001
+    assert wake._contains_wake('{"text": "дарвис"}') is True  # noqa: SLF001

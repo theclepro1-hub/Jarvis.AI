@@ -93,7 +93,7 @@ Rectangle {
 
                     Text {
                         visible: settingsBridge.assistantMode !== "private"
-                        text: 'Получить ключ можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://console.groq.com/keys">https://console.groq.com/keys</a>'
+                        text: 'Открыть страницу ключей можно здесь: <a style="color:#68f0d1;text-decoration:none" href="https://console.groq.com/keys">Открыть страницу ключей</a>'
                         textFormat: Text.RichText
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily

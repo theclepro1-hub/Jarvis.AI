@@ -5,12 +5,7 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QTimer, QUrl
-from PySide6.QtGui import QAction, QFontDatabase, QIcon
-from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
-
-from core.services.service_container import ServiceContainer
+from PySide6.QtCore import QEvent, QObject, QTimer
 
 
 def _boot_log(message: str) -> None:
@@ -48,6 +43,8 @@ def _background_start_delay_ms() -> int:
 
 
 def _load_embedded_fonts() -> None:
+    from PySide6.QtGui import QFontDatabase
+
     fonts_dir = Path(__file__).resolve().parents[1] / "assets" / "fonts"
     if not fonts_dir.exists():
         return
@@ -83,6 +80,7 @@ class JarvisUnityApplication:
         self._update_checking = False
         _load_embedded_fonts()
         _boot_log("app:init:fonts")
+        from core.services.service_container import ServiceContainer
         from core.state.app_state import AppState
         from ui.bridge.app_bridge import AppBridge
         from ui.bridge.apps_bridge import AppsBridge
@@ -95,6 +93,8 @@ class JarvisUnityApplication:
         _boot_log("app:init:services")
         self.state = AppState()
         _boot_log("app:init:state")
+        from PySide6.QtQml import QQmlApplicationEngine
+
         self.engine = QQmlApplicationEngine()
         _boot_log("app:init:engine")
 
@@ -114,6 +114,8 @@ class JarvisUnityApplication:
         _boot_log("app:init:registration-bridge")
 
     def start(self) -> None:
+        from PySide6.QtCore import QUrl
+
         _boot_log("app:start:begin")
         self.qapp.aboutToQuit.connect(self.voice_bridge.shutdown)
         self.qapp.aboutToQuit.connect(self.settings_bridge.shutdown)
@@ -150,6 +152,9 @@ class JarvisUnityApplication:
             _boot_log("app:start:wake-scheduled")
 
     def _install_tray_mode(self, *, eager: bool) -> None:
+        from PySide6.QtGui import QAction, QIcon
+        from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
         if self.window is not None and self._close_filter is None:
             self._close_filter = _WindowCloseFilter(self)
             self.window.installEventFilter(self._close_filter)
@@ -208,6 +213,8 @@ class JarvisUnityApplication:
         return not self._force_quit and self._tray_enabled()
 
     def hide_to_tray(self, *, show_message: bool) -> None:
+        from PySide6.QtWidgets import QSystemTrayIcon
+
         if self.window is None or not self._tray_enabled():
             return
         self.window.hide()
@@ -239,6 +246,8 @@ class JarvisUnityApplication:
         self.qapp.quit()
 
     def _handle_tray_activated(self, reason) -> None:
+        from PySide6.QtWidgets import QSystemTrayIcon
+
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show_window()
 

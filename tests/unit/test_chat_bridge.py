@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from core.ai.ai_service import AIReplyResult
 from core.models.action_models import ExecutionResult, ExecutionStep
 from ui.bridge.chat_bridge import ChatBridge
@@ -191,6 +193,18 @@ def test_wake_noise_does_not_enter_chat_history_but_reminders_do() -> None:
     assert bridge.messages[-1]["text"] == "Напоминание: чай"
 
 
+def test_generic_cloud_stt_noise_does_not_enter_chat_history() -> None:
+    bridge, _services = _bridge_for(
+        SimpleNamespace(kind="ai", commands=[], assistant_lines=[], queue_items=[], execution_result=None)
+    )
+    before = len(bridge.messages)
+
+    bridge.appendAssistantNote("Нужен ключ для облачного распознавания речи.")
+    bridge.appendAssistantNote("Нужна локальная модель или ключ для облачного распознавания речи.")
+
+    assert len(bridge.messages) == before
+
+
 def test_chat_bridge_clears_wake_hint_on_assistant_note() -> None:
     route = SimpleNamespace(kind="ai", commands=["чай"], assistant_lines=[], queue_items=["чай"], execution_result=None)
     wake_bridge = _WakeBridge()
@@ -303,8 +317,40 @@ def test_chat_bridge_exposes_last_response_hint_from_ai_result(monkeypatch) -> N
     bridge.sendMessage("как дела")
 
     assert services.ai.received == ["как дела"]
-    assert bridge.lastResponseHint == "Быстро: Groq · 0.1 с"
+    assert bridge.lastResponseHint == "Быстрый: Groq · 0.1 с"
     assert bridge.thinkingLabel == ""
+
+
+@pytest.mark.parametrize(
+    ("assistant_mode", "expected_stage"),
+    [
+        ("fast", "Быстрый режим"),
+        ("standard", "Стандартный режим"),
+        ("smart", "Умный режим"),
+        ("private", "Приватный режим"),
+    ],
+)
+def test_chat_bridge_reports_assistant_modes_honestly_in_stage_labels(assistant_mode: str, expected_stage: str) -> None:
+    route = SimpleNamespace(kind="ai", commands=["как дела"], assistant_lines=[], queue_items=["как дела"], execution_result=None)
+    bridge, services = _bridge_for(route)
+    services.settings = SimpleNamespace(get=lambda key, default=None: {"assistant_mode": assistant_mode}.get(key, default))
+
+    assert bridge._initial_ai_stage_label(None) == f"{expected_stage}: готовлю ответ…"
+
+
+def test_chat_bridge_keeps_smart_mode_out_of_auto_hint() -> None:
+    route = SimpleNamespace(kind="ai", commands=["как пройти FNAF 4"], assistant_lines=[], queue_items=["как пройти FNAF 4"], execution_result=None)
+    bridge, _services = _bridge_for(route)
+    result = AIReplyResult(
+        text="умный ответ",
+        mode="smart",
+        provider="gemini",
+        provider_label="Gemini",
+        model="gemini-3-flash-preview",
+        elapsed_ms=220,
+    )
+
+    assert bridge._format_ai_response_hint(result) == "Умный: Gemini · 0.2 с"
 
 
 def test_chat_bridge_sanitizes_ai_markdown_before_appending(monkeypatch) -> None:
@@ -460,7 +506,7 @@ def test_chat_bridge_normalizes_legacy_local_ai_mode_in_stage_and_hint() -> None
         get=lambda key, default=None: {"ai_mode": "local", "ai_provider": "auto"}.get(key, default)
     )
 
-    assert bridge._initial_ai_stage_label(None) == "Готовлю ответ ИИ…"
+    assert bridge._initial_ai_stage_label(None) == "Стандартный режим: готовлю ответ…"
 
     hint = bridge._format_ai_response_hint(
         SimpleNamespace(mode="local", provider_label="Groq", elapsed_ms=150, fallback_used=False)

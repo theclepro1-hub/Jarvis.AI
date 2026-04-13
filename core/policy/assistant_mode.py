@@ -61,6 +61,8 @@ def local_llama_ready(settings_service) -> bool:
 def resolve_assistant_policy(settings_service, readiness: AssistantReadiness | None = None) -> AssistantPolicy:
     mode = resolve_assistant_mode(settings_service)
     readiness = readiness or AssistantReadiness(local_llama_ready=local_llama_ready(settings_service))
+    allow_text_cloud_fallback = bool(settings_service.get("allow_text_cloud_fallback", True))
+    allow_stt_cloud_fallback = bool(settings_service.get("allow_stt_cloud_fallback", True))
 
     text_route: tuple[str, ...]
     stt_route: tuple[str, ...]
@@ -83,19 +85,21 @@ def resolve_assistant_policy(settings_service, readiness: AssistantReadiness | N
         stt_cloud_allowed = False
         privacy = "no_cloud_ever"
     else:
-        text_route = ("local_llama", "groq", "cerebras", "openrouter")
+        text_route = ("groq", "cerebras", "openrouter", "local_llama")
         stt_route = ("local_faster_whisper", "local_vosk", "groq_whisper")
 
     text_override = str(settings_service.get("text_backend_override", "auto")).strip().lower()
     if text_override in TEXT_OVERRIDES and text_override != "auto":
-        text_route = ("local_llama",) if text_override == "local_llama" else (text_override,)
+        # A stale legacy local override should not silently hijack cloud-capable
+        # assistant modes. Keep explicit cloud overrides, but only allow forcing
+        # local_llama when the user asked for private mode or disabled cloud fallback.
+        if text_override != "local_llama" or mode == "private" or not allow_text_cloud_fallback:
+            text_route = ("local_llama",) if text_override == "local_llama" else (text_override,)
 
     stt_override = str(settings_service.get("stt_backend_override", "auto")).strip().lower()
     if stt_override in STT_OVERRIDES and stt_override != "auto":
         stt_route = (stt_override,)
 
-    allow_text_cloud_fallback = bool(settings_service.get("allow_text_cloud_fallback", True))
-    allow_stt_cloud_fallback = bool(settings_service.get("allow_stt_cloud_fallback", True))
     if mode == "private":
         allow_text_cloud_fallback = False
         allow_stt_cloud_fallback = False

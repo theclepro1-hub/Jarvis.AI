@@ -539,6 +539,17 @@ def test_command_router_routes_plain_conversation_to_ai_fallback() -> None:
     assert result.execution_result is None
 
 
+def test_command_router_voice_conversation_after_wake_falls_back_to_ai() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("жаравис, куча дела", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["куча дела"]
+    assert result.assistant_lines == []
+    assert result.execution_result is None
+
+
 def test_command_router_strips_wake_like_prefix_before_ai_fallback() -> None:
     router, _actions, _pc_control = make_router()
 
@@ -546,6 +557,24 @@ def test_command_router_strips_wake_like_prefix_before_ai_fallback() -> None:
 
     assert result.kind == "ai"
     assert result.commands == ["как дела"]
+
+
+def test_command_router_strips_darvis_like_prefix_before_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("дарвис, как дела?", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела?"]
+
+
+def test_command_router_strips_ryzh_like_prefix_before_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("рыж, сколько у тебя дела?", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["сколько у тебя дела?"]
 
 
 def test_command_router_preview_marks_plain_conversation_as_ai_path() -> None:

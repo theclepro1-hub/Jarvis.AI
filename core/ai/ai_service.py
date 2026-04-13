@@ -9,28 +9,57 @@ import httpx
 from openai import OpenAI
 
 from core.policy.assistant_mode import resolve_assistant_mode, resolve_assistant_policy
+from core.ai.reply_text import SUPPORTED_AI_MODES, sanitize_ai_reply_text
 
 
 SYSTEM_PROMPT = """
 Ты JARVIS Unity.
 Отвечай быстро, коротко и по делу.
+Отвечай на языке пользователя. Если пользователь пишет по-русски, не переходи на английский без явной причины.
 Не используй markdown-таблицы, длинные списки и простыни.
 Если запрос касается действия на ПК, не утверждай, что оно уже выполнено, пока не получил реальный локальный результат.
-Если данных не хватает, задай один короткий вопрос.
+На общие вопросы вроде "как", "что", "почему" или "как пройти" сначала дай короткий полезный ответ по существу; не переводи такие запросы сразу в уточнение.
+Один короткий уточняющий вопрос задавай только если без него ответ будет пустым, нечестным или рискованным.
 Тон: спокойный, взрослый, уверенный.
 """.strip()
 
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
-SUPPORTED_AI_MODES = ("auto", "fast", "quality")
 SUPPORTED_AI_MODE_SET = frozenset(SUPPORTED_AI_MODES)
 SUPPORTED_AI_PROFILES = ("auto", "groq_fast", "cerebras_fast", "gemini_quality", "openrouter_free")
 AI_MODES = SUPPORTED_AI_MODE_SET
 DEFAULT_NO_PROXY = "localhost,127.0.0.1,::1"
 AI_MODE_BUDGET_SECONDS: dict[str, float] = {
     "auto": 5.0,
-    "fast": 2.5,
+    "fast": 4.5,
     "quality": 9.0,
 }
+MODE_CONTEXT_WINDOWS: dict[str, int] = {
+    "auto": 6,
+    "fast": 4,
+    "quality": 8,
+    "standard": 6,
+    "smart": 8,
+    "private": 6,
+}
+_CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
+_LATIN_PATTERN = re.compile(r"[A-Za-z]")
+_DIRECT_ANSWER_PREFIXES = (
+    "как ",
+    "что ",
+    "почему ",
+    "зачем ",
+    "когда ",
+    "где ",
+    "кто ",
+    "сколько ",
+    "расскажи",
+    "объясни",
+    "подскажи",
+    "посоветуй",
+    "как пройти",
+    "как настроить",
+    "как сделать",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,64 +97,6 @@ class AIReplyResult:
     elapsed_ms: int = 0
     fallback_used: bool = False
     error: str = ""
-
-
-_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
-_MARKDOWN_FENCE_PATTERN = re.compile(r"```(?:[\w+-]+\n)?|```")
-_MARKDOWN_MARKERS_PATTERN = re.compile(r"(\*\*|__|~~|`)")
-_LIST_PREFIX_PATTERN = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
-_TABLE_SEPARATOR_PATTERN = re.compile(r"^[\s|:\-]+$")
-
-
-def sanitize_ai_reply_text(text: str, *, max_lines: int = 5, max_chars: int = 800) -> str:
-    clean = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not clean:
-        return ""
-
-    clean = _MARKDOWN_LINK_PATTERN.sub(r"\1", clean)
-    clean = _MARKDOWN_FENCE_PATTERN.sub("", clean)
-    clean = _MARKDOWN_MARKERS_PATTERN.sub("", clean)
-
-    lines: list[str] = []
-    for raw_line in clean.split("\n"):
-        line = raw_line.strip()
-        if not line:
-            if lines and lines[-1] != "":
-                lines.append("")
-            continue
-        if line.count("|") >= 2:
-            if _TABLE_SEPARATOR_PATTERN.fullmatch(line):
-                continue
-            cells = [_MARKDOWN_MARKERS_PATTERN.sub("", cell).strip() for cell in line.strip("|").split("|")]
-            cells = [cell for cell in cells if cell]
-            if not cells:
-                continue
-            line = " — ".join(cells)
-        line = _LIST_PREFIX_PATTERN.sub("", line)
-        line = re.sub(r"\s{2,}", " ", line)
-        if line:
-            lines.append(line)
-
-    while lines and not lines[0]:
-        lines.pop(0)
-    while lines and not lines[-1]:
-        lines.pop()
-    compact: list[str] = []
-    for line in lines:
-        if line == "" and (not compact or compact[-1] == ""):
-            continue
-        compact.append(line)
-
-    if not compact:
-        return ""
-    if len(compact) > max_lines:
-        compact = compact[:max_lines]
-        compact[-1] = compact[-1].rstrip(" .") + "…"
-
-    reply = "\n".join(compact).strip()
-    if len(reply) > max_chars:
-        reply = reply[:max_chars].rstrip(" ,;:-") + "…"
-    return reply
 
 
 PROVIDERS: dict[str, ProviderSpec] = {
@@ -217,7 +188,7 @@ class AIService:
 
         ai_mode = self._ai_mode()
         started_at = time.perf_counter()
-        messages = self._build_messages(user_text, history or [])
+        messages = self._build_messages(user_text, history or [], mode=ai_mode)
         attempts = self.provider_plan(ai_mode)
         if not attempts:
             reply = self._fallback_reply(user_text)
@@ -271,10 +242,11 @@ class AIService:
                 )
             last_error = error or last_error
             if index < len(attempts) - 1:
-                next_spec = PROVIDERS[attempts[index + 1].provider]
+                next_attempt = attempts[index + 1]
+                next_spec = PROVIDERS[next_attempt.provider]
                 self._report_stage(
                     status_callback,
-                    self._fallback_stage_label(spec, next_spec),
+                    self._fallback_stage_label(spec, attempt.model, next_spec, next_attempt.model),
                 )
 
         return AIReplyResult(
@@ -295,7 +267,7 @@ class AIService:
         mode = resolve_assistant_mode(self.settings)
         policy = resolve_assistant_policy(self.settings)
         started_at = time.perf_counter()
-        messages = self._build_messages(user_text, history)
+        messages = self._build_messages(user_text, history, mode=mode)
         budget_seconds = self._mode_budget_seconds(self._assistant_mode_request_mode(mode))
         last_error: str | None = None
 
@@ -307,6 +279,9 @@ class AIService:
                 break
 
             if backend == "local_llama":
+                if "local_llama_missing" in policy.readiness_issues:
+                    last_error = "local_llama_missing"
+                    continue
                 self._report_stage(status_callback, self._assistant_stage_label(mode, "Локальная Llama", index, len(policy.text_route)))
                 reply, error = self._try_local_llama(messages)
                 if reply:
@@ -330,25 +305,32 @@ class AIService:
                 continue
             model_mode = self._assistant_mode_request_mode(mode)
             self._report_stage(status_callback, self._assistant_stage_label(mode, spec.label, index, len(policy.text_route)))
-            reply, error = self._try_provider(
-                spec,
-                spec.models[model_mode],
-                api_key,
-                messages,
-                ai_mode=model_mode,
-                budget_seconds=remaining_budget,
-            )
-            if reply:
-                return AIReplyResult(
-                    text=reply,
-                    mode=mode,
-                    provider=spec.key,
-                    provider_label=spec.label,
-                    model=spec.models[model_mode],
-                    elapsed_ms=self._elapsed_ms(started_at),
-                    fallback_used=index > 0,
+            model_candidates = self._provider_model_candidates(spec, model_mode)
+            for model_index, model_name in enumerate(model_candidates):
+                if model_index > 0:
+                    self._report_stage(
+                        status_callback,
+                        self._assistant_stage_label(mode, f"{spec.label} (резервная модель)", index, len(policy.text_route)),
+                    )
+                reply, error = self._try_provider(
+                    spec,
+                    model_name,
+                    api_key,
+                    messages,
+                    ai_mode=model_mode,
+                    budget_seconds=remaining_budget,
                 )
-            last_error = error or last_error
+                if reply:
+                    return AIReplyResult(
+                        text=reply,
+                        mode=mode,
+                        provider=spec.key,
+                        provider_label=spec.label,
+                        model=model_name,
+                        elapsed_ms=self._elapsed_ms(started_at),
+                        fallback_used=index > 0 or model_index > 0,
+                    )
+                last_error = error or last_error
 
         if mode == "private" and not policy.text_cloud_allowed:
             return AIReplyResult(
@@ -375,14 +357,32 @@ class AIService:
         else:
             provider_keys = PROVIDER_PLANS[mode]
 
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         attempts: list[ProviderAttempt] = []
         for provider_key in provider_keys:
-            if provider_key in seen:
-                continue
-            seen.add(provider_key)
             spec = PROVIDERS[provider_key]
-            attempts.append(ProviderAttempt(provider=provider_key, model=spec.models[mode]))
+            attempt = ProviderAttempt(provider=provider_key, model=spec.models[mode])
+            identity = (attempt.provider, attempt.model)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            attempts.append(attempt)
+
+        # Some OpenAI-compatible providers intermittently return an empty body on
+        # their lightweight fast model. Keep the fast lane reliable by allowing
+        # one in-provider fallback to the provider's quality model before giving up.
+        if mode == "fast":
+            for provider_key in provider_keys:
+                spec = PROVIDERS[provider_key]
+                fallback_model = str(spec.models.get("quality", "")).strip()
+                if not fallback_model or fallback_model == spec.models["fast"]:
+                    continue
+                attempt = ProviderAttempt(provider=provider_key, model=fallback_model)
+                identity = (attempt.provider, attempt.model)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                attempts.append(attempt)
         return attempts
 
     def network_settings(self) -> NetworkSettings:
@@ -423,6 +423,7 @@ class AIService:
         last_error: str | None = None
         started_at = time.perf_counter()
         request_options = self._mode_request_options(ai_mode)
+        network = self.network_settings()
 
         for attempt_index in range(max_attempts):
             http_client: httpx.Client | None = None
@@ -431,14 +432,14 @@ class AIService:
                 remaining_budget = budget_seconds - elapsed
                 if remaining_budget <= 0:
                     break
-                http_client = self._make_http_client()
+                http_client = self._make_http_client(network)
                 client = self._client_factory(
                     api_key=api_key,
                     base_url=spec.base_url,
                     http_client=http_client,
                     default_headers=self._default_headers(spec),
                 )
-                request_timeout = max(0.8, min(self.network_settings().timeout_seconds, remaining_budget))
+                request_timeout = max(0.8, min(network.timeout_seconds, remaining_budget))
                 response = client.chat.completions.create(
                     model=model,
                     messages=messages,
@@ -460,8 +461,8 @@ class AIService:
                     http_client.close()
         return None, last_error
 
-    def _make_http_client(self) -> httpx.Client:
-        network = self.network_settings()
+    def _make_http_client(self, network: NetworkSettings | None = None) -> httpx.Client:
+        network = network or self.network_settings()
         timeout = httpx.Timeout(network.timeout_seconds)
         if network.proxy_mode == "manual" and network.proxy_url:
             return httpx.Client(proxy=network.proxy_url, timeout=timeout, trust_env=False)
@@ -491,9 +492,22 @@ class AIService:
     def _assistant_mode_enabled(self) -> bool:
         return bool(str(self.settings.get("assistant_mode", "")).strip())
 
+    def _provider_model_candidates(self, spec: ProviderSpec, mode: str) -> list[str]:
+        primary = str(spec.models.get(mode, "")).strip()
+        if not primary:
+            return []
+        models = [primary]
+        if mode in {"auto", "fast"}:
+            quality = str(spec.models.get("quality", "")).strip()
+            if quality and quality != primary:
+                models.append(quality)
+        return models
+
     def _assistant_mode_request_mode(self, mode: str) -> str:
         if mode == "fast":
             return "fast"
+        if mode == "standard":
+            return "auto"
         if mode == "smart":
             return "quality"
         return "auto"
@@ -533,7 +547,7 @@ class AIService:
         if mode == "fast":
             return {
                 "temperature": 0.2,
-                "max_tokens": 160,
+                "max_tokens": 240,
             }
         if mode == "quality":
             return {
@@ -563,7 +577,15 @@ class AIService:
             return f"{mode_label}: {spec.label}…"
         return f"{mode_label}: {spec.label} ({attempt_index + 1}/{attempts_total})…"
 
-    def _fallback_stage_label(self, current: ProviderSpec, next_spec: ProviderSpec) -> str:
+    def _fallback_stage_label(
+        self,
+        current: ProviderSpec,
+        current_model: str,
+        next_spec: ProviderSpec,
+        next_model: str,
+    ) -> str:
+        if current.key == next_spec.key and current_model != next_model:
+            return f"{current.label} не ответил, пробую резервную модель…"
         return f"{current.label} не ответил, переключаюсь на {next_spec.label}…"
 
     def _report_stage(self, callback: Callable[[str], None] | None, text: str) -> None:
@@ -587,9 +609,9 @@ class AIService:
     def available_profiles(self) -> tuple[str, ...]:
         return SUPPORTED_AI_PROFILES
 
-    def _build_messages(self, user_text: str, history: list[dict[str, str]]) -> list[dict[str, str]]:
-        messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for item in history[-6:]:
+    def _build_messages(self, user_text: str, history: list[dict[str, str]], *, mode: str = "auto") -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = [{"role": "system", "content": self._system_prompt_for_mode(mode)}]
+        for item in history[-self._history_window_for_mode(mode):]:
             role = str(item.get("role", "")).strip()
             if role not in {"user", "assistant"}:
                 continue
@@ -601,8 +623,68 @@ class AIService:
                 if not text:
                     continue
             messages.append({"role": role, "content": text})
-        messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "user", "content": self._augment_user_prompt(user_text, mode=mode)})
         return messages
+
+    def _augment_user_prompt(self, user_text: str, *, mode: str) -> str:
+        clean = str(user_text or "").strip()
+        if not clean:
+            return ""
+
+        notes: list[str] = []
+        if self._looks_russian_text(clean):
+            notes.append("Ответь полностью по-русски.")
+            notes.append(
+                "Если в ответе есть название игры, приложения или сервиса, не начинай с английского заголовка; "
+                "используй русское написание или короткое пояснение в начале."
+            )
+        if self._should_answer_directly(clean):
+            notes.append("Сразу дай короткий ответ по существу. Не начинай с вопроса-уточнения.")
+        if mode == "fast":
+            notes.append("Уложись в 2-4 коротких предложения без воды.")
+        elif mode == "smart":
+            notes.append("Если нужно, добавь только самые полезные детали и не расползайся.")
+        elif mode == "standard":
+            notes.append("Сначала дай рабочий ответ, а уже потом при необходимости предложи уточнить.")
+
+        if not notes:
+            return clean
+        return "Инструкция для ответа:\n- " + "\n- ".join(notes) + f"\n\nЗапрос пользователя:\n{clean}"
+
+    def _looks_russian_text(self, text: str) -> bool:
+        return bool(_CYRILLIC_PATTERN.search(str(text or "")))
+
+    def _should_answer_directly(self, text: str) -> bool:
+        clean = str(text or "").strip().casefold()
+        if not clean:
+            return False
+        if clean.startswith(_DIRECT_ANSWER_PREFIXES):
+            return True
+        return "?" in clean and not self._looks_mostly_english(clean)
+
+    def _looks_mostly_english(self, text: str) -> bool:
+        sample = str(text or "")
+        return bool(_LATIN_PATTERN.search(sample)) and not self._looks_russian_text(sample)
+
+    def _history_window_for_mode(self, mode: str) -> int:
+        normalized = self._normalize_mode(mode)
+        if mode in MODE_CONTEXT_WINDOWS:
+            return MODE_CONTEXT_WINDOWS[mode]
+        return MODE_CONTEXT_WINDOWS.get(normalized, MODE_CONTEXT_WINDOWS["auto"])
+
+    def _system_prompt_for_mode(self, mode: str) -> str:
+        normalized = self._normalize_mode(mode)
+        if mode == "private":
+            note = "Режим private: держи ответы локальными, сдержанными и без ссылок на облако."
+        elif mode == "smart" or normalized == "quality":
+            note = "Режим smart: выбирай самый точный ответ и добавляй только нужные нюансы. На общий вопрос сначала дай полезный стартовый ответ, а не один вопрос-уточнение."
+        elif mode == "fast":
+            note = "Режим fast: отвечай как можно быстрее, короче и без лишней воды."
+        elif mode == "standard" or normalized == "auto":
+            note = "Режим standard: держи баланс между скоростью и качеством, отвечай естественно. На общий вопрос сначала дай короткий рабочий ответ, а потом при необходимости предложи уточнить."
+        else:
+            note = ""
+        return f"{SYSTEM_PROMPT}\n{note}" if note else SYSTEM_PROMPT
 
     def _extract_text(self, response: Any) -> str:
         output_text = getattr(response, "output_text", "")

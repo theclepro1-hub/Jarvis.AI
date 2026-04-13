@@ -167,12 +167,15 @@ def test_voice_bridge_prewarm_refreshes_cached_status(monkeypatch):
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
 
-    calls = {"refresh": 0}
+    calls = {"warmup": 0, "refresh": 0}
+    monkeypatch.setattr(bridge, "_start_voice_runtime_warmup", lambda: calls.__setitem__("warmup", calls["warmup"] + 1))
     monkeypatch.setattr(bridge, "_refresh_voice_status_cache", lambda: calls.__setitem__("refresh", calls["refresh"] + 1))
 
     bridge.prewarm()
 
+    assert calls["warmup"] == 1
     assert calls["refresh"] == 1
+    assert services.wake.start_calls == 0
 
 
 def test_voice_bridge_deliver_transcribed_text_sets_handoff_status():
@@ -221,11 +224,21 @@ def test_voice_bridge_preserves_missing_key_note_through_finalize():
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
 
-    bridge._push_voice_note("Нужен ключ Groq для облачного распознавания речи.")  # noqa: SLF001
+    bridge._push_voice_note("Нужен ключ для облачного распознавания речи.")  # noqa: SLF001
     bridge._finalize_capture()  # noqa: SLF001
 
-    assert state.status == "Нужен ключ Groq для облачного распознавания речи."
-    assert bridge.recordingHint == "Нужен ключ Groq для облачного распознавания речи."
+    assert state.status == "Нужен ключ для облачного распознавания речи."
+    assert bridge.recordingHint == "Нужен ключ для облачного распознавания речи."
+
+
+def test_voice_bridge_classifies_generic_cloud_note_as_stt_error():
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    bridge._handle_voice_test_note("Нужен ключ для облачного распознавания речи.")  # noqa: SLF001
+
+    assert bridge.voiceTest["stage"] == "error_stt"
 
 
 def test_voice_bridge_preserves_missing_model_note_through_finalize():
@@ -233,11 +246,11 @@ def test_voice_bridge_preserves_missing_model_note_through_finalize():
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
 
-    bridge._push_voice_note("Нужна локальная или облачная модель распознавания речи.")  # noqa: SLF001
+    bridge._push_voice_note("Нужна локальная модель или ключ для облачного распознавания речи.")  # noqa: SLF001
     bridge._finalize_capture()  # noqa: SLF001
 
-    assert state.status == "Нужна локальная или облачная модель распознавания речи."
-    assert bridge.recordingHint == "Нужна локальная или облачная модель распознавания речи."
+    assert state.status == "Нужна локальная модель или ключ для облачного распознавания речи."
+    assert bridge.recordingHint == "Нужна локальная модель или ключ для облачного распознавания речи."
 
 
 def test_voice_bridge_clears_wake_hint_when_capture_finishes():

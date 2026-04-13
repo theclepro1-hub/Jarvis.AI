@@ -167,6 +167,39 @@ def test_speech_capture_treats_wake_pre_roll_as_active_speech(monkeypatch):
     assert result.speech_started is True
 
 
+def test_speech_capture_does_not_treat_silent_pre_roll_as_speech(monkeypatch):
+    frames = 1600
+
+    def pcm_block(amplitude: int) -> bytes:
+        return array("h", [amplitude] * frames).tobytes()
+
+    blocks = iter((pcm_block(0), pcm_block(0), pcm_block(0), pcm_block(0)))
+
+    class FakeStream:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN002, ANN003
+            return False
+
+        def read(self, blocksize):  # noqa: ANN001
+            return next(blocks, pcm_block(0)), False
+
+    monkeypatch.setattr("core.voice.speech_capture_service.sd.RawInputStream", FakeStream)
+
+    service = SpeechCaptureService(
+        lambda: None,
+        threading.Event(),
+        config=CaptureConfig(max_seconds=0.3, silence_seconds=0.1, energy_threshold=160.0, pre_roll_grace_seconds=0.1),
+    )
+    result = service.capture_until_silence(pre_roll=pcm_block(0))
+
+    assert result.status == "no_speech"
+
+
 def test_speech_capture_adapts_to_steady_noise_before_real_speech(monkeypatch):
     frames = 1600
 
@@ -217,6 +250,13 @@ def test_speech_capture_adapts_to_steady_noise_before_real_speech(monkeypatch):
     assert result.speech_started is True
 
 
+def test_speech_capture_default_gate_stays_less_aggressive() -> None:
+    config = CaptureConfig()
+
+    assert config.noise_margin <= 24.0
+    assert config.speech_gate_ratio <= 1.18
+
+
 def test_stt_service_reports_missing_model_without_key(tmp_path):
     settings = SettingsService(FakeStore())
     service = STTService(settings, local_model_path=tmp_path / "missing-model")
@@ -225,8 +265,8 @@ def test_stt_service_reports_missing_model_without_key(tmp_path):
     result = service.transcribe_pcm_bytes(b"\x00" * 3200)
 
     assert result.status == "model_missing"
-    assert "backend" in result.detail.casefold() or "Groq" in result.detail
-    assert service.status_text() == "Нужен ключ Groq или локальный backend распознавания"
+    assert "backend" in result.detail.casefold() or "облач" in result.detail.casefold() or "локальн" in result.detail.casefold()
+    assert service.status_text() == "Нужен ключ для облачного распознавания или локальный backend распознавания речи"
     assert service.can_transcribe() is False
 
 

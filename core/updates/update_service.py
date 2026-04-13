@@ -12,7 +12,7 @@ from typing import Callable, TypeVar
 
 import httpx
 
-from core.version import DEFAULT_VERSION
+from core.version import DISPLAY_VERSION, UPDATE_VERSION
 
 
 DEFAULT_GITHUB_REPOSITORY = "theclepro1-hub/Jarvis.AI"
@@ -20,6 +20,8 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 20.0
 USER_AGENT = "JarvisAi_Unity/1.0"
 INSTALLER_LAUNCH_ARGUMENTS = ("/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS")
 HTTP_RETRY_COUNT = 2
+DISPLAY_VERSION_MARKER = re.compile(r"(?im)^display-version:\s*v?([0-9]+(?:\.[0-9]+){1,3})\s*$")
+SEMVER_PATTERN = re.compile(r"(?<!\d)([0-9]+(?:\.[0-9]+){1,3})(?!\d)")
 T = TypeVar("T")
 
 
@@ -66,13 +68,16 @@ class UpdateService:
         settings: object | None = None,
         *,
         repository: str = DEFAULT_GITHUB_REPOSITORY,
-        current_version: str = DEFAULT_VERSION,
+        current_version: str = UPDATE_VERSION,
+        current_display_version: str = DISPLAY_VERSION,
     ) -> None:
         self.settings = settings
         self.repository = repository
-        self.current_version_value = current_version
+        self.current_update_version_value = self._normalize_version(current_version)
+        self.current_version_value = self._normalize_version(current_display_version or DISPLAY_VERSION)
         self.channel = "stable"
         self.latest_version_value = ""
+        self.latest_update_version_value = ""
         self.release_url_value = ""
         self.last_error_value = ""
         self.last_checked_at_utc: datetime | None = None
@@ -114,8 +119,10 @@ class UpdateService:
         self._set_status("checking", "Проверяю обновления...")
         try:
             payload = self._fetch_latest_release_payload()
-            latest_version = self._normalize_version(str(payload.get("tag_name") or payload.get("name") or "").strip())
-            self.latest_version_value = latest_version or self.current_version_value
+            latest_update_version = self._normalize_version(str(payload.get("tag_name") or payload.get("name") or "").strip())
+            latest_display_version = self._display_version_from_payload(payload)
+            self.latest_update_version_value = latest_update_version or self.current_update_version_value
+            self.latest_version_value = latest_display_version or self.latest_update_version_value or self.current_version_value
             self.release_url_value = str(payload.get("html_url") or "").strip()
             self.assets = [
                 UpdateAsset(
@@ -127,7 +134,10 @@ class UpdateService:
                 for asset in payload.get("assets", [])
                 if isinstance(asset, dict)
             ]
-            self.update_available_value = self._is_newer_version(self.latest_version_value, self.current_version_value)
+            self.update_available_value = self._is_newer_version(
+                self.latest_update_version_value,
+                self.current_update_version_value,
+            )
             self.last_error_value = ""
             self.last_checked_at_utc = datetime.now(timezone.utc)
 
@@ -160,6 +170,7 @@ class UpdateService:
             self.last_error_value = self._format_error(exc)
             self.update_available_value = False
             self.latest_version_value = ""
+            self.latest_update_version_value = ""
             self.release_url_value = ""
             self.assets = []
             self.last_checked_at_utc = datetime.now(timezone.utc)
@@ -383,6 +394,8 @@ class UpdateService:
         return {
             "current_version": self.current_version_value,
             "latest_version": self.latest_version_value,
+            "current_update_version": self.current_update_version_value,
+            "latest_update_version": self.latest_update_version_value,
             "release_url": self.release_url_value,
             "update_available": self.update_available_value,
             "last_error": self.last_error_value,
@@ -441,6 +454,21 @@ class UpdateService:
     def _default_summary(self) -> str:
         channel = "стабильный" if self.channel == "stable" else self.channel
         return f"Версия {self.current_version_value} · канал {channel}"
+
+    def _display_version_from_payload(self, payload: dict[str, object]) -> str:
+        body = str(payload.get("body") or "").strip()
+        if body:
+            match = DISPLAY_VERSION_MARKER.search(body)
+            if match is not None:
+                return self._normalize_version(match.group(1))
+        for source_field in ("name", "tag_name"):
+            raw = str(payload.get(source_field) or "").strip()
+            if not raw:
+                continue
+            match = SEMVER_PATTERN.search(raw)
+            if match is not None:
+                return self._normalize_version(match.group(1))
+        return ""
 
     def _apply_hint(self, preferred_asset: UpdateAsset | None) -> str:
         if not self.apply_supported_value:

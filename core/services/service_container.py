@@ -11,6 +11,11 @@ from core.services.chat_history_store import ChatHistoryStore
 from core.settings.settings_service import SettingsService
 from core.settings.startup_manager import StartupManager
 from core.settings.settings_store import SettingsStore
+from core.routing.text_rules import (
+    looks_like_broken_command,
+    looks_like_system_command,
+    normalize_text,
+)
 
 if TYPE_CHECKING:
     from core.actions.action_registry import ActionRegistry
@@ -100,6 +105,20 @@ class ServiceContainer:
         self._command_router = None
         _boot_log("services:init:lazy-heavy-services")
 
+    TELEGRAM_CONTEXTUAL_REPLY_WORDS = {
+        "да",
+        "нет",
+        "ок",
+        "ладно",
+        "угу",
+        "ага",
+        "понятно",
+        "ясно",
+        "спасибо",
+        "сорри",
+        "извини",
+    }
+
     def _ensure_lazy_lock(self):
         if not hasattr(self, "_lazy_lock") or self._lazy_lock is None:
             self._lazy_lock = threading.RLock()
@@ -112,32 +131,28 @@ class ServiceContainer:
         status_callback: Callable[[str], None] | None = None,
     ) -> str:
         route = self.command_router.handle(text, source="telegram", telegram_chat_id=telegram_chat_id)
-        if route.assistant_lines:
-            return "\n".join(route.assistant_lines)
-        if route.kind != "ai" and not route.commands:
-            return ""
-        if route.kind != "ai":
-            return self._telegram_route_reply(route)
         clean = " ".join(route.commands).strip() if route.commands else text
         history = self._telegram_history(telegram_chat_id)
-        prompt = self._telegram_ai_prompt(clean)
-        if hasattr(self.ai, "generate_reply_result"):
-            result = self.ai.generate_reply_result(prompt, history, status_callback=status_callback)
-            reply = str(getattr(result, "text", "") or "").strip()
-        else:
-            if status_callback is not None:
-                status_callback("telegram_ai")
-            reply = str(self.ai.generate_reply(prompt, history) or "").strip()
-        compact = self._compact_telegram_reply(reply)
-        self._remember_telegram_exchange(telegram_chat_id, clean, compact)
-        return compact
+        if route.kind != "ai":
+            if self._should_use_telegram_contextual_ai(clean, history):
+                return self._run_telegram_ai(clean, history, status_callback=status_callback, telegram_chat_id=telegram_chat_id)
+            if route.assistant_lines:
+                return "\n".join(route.assistant_lines)
+            if not route.commands:
+                return ""
+            return self._telegram_route_reply(route)
+        return self._run_telegram_ai(clean, history, status_callback=status_callback, telegram_chat_id=telegram_chat_id)
 
     def classify_external_command(self, text: str, telegram_chat_id: str = "") -> str:
         try:
             route = self.command_router.preview(text, source="telegram", telegram_chat_id=telegram_chat_id)
         except Exception:
             return "fast"
-        return "ai" if str(getattr(route, "kind", "")).strip().casefold() == "ai" else "fast"
+        if str(getattr(route, "kind", "")).strip().casefold() == "ai":
+            return "ai"
+        if self._should_use_telegram_contextual_ai(text, self._telegram_history(telegram_chat_id)):
+            return "ai"
+        return "fast"
 
     @property
     def ai(self) -> AIService:
@@ -392,11 +407,34 @@ class ServiceContainer:
         key = str(chat_id or "").strip()
         if not key:
             return []
-        with self._telegram_history_lock:
+        lock = getattr(self, "_telegram_history_lock", None)
+        if lock is None:
+            history = getattr(self, "_telegram_history_by_chat_id", {}).get(key)
+            if history is None:
+                return []
+            return [dict(item) for item in history]
+        with lock:
             history = self._telegram_history_by_chat_id.get(key)
             if history is None:
                 return []
             return [dict(item) for item in history]
+
+    def _telegram_recent_context(self, history: list[dict[str, str]], *, limit: int = 6) -> list[str]:
+        recent = history[-limit:]
+        lines: list[str] = []
+        for item in recent:
+            role = str(item.get("role", "") or "").strip().casefold()
+            speaker = "Пользователь" if role == "user" else "JARVIS"
+            text = self._telegram_limit_text(item.get("text", ""))
+            if text:
+                lines.append(f"{speaker}: {text}")
+        return lines
+
+    def _telegram_limit_text(self, text: object, *, limit: int = 120) -> str:
+        clean = normalize_text(str(text or "").strip())
+        if len(clean) <= limit:
+            return clean
+        return f"{clean[: max(0, limit - 1)].rstrip()}…"
 
     def _remember_telegram_exchange(self, chat_id: str, user_text: str, assistant_text: str) -> None:
         key = str(chat_id or "").strip()
@@ -412,21 +450,63 @@ class ServiceContainer:
             history.append({"role": "user", "text": user})
             history.append({"role": "assistant", "text": assistant})
 
-    def _telegram_ai_prompt(self, text: str) -> str:
+    def _telegram_ai_prompt(self, text: str, history: list[dict[str, str]]) -> str:
         clean = str(text or "").strip()
         if not clean:
             return ""
-        return (
-            "Ответь кратко и по делу для Telegram. "
-            "Без длинных вступлений, лишней вежливой воды и длинных списков, если они не нужны.\n\n"
-            f"{clean}"
-        )
+        prompt_lines = [
+            "Ты отвечаешь в Telegram как JARVIS.",
+            "Отвечай на языке пользователя.",
+            "Держи ответы короткими, но не сухими.",
+            "Если это команда, отвечай кратко и по делу без лишних вступлений.",
+            "Если это обычный разговор, отвечай естественно и по-человечески.",
+            "Если пользователь отвечает коротко вроде да/ок/ясно, опирайся на контекст.",
+            "Если не уверен или не знаешь ответ, скажи это прямо и задай один короткий уточняющий вопрос.",
+            "Не выдумывай факты.",
+        ]
+        context_lines = self._telegram_recent_context(history)
+        if context_lines:
+            prompt_lines.extend(["", "Контекст чата:"])
+            prompt_lines.extend(context_lines)
+        prompt_lines.extend(["", f"Текущий запрос: {clean}"])
+        return "\n".join(prompt_lines)
 
-    def _compact_telegram_reply(self, text: str) -> str:
+    def _compact_telegram_reply(self, text: str, *, max_lines: int = 4) -> str:
         lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
         if not lines:
             return ""
-        return "\n".join(lines)
+        return "\n".join(lines[:max_lines])
+
+    def _run_telegram_ai(
+        self,
+        text: str,
+        history: list[dict[str, str]],
+        *,
+        status_callback: Callable[[str], None] | None = None,
+        telegram_chat_id: str = "",
+    ) -> str:
+        prompt = self._telegram_ai_prompt(text, history)
+        if hasattr(self.ai, "generate_reply_result"):
+            result = self.ai.generate_reply_result(prompt, history, status_callback=status_callback)
+            reply = str(getattr(result, "text", "") or "").strip()
+        else:
+            if status_callback is not None:
+                status_callback("telegram_ai")
+            reply = str(self.ai.generate_reply(prompt, history) or "").strip()
+        compact = self._compact_telegram_reply(reply)
+        self._remember_telegram_exchange(telegram_chat_id, text, compact)
+        return compact
+
+    def _should_use_telegram_contextual_ai(self, text: str, history: list[dict[str, str]]) -> bool:
+        clean = normalize_text(text).casefold()
+        if not clean or not history:
+            return False
+        if looks_like_broken_command(clean) or looks_like_system_command(clean):
+            return False
+        words = clean.split()
+        if len(words) > 3:
+            return False
+        return any(word in self.TELEGRAM_CONTEXTUAL_REPLY_WORDS for word in words)
 
     def _telegram_route_reply(self, route) -> str:  # noqa: ANN001
         execution_result = getattr(route, "execution_result", None)

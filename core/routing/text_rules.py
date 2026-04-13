@@ -9,6 +9,9 @@ WAKE_PREFIX_ALIASES = (
     "гарби",
     "джарвис",
     "жарвис",
+    "жаравис",
+    "дарвис",
+    "рыж",
     "джервис",
     "джарвес",
     "джарис",
@@ -21,6 +24,8 @@ WAKE_PREFIX_ALIASES = (
 STRICT_WAKE_ALIASES = (
     "джарвис",
     "жарвис",
+    "жаравис",
+    "дарвис",
     "джервис",
     "jarvis",
 )
@@ -105,6 +110,7 @@ CONVERSATION_PREFIXES = (
 QUESTION_WORDS = (
     "как",
     "что",
+    "сколько",
     "почему",
     "зачем",
     "когда",
@@ -119,6 +125,27 @@ COMMAND_FILLER_PREFIXES = (
     "пожалуйста",
     "давай",
     "давайте",
+)
+
+VOICE_CONVERSATION_WORDS = (
+    "ты",
+    "тебя",
+    "тебе",
+    "мне",
+    "меня",
+    "дела",
+    "дело",
+    "куча",
+    "привет",
+    "спасибо",
+    "ладно",
+    "ок",
+    "ага",
+    "угу",
+    "норм",
+    "нормально",
+    "сегодня",
+    "сейчас",
 )
 
 
@@ -232,3 +259,14 @@ def looks_like_conversation(text: str) -> bool:
     if any(lower.startswith(f"{token} ") or lower == token for token in COMMAND_FRAGMENT_TOKENS):
         return False
     return True
+
+
+def looks_like_voice_conversation(text: str) -> bool:
+    clean = normalize_text(text)
+    lower = clean.casefold()
+    if not lower:
+        return False
+    if looks_like_explicit_conversation(lower):
+        return True
+    words = lower.split()
+    return len(words) <= 4 and any(word in VOICE_CONVERSATION_WORDS for word in words)

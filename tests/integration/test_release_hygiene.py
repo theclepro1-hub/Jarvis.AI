@@ -8,10 +8,12 @@ from core.app_identity import (
     WINDOWS_APP_USER_MODEL_ID,
     WINDOWS_EXECUTABLE_NAME,
     WINDOWS_INSTANCE_MUTEX,
+    WINDOWS_INSTANCE_SERVER,
     WINDOWS_SETUP_MUTEX,
 )
+from core.services.single_instance import SingleInstanceService
 from core.updates.update_service import UpdateService
-from core.version import DEFAULT_VERSION
+from core.version import DEFAULT_VERSION, DISPLAY_VERSION, UPDATE_VERSION
 from tools.release_metadata import render_installer_script
 
 
@@ -56,8 +58,10 @@ def test_release_docs_exist() -> None:
 def test_project_version_is_sourced_from_core_version() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     project = pyproject["project"]
+    update_service = UpdateService()
 
-    assert DEFAULT_VERSION == UpdateService().current_version
+    assert DEFAULT_VERSION == DISPLAY_VERSION == update_service.current_version
+    assert update_service.status_snapshot()["current_update_version"] == UPDATE_VERSION
     assert project.get("dynamic", []) == ["version"]
     assert pyproject["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "core.version.DEFAULT_VERSION"
 
@@ -86,11 +90,12 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert '--icon $iconPath' in build_script
     assert '--version-file $versionInfoFile' in build_script
     assert "RELEASE_VERSION $version" in build_script
+    assert "SetupMutex=JarvisAi_Unity_setup_mutex" in build_script
 
 
 def test_installer_metadata_matches_runtime_identity() -> None:
     bootstrap = Path("app/bootstrap.py").read_text(encoding="utf-8")
-    current_version = UpdateService().current_version
+    current_version = DEFAULT_VERSION
 
     installer_script = render_installer_script(
         version=current_version,
@@ -112,3 +117,37 @@ def test_installer_metadata_matches_runtime_identity() -> None:
     assert 'Type: filesandordirs; Name: "{app}"' in installer_script
     assert "from core.app_identity import WINDOWS_APP_DISPLAY_NAME, WINDOWS_APP_USER_MODEL_ID, WINDOWS_APP_VERSION" in bootstrap
     assert "QGuiApplication.setApplicationVersion(WINDOWS_APP_VERSION)" in bootstrap
+
+
+def test_single_instance_identity_is_versionless() -> None:
+    assert WINDOWS_INSTANCE_SERVER == "JarvisAi_Unity_instance"
+    assert "22" not in WINDOWS_INSTANCE_MUTEX
+    assert "22" not in WINDOWS_SETUP_MUTEX
+    assert SingleInstanceService().server_name == WINDOWS_INSTANCE_SERVER
+
+
+def test_startup_modules_keep_heavy_imports_lazy() -> None:
+    app_py = Path("app/app.py").read_text(encoding="utf-8")
+    chat_bridge_py = Path("ui/bridge/chat_bridge.py").read_text(encoding="utf-8")
+    app_lines = set(app_py.splitlines())
+    chat_bridge_lines = set(chat_bridge_py.splitlines())
+
+    assert "from core.services.service_container import ServiceContainer" not in app_lines
+    assert "from PySide6.QtGui import QAction, QFontDatabase, QIcon" not in app_lines
+    assert "from PySide6.QtQml import QQmlApplicationEngine" not in app_lines
+    assert "from PySide6.QtWidgets import QMenu, QSystemTrayIcon" not in app_lines
+    assert "from core.ai.reply_text import SUPPORTED_AI_MODES, sanitize_ai_reply_text" not in chat_bridge_lines
+    assert "from core.policy.assistant_mode import resolve_assistant_mode" not in chat_bridge_lines
+
+
+def test_owned_startup_files_have_no_stale_22x_tails() -> None:
+    owned_text = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in [
+            "app/app.py",
+            "ui/bridge/chat_bridge.py",
+            "tests/unit/test_app_bridge.py",
+        ]
+    )
+
+    assert "22." not in owned_text

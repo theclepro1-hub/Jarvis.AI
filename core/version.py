@@ -1,4 +1,6 @@
 from __future__ import annotations
 
 
-DEFAULT_VERSION = "22.5.1"
+DISPLAY_VERSION = "20.5.5"
+UPDATE_VERSION = "22.5.5"
+DEFAULT_VERSION = DISPLAY_VERSION
