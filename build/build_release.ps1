@@ -402,7 +402,7 @@ if (Test-Path $innoCompiler) {
     Assert-NativeSuccess -Step "Installer metadata render"
     $installerScriptContent = Get-Content -LiteralPath $installerScript -Raw -Encoding UTF8
     Assert-TextContains -Text $installerScriptContent -Needle 'AppUserModelID: "theclepro1.JarvisAiUnity"' -Label "Installer shortcut identity"
-    Assert-TextContains -Text $installerScriptContent -Needle "SetupMutex=JarvisAi_Unity_22_setup_mutex" -Label "Installer mutex"
+    Assert-TextContains -Text $installerScriptContent -Needle "SetupMutex=JarvisAi_Unity_setup_mutex" -Label "Installer mutex"
     Assert-TextContains -Text $installerScriptContent -Needle "CloseApplicationsFilter=JarvisAi_Unity.exe" -Label "Installer close filter"
     Assert-TextContains -Text $installerScriptContent -Needle "VersionInfoTextVersion=$version" -Label "Installer version text"
     Assert-TextContains -Text $installerScriptContent -Needle 'Type: filesandordirs; Name: "{app}"' -Label "Installer uninstall cleanup"
