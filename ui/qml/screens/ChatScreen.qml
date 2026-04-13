@@ -111,32 +111,24 @@ Rectangle {
                 id: listView
                 objectName: "chatListView"
                 property bool followBottom: true
-                property bool followBottomPending: false
-                property int followBottomRetries: 0
 
                 function nearBottom() {
                     return (contentHeight - (contentY + height)) <= 48
                 }
 
                 function requestFollowBottom() {
-                    followBottom = true
-                    followBottomPending = true
-                    followBottomRetries = 4
-                    scheduleFollowBottom()
-                }
-
-                function scheduleFollowBottom() {
-                    if (!(followBottom || followBottomPending) || count <= 0) {
+                    if (count <= 0 || !followBottom) {
                         return
                     }
-                    forceLayout()
-                    positionViewAtEnd()
-                    if (nearBottom()) {
-                        followBottomPending = false
-                        followBottomRetries = 0
-                        followBottomTimer.stop()
-                    } else if (followBottomPending && !followBottomTimer.running) {
-                        followBottomTimer.start()
+                    followBottomTimer.restart()
+                }
+
+                function syncFollowBottom() {
+                    if (count <= 0) {
+                        return
+                    }
+                    if (followBottom) {
+                        requestFollowBottom()
                     }
                 }
 
@@ -149,13 +141,19 @@ Rectangle {
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
 
-                onCountChanged: scheduleFollowBottom()
-                onContentHeightChanged: scheduleFollowBottom()
-                onHeightChanged: scheduleFollowBottom()
-                onMovementStarted: followBottom = nearBottom()
-                onFlickStarted: followBottom = nearBottom()
-                onMovementEnded: followBottom = nearBottom()
-                onFlickEnded: followBottom = nearBottom()
+                onCountChanged: syncFollowBottom()
+                onContentHeightChanged: syncFollowBottom()
+                onHeightChanged: syncFollowBottom()
+                onMovementStarted: followBottom = false
+                onFlickStarted: followBottom = false
+                onMovementEnded: {
+                    followBottom = nearBottom()
+                    syncFollowBottom()
+                }
+                onFlickEnded: {
+                    followBottom = nearBottom()
+                    syncFollowBottom()
+                }
 
                 onContentYChanged: {
                     if (!moving && !flicking) {
@@ -171,31 +169,17 @@ Rectangle {
 
                 Timer {
                     id: followBottomTimer
-                    interval: 16
+                    interval: 0
                     repeat: false
                     onTriggered: {
-                        if (!(listView.followBottom || listView.followBottomPending) || listView.count <= 0) {
-                            listView.followBottomPending = false
-                            listView.followBottomRetries = 0
+                        if (!listView.followBottom || listView.count <= 0) {
                             return
                         }
-                        listView.forceLayout()
                         listView.positionViewAtEnd()
-                        if (listView.nearBottom()) {
-                            listView.followBottomPending = false
-                            listView.followBottomRetries = 0
-                            return
-                        }
-                        if (listView.followBottomRetries > 0) {
-                            listView.followBottomRetries -= 1
-                            restart()
-                        } else {
-                            listView.followBottomPending = false
-                        }
                     }
                 }
 
-                Component.onCompleted: requestFollowBottom()
+                Component.onCompleted: syncFollowBottom()
 
                 Connections {
                     target: chatBridge

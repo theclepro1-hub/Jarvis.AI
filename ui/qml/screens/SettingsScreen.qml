@@ -45,7 +45,10 @@ Rectangle {
             return status.last_error
         }
         if (status.update_available) {
-            return "Найдена новая версия. Можно открыть релиз и скачать свежий установщик."
+            if (status.can_apply) {
+                return "Найдена новая версия. Можно скачать релиз или установить автоматически."
+            }
+            return "Найдена новая версия. Можно скачать свежий установщик."
         }
         return settingsBridge.updateSummary
     }
@@ -144,7 +147,7 @@ Rectangle {
 
                 SettingRow {
                     Layout.fillWidth: true
-                    title: "Groq"
+                    title: "Облачный ИИ"
                     description: "Основной ключ для ответов JARVIS."
                     helpText: "Если ключ есть, JARVIS сможет отвечать через облако."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
@@ -154,9 +157,9 @@ Rectangle {
                         id: groqConnectionField
                         objectName: "settingsGroqField"
                         Layout.fillWidth: true
-                        label: "Ключ Groq"
+                        label: "Ключ облачного ИИ"
                         text: settingsBridge.groqApiKey
-                        placeholderText: "Вставьте ключ Groq"
+                        placeholderText: "Вставьте ключ облачного ИИ"
                         secret: true
                     }
                 }
@@ -594,7 +597,7 @@ Rectangle {
                 Layout.fillWidth: true
                 title: "Обновления"
                 description: "Версия, канал и проверка релиза на GitHub."
-                helpText: "Здесь видно текущую версию и можно проверить новый релиз."
+                helpText: "Здесь видно текущую версию и можно проверить, скачать или установить новый релиз."
                 expanded: false
                 onHelpRequested: (text) => settingsRoot.helpRequested(text)
                 onHelpCleared: settingsRoot.helpCleared()
@@ -603,7 +606,7 @@ Rectangle {
                     Layout.fillWidth: true
                     title: "Статус"
                     description: settingsBridge.updateSummary
-                    helpText: "Если доступно обновление, здесь появится статус и переход на релиз."
+                    helpText: "Если доступно обновление, здесь появятся кнопки скачивания и установки."
                     onHelpRequested: (text) => settingsRoot.helpRequested(text)
                     onHelpCleared: settingsRoot.helpCleared()
 
@@ -632,10 +635,21 @@ Rectangle {
                         onClicked: settingsBridge.checkForUpdates()
                     }
 
+                    PrimaryButton {
+                        objectName: "installUpdateButton"
+                        text: "Установить обновление"
+                        visible: settingsBridge.updateStatus.can_apply
+                        enabled: !settingsBridge.updateCheckBusy
+                        onClicked: settingsBridge.applyUpdate()
+                    }
+
                     SecondaryButton {
-                        objectName: "openReleaseButton"
-                        text: "Открыть релиз"
-                        enabled: settingsBridge.updateStatus.release_url && settingsBridge.updateStatus.release_url.length > 0
+                        objectName: "downloadUpdateButton"
+                        text: "Скачать обновление"
+                        visible: settingsBridge.updateStatus.update_available
+                                 && settingsBridge.updateStatus.release_url
+                                 && settingsBridge.updateStatus.release_url.length > 0
+                        enabled: !settingsBridge.updateCheckBusy
                         onClicked: Qt.openUrlExternally(settingsBridge.updateStatus.release_url)
                     }
 

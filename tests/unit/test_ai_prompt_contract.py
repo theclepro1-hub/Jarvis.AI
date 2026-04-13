@@ -8,5 +8,8 @@ def test_ai_prompt_forbids_fake_action_claims():
 
 
 def test_ai_prompt_discourages_tables_and_long_answers():
-    assert "markdown-таблицы" in SYSTEM_PROMPT
+    assert "Не суши ответ искусственно" in SYSTEM_PROMPT
+    assert "обычном разговоре" in SYSTEM_PROMPT
+    assert "игровых и how-to вопросов" in SYSTEM_PROMPT
+    assert "короткий список" in SYSTEM_PROMPT
     assert "один короткий вопрос" in SYSTEM_PROMPT

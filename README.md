@@ -16,7 +16,7 @@
 - Python 3.11.9 for the current build environment, project requirement `>=3.11`
 - PySide6 6.11
 - Qt Quick / QML
-- OpenAI-compatible Groq client via `openai`
+- OpenAI-compatible cloud AI clients via `openai`
 - `sounddevice` + `numpy` for manual mic capture
 - `vosk` for always-on local wake word
 - bundled `Golos Text` font for stable Cyrillic rendering in QML
@@ -60,7 +60,7 @@ The release build produces:
 
 ## Release Notes
 
-- [Release 22.5.1](docs/RELEASE_22.5.1.md)
+- [Release 20.5.0](docs/RELEASE_20.5.0.md)
 - [Release 22.4.5](docs/RELEASE_22.4.5.md)
 - [Release 22.2.0](docs/RELEASE_22.2.0.md)
 - [Release 22.1.1](docs/RELEASE_22.1.1.md)
@@ -72,6 +72,6 @@ The release build produces:
 ## Voice Runtime
 
 - manual mic capture uses `sounddevice`
-- transcription uses Groq Whisper STT after capture
+- transcription uses cloud STT or local speech backends after capture
 - always-on local wake word uses a bundled Vosk Russian model and reports readiness only after the local model and microphone stream are actually available
 - registration secrets are protected with Windows DPAPI in the Windows build

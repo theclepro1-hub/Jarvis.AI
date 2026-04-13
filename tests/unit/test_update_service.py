@@ -172,6 +172,37 @@ def test_update_service_reports_error_honestly(monkeypatch) -> None:
     assert service.summary() == "Проверка обновлений: ошибка."
 
 
+def test_update_service_prefers_release_name_version_over_bridge_tag(monkeypatch) -> None:
+    def fake_create_http_client(*, proxy_url: str = "", trust_env: bool = True) -> _FakeHttpClient:
+        _ = proxy_url, trust_env
+        return _FakeHttpClient(
+            response=_FakeResponse(
+                {
+                    "tag_name": "v22.5.2",
+                    "name": "20.5.0",
+                    "html_url": "https://example.test/releases/20.5.0",
+                    "assets": [
+                        {
+                            "name": "JarvisAi_Unity_20.5.0_windows_installer.exe",
+                            "browser_download_url": "https://example.test/installer.exe",
+                        }
+                    ],
+                },
+                body=b"",
+            )
+        )
+
+    service = UpdateService(settings=None, current_version="20.5.0")
+    monkeypatch.setattr(service, "_create_http_client", fake_create_http_client)
+
+    result = service.check_now()
+
+    assert result.ok is True
+    assert result.latest_version == "20.5.0"
+    assert result.update_available is False
+    assert service.summary().startswith("Версия 20.5.0")
+
+
 def test_update_service_retries_transport_failure_before_succeeding(monkeypatch) -> None:
     attempts: list[tuple[bool, str]] = []
     digest = hashlib.sha256(b"binary-installer").hexdigest()

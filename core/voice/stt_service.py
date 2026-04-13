@@ -58,7 +58,7 @@ class STTService:
         policy = self._assistant_policy()
 
         if configured_engine == "groq_whisper":
-            return "распознавание через Groq готово" if groq_key else "Нужен ключ Groq"
+            return "облачное распознавание готово" if groq_key else "Нужен ключ облачного распознавания"
         if configured_engine == "local_vosk":
             return "локальная модель Vosk готова" if self._local_vosk_available() else "Локальная модель Vosk не найдена"
         if configured_engine == "local_faster_whisper":
@@ -67,7 +67,7 @@ class STTService:
             if self._local_vosk_available():
                 return "локальное распознавание работает через Vosk"
             if policy.stt_cloud_allowed:
-                return "Нужен ключ Groq или локальный backend распознавания"
+                return "Нужен ключ облачного распознавания или локальный backend распознавания"
             return "Нужен локальный backend распознавания"
 
         if policy.mode == "private":
@@ -84,8 +84,8 @@ class STTService:
         if groq_key and self._local_faster_whisper_ready():
             return "распознавание готово"
         if groq_key:
-            return "распознавание через Groq готово"
-        return "Нужен ключ Groq или локальный backend распознавания"
+            return "облачное распознавание готово"
+        return "Нужен ключ облачного распознавания или локальный backend распознавания"
 
     def can_transcribe(self) -> bool:
         configured_engine = self._configured_engine()

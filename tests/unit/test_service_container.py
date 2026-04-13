@@ -73,7 +73,7 @@ def test_handle_external_command_routes_plain_conversation_to_ai() -> None:
     assert runtime._command_router.calls == [("how are you", "telegram", "777")]
     assert len(runtime._ai.received) == 1
     assert runtime._ai.received[0][1] == []
-    assert "Telegram" in runtime._ai.received[0][0]
+    assert runtime._ai.received[0][0] == "how are you"
 
 
 def test_handle_external_command_uses_short_telegram_history_per_chat() -> None:
@@ -275,6 +275,7 @@ def test_service_container_telegram_transport_uses_safe_timeout_fallback() -> No
 
     assert transport is not None
     assert transport.timeout_seconds == 12.0
+    assert transport.poll_timeout_seconds == 10.0
 
 
 def test_service_container_telegram_transport_passes_proxy_settings_through(monkeypatch) -> None:
@@ -296,9 +297,10 @@ def test_service_container_telegram_transport_passes_proxy_settings_through(monk
             return super().get(key, default)
 
     class FakeTransport:
-        def __init__(self, token, *, timeout_seconds, proxy_mode, proxy_url) -> None:  # noqa: ANN001
+        def __init__(self, token, *, timeout_seconds, poll_timeout_seconds, proxy_mode, proxy_url) -> None:  # noqa: ANN001
             self.token = token
             self.timeout_seconds = timeout_seconds
+            self.poll_timeout_seconds = poll_timeout_seconds
             self.proxy_mode = proxy_mode
             self.proxy_url = proxy_url
 
@@ -312,6 +314,7 @@ def test_service_container_telegram_transport_passes_proxy_settings_through(monk
     assert transport is not None
     assert transport.token == "bot_token"
     assert transport.timeout_seconds == 7.5
+    assert transport.poll_timeout_seconds == 6.5
     assert transport.proxy_mode == "manual"
     assert transport.proxy_url == "http://127.0.0.1:8080"
 

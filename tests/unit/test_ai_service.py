@@ -130,7 +130,7 @@ def test_generate_reply_result_reports_stage_and_timing_hint() -> None:
     assert stages and stages[0].startswith("Быстрый режим: Groq")
 
 
-def test_generate_reply_result_sanitizes_markdown_tables_and_long_lists() -> None:
+def test_generate_reply_result_sanitizes_provider_formatting_for_output() -> None:
     calls: list[dict] = []
     behavior = {
         "https://api.groq.com/openai/v1": (
@@ -165,6 +165,87 @@ def test_sanitize_ai_reply_text_removes_tables_and_markdown() -> None:
     assert "|" not in clean
     assert "**" not in clean
     assert len(clean.splitlines()) <= 5
+
+
+def test_generate_reply_result_keeps_assistant_history_raw_for_context() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.groq.com/openai/v1": "чёткий ответ",
+    }
+    service = AIService(
+        FakeSettings({"ai_mode": "fast", "ai_provider": "groq"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    history = [
+        {"role": "assistant", "text": "**Сводка**\n| A | B |\n- Первый"},
+        {"role": "user", "text": "привет"},
+    ]
+    result = service.generate_reply_result("сделай продолжение", history=history)
+
+    assert result.text == "чёткий ответ"
+    recorded_messages = calls[0]["messages"]
+    assert recorded_messages[1]["role"] == "assistant"
+    assert recorded_messages[1]["content"] == history[0]["text"]
+
+
+def test_fast_mode_handles_short_casual_query_without_fallback() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.groq.com/openai/v1": "Нормально, работаю.",
+    }
+    service = AIService(
+        FakeSettings({"ai_mode": "fast"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    result = service.generate_reply_result("как дела")
+
+    assert result.mode == "fast"
+    assert result.provider == "groq"
+    assert result.text == "Нормально, работаю."
+    assert calls and calls[0]["messages"][-1]["content"] == "как дела"
+
+
+def test_smart_assistant_mode_uses_quality_route_and_request_mode() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://generativelanguage.googleapis.com/v1beta/openai": "содержательный ответ",
+    }
+    service = AIService(
+        FakeSettings({"assistant_mode": "smart"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    stages: list[str] = []
+    result = service.generate_reply_result("как дела", status_callback=stages.append)
+
+    assert result.mode == "quality"
+    assert result.provider == "gemini"
+    assert stages and stages[0].startswith("Качество: Gemini")
+    assert [call["base_url"] for call in calls] == ["https://generativelanguage.googleapis.com/v1beta/openai"]
+
+
+def test_smart_mode_handles_fnaf4_howto_query_on_quality_route() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://generativelanguage.googleapis.com/v1beta/openai": "Слушай шёпот, проверяй двери и не жди лишнего шума.",
+    }
+    service = AIService(
+        FakeSettings({"assistant_mode": "smart"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    result = service.generate_reply_result("как пройти FNAF 4")
+
+    assert result.mode == "quality"
+    assert result.provider == "gemini"
+    assert "двери" in result.text.lower()
+    assert calls and calls[0]["messages"][-1]["content"] == "как пройти FNAF 4"
 
 
 def test_quality_mode_prioritizes_quality_plan() -> None:

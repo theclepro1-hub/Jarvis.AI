@@ -138,6 +138,15 @@ class FakeAi:
         raise AssertionError("local command must not call LLM")
 
 
+class RecordingAi:
+    def __init__(self) -> None:
+        self.received: list[str] = []
+
+    def generate_reply(self, text: str, history: list[dict[str, object]]) -> str:
+        self.received.append(text)
+        return f"AI fallback: {text}"
+
+
 def make_router(reminder_service=None) -> tuple[CommandRouter, FakeActions, FakePcControl]:
     actions = FakeActions()
     pc_control = FakePcControl(actions)
@@ -539,6 +548,20 @@ def test_command_router_routes_plain_conversation_to_ai_fallback() -> None:
     assert result.execution_result is None
 
 
+def test_command_router_voice_conversation_falls_back_to_ai_instead_of_retry() -> None:
+    actions = FakeActions()
+    pc_control = FakePcControl(actions)
+    ai = RecordingAi()
+    router = CommandRouter(actions, BatchRouter(actions), ai, pc_control=pc_control)
+
+    result = router.handle("жаравис, куча дела", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["куча дела"]
+    assert result.assistant_lines == []
+    assert result.execution_result is None
+
+
 def test_command_router_strips_wake_like_prefix_before_ai_fallback() -> None:
     router, _actions, _pc_control = make_router()
 
@@ -548,6 +571,15 @@ def test_command_router_strips_wake_like_prefix_before_ai_fallback() -> None:
     assert result.commands == ["как дела"]
 
 
+def test_command_router_strips_darvis_like_prefix_before_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("дарвис, как дела?")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела?"]
+
+
 def test_command_router_preview_marks_plain_conversation_as_ai_path() -> None:
     router, _actions, _pc_control = make_router()
 
@@ -555,6 +587,15 @@ def test_command_router_preview_marks_plain_conversation_as_ai_path() -> None:
 
     assert result.kind == "ai"
     assert result.commands == ["как дела"]
+
+
+def test_command_router_keeps_screenshot_style_ryzh_question_on_ai_path() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("рыж, сколько у тебя дела?", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["сколько у тебя дела?"]
 
 
 def test_command_router_strips_short_wake_alias_before_open_command() -> None:

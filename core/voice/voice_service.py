@@ -131,7 +131,7 @@ class VoiceService:
             "executing": self._wake_detail or "Выполняю",
             "not_heard": self._wake_detail or "Не расслышал",
             "error": self._wake_detail or "Ошибка слова активации",
-            "no_key": "Нужен ключ Groq",
+            "no_key": "Нужен ключ облачного распознавания",
             "idle": self._wake_detail or "Слово активации не запущено",
         }
         return labels.get(self._wake_phase, self._wake_detail or "Готов")
@@ -466,18 +466,18 @@ class VoiceService:
         if result.status == "cancelled":
             return "Запись остановлена."
         if result.status == "no_speech":
-            return "Не удалось получить текст. Проверьте микрофон или ключ Groq."
+            return "Не удалось получить текст. Проверьте микрофон или облачное распознавание."
         return result.detail or "Не удалось получить текст."
 
     def _stt_note_from_result(self, result: TranscriptionResult) -> str:
         if result.status == "cancelled":
             return "Запись остановлена."
         if result.status == "stt_key_missing":
-            return "Нужен ключ Groq."
+            return "Нужен ключ облачного распознавания."
         if result.status == "model_missing":
-            return "Нужен ключ Groq или локальная модель распознавания."
+            return "Нужен ключ облачного распознавания или локальная модель распознавания."
         if result.status == "no_speech":
-            return "Не удалось получить текст. Проверьте микрофон или ключ Groq."
+            return "Не удалось получить текст. Проверьте микрофон или облачное распознавание."
         return result.detail or "Не удалось распознать речь."
 
     def cancel_active_pipeline(self) -> None:

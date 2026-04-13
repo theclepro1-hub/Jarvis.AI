@@ -137,7 +137,7 @@ def _route_with_steps(steps: list[ExecutionStep], assistant_lines: list[str] | N
     )
 
 
-def test_local_execution_result_with_one_simple_action_renders_as_plain_text() -> None:
+def test_local_execution_result_always_renders_as_execution_card() -> None:
     route = _route_with_steps(
         [
             ExecutionStep(
@@ -153,8 +153,9 @@ def test_local_execution_result_with_one_simple_action_renders_as_plain_text() -
 
     bridge.sendMessage("открой ютуб")
 
-    assert bridge.messages[-1]["type"] == "text"
-    assert bridge.messages[-1]["text"] == "Открываю YouTube"
+    assert bridge.messages[-1]["type"] == "execution"
+    assert bridge.messages[-1]["title"] == "Открываю YouTube"
+    assert bridge.messages[-1]["steps"][0]["status"] == "готово"
 
 
 def test_mixed_execution_result_uses_plan_title_instead_of_first_step_title() -> None:
@@ -467,3 +468,14 @@ def test_chat_bridge_normalizes_legacy_local_ai_mode_in_stage_and_hint() -> None
     )
 
     assert hint == "Авто: Groq · 0.1 с"
+
+
+def test_chat_bridge_treats_smart_mode_as_quality_in_hint() -> None:
+    route = SimpleNamespace(kind="ai", commands=[], assistant_lines=[], queue_items=[], execution_result=None)
+    bridge, _services = _bridge_for(route)
+
+    hint = bridge._format_ai_response_hint(  # noqa: SLF001 - contract coverage for mode mapping.
+        SimpleNamespace(mode="smart", provider_label="Gemini", elapsed_ms=220, fallback_used=False)
+    )
+
+    assert hint == "Качество: Gemini · 0.2 с"

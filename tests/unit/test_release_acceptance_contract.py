@@ -198,6 +198,11 @@ def test_release_gate_chat_footer_keeps_transient_wake_handoff_status() -> None:
     assert 'readonly property bool hasWakeHint' in composer_source
     assert 'text: root.recording' in composer_source
     assert 'wakeHint: voiceBridge.wakeHint' in chat_source
+    assert 'followBottomRetries' not in chat_source
+    assert 'followBottomPending' not in chat_source
+    assert 'requestFollowBottom()' in chat_source
+    assert 'onMovementStarted: followBottom = false' in chat_source
+    assert 'followBottomTimer.restart()' in chat_source
 
 
 def test_release_gate_local_commands_do_not_call_llm() -> None:

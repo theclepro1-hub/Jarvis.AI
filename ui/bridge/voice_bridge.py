@@ -564,7 +564,7 @@ class VoiceBridge(QObject):
         return {
             "wakeWord": "Готов",
             "command": "Готов",
-            "ai": "Groq или резервный локальный режим",
+            "ai": "Облако или резервный локальный режим",
             "model": "не подключена",
             "tts": "Готов",
             "wakeModel": "не загружена",
@@ -602,7 +602,7 @@ class VoiceBridge(QObject):
         if status == "mic_open_failed":
             return "Не удалось открыть микрофон. Проверьте доступ и выбранное устройство."
         if status == "stt_key_missing":
-            return "Нужен ключ Groq для облачного распознавания речи."
+            return "Нужен ключ облачного распознавания речи."
         if status == "model_missing":
             return "Нужна локальная или облачная модель распознавания речи."
         if status == "no_speech":
@@ -678,7 +678,7 @@ class VoiceBridge(QObject):
             stage = "error_mic"
         elif "не услыш" in lowered or "не удалось распознать" in lowered or "not heard" in lowered:
             stage = "not_heard"
-        elif "groq" in lowered or "stt" in lowered or "ошиб" in lowered or "error" in lowered:
+        elif "groq" in lowered or "stt" in lowered or "ошиб" in lowered or "error" in lowered or "облачн" in lowered or "распознав" in lowered:
             stage = "error_stt"
 
         self._voice_test = {

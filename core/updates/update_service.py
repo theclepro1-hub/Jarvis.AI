@@ -20,6 +20,7 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 20.0
 USER_AGENT = "JarvisAi_Unity/1.0"
 INSTALLER_LAUNCH_ARGUMENTS = ("/SP-", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS")
 HTTP_RETRY_COUNT = 2
+VERSION_PATTERN = re.compile(r"(?<!\d)(\d+(?:\.\d+){1,2})(?!\d)")
 T = TypeVar("T")
 
 
@@ -114,7 +115,7 @@ class UpdateService:
         self._set_status("checking", "Проверяю обновления...")
         try:
             payload = self._fetch_latest_release_payload()
-            latest_version = self._normalize_version(str(payload.get("tag_name") or payload.get("name") or "").strip())
+            latest_version = self._resolve_release_version(payload)
             self.latest_version_value = latest_version or self.current_version_value
             self.release_url_value = str(payload.get("html_url") or "").strip()
             self.assets = [
@@ -480,7 +481,20 @@ class UpdateService:
         clean = value.strip()
         if clean.casefold().startswith("v"):
             clean = clean[1:]
+        match = VERSION_PATTERN.search(clean)
+        if match is not None:
+            return match.group(1)
         return clean
+
+    def _resolve_release_version(self, payload: dict[str, object]) -> str:
+        # Prefer the human-facing release name first. This lets us ship a bridge
+        # release with a higher tag for legacy auto-update while keeping the
+        # in-app/runtime version on the new numbering track.
+        for source_field in ("name", "tag_name"):
+            value = self._normalize_version(str(payload.get(source_field) or "").strip())
+            if value:
+                return value
+        return ""
 
     def _is_newer_version(self, latest: str, current: str) -> bool:
         return self._version_parts(latest) > self._version_parts(current)

@@ -221,11 +221,11 @@ def test_voice_bridge_preserves_missing_key_note_through_finalize():
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
 
-    bridge._push_voice_note("Нужен ключ Groq для облачного распознавания речи.")  # noqa: SLF001
+    bridge._push_voice_note("Нужен ключ облачного распознавания речи.")  # noqa: SLF001
     bridge._finalize_capture()  # noqa: SLF001
 
-    assert state.status == "Нужен ключ Groq для облачного распознавания речи."
-    assert bridge.recordingHint == "Нужен ключ Groq для облачного распознавания речи."
+    assert state.status == "Нужен ключ облачного распознавания речи."
+    assert bridge.recordingHint == "Нужен ключ облачного распознавания речи."
 
 
 def test_voice_bridge_preserves_missing_model_note_through_finalize():

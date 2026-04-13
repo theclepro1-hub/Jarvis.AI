@@ -14,7 +14,9 @@ from core.policy.assistant_mode import resolve_assistant_mode, resolve_assistant
 SYSTEM_PROMPT = """
 Ты JARVIS Unity.
 Отвечай быстро, коротко и по делу.
-Не используй markdown-таблицы, длинные списки и простыни.
+Не суши ответ искусственно: если короткий список или шаги реально помогают, используй их.
+В обычном разговоре отвечай по-человечески, без канцелярита и без лишней официальности.
+Для бытовых, игровых и how-to вопросов давай конкретный ответ, а не общие советы.
 Если запрос касается действия на ПК, не утверждай, что оно уже выполнено, пока не получил реальный локальный результат.
 Если данных не хватает, задай один короткий вопрос.
 Тон: спокойный, взрослый, уверенный.
@@ -212,10 +214,11 @@ class AIService:
         *,
         status_callback: Callable[[str], None] | None = None,
     ) -> AIReplyResult:
-        if self._assistant_mode_enabled():
+        assistant_mode = resolve_assistant_mode(self.settings)
+        if self._assistant_mode_enabled(assistant_mode):
             return self._generate_assistant_mode_reply(user_text, history or [], status_callback=status_callback)
 
-        ai_mode = self._ai_mode()
+        ai_mode = self._effective_ai_mode(assistant_mode)
         started_at = time.perf_counter()
         messages = self._build_messages(user_text, history or [])
         attempts = self.provider_plan(ai_mode)
@@ -312,7 +315,7 @@ class AIService:
                 if reply:
                     return AIReplyResult(
                         text=reply,
-                        mode=mode,
+                        mode=self._assistant_mode_request_mode(mode),
                         provider="local_llama",
                         provider_label="Local Llama",
                         model=str(self.settings.get("local_llm_model", "")).strip(),
@@ -341,7 +344,7 @@ class AIService:
             if reply:
                 return AIReplyResult(
                     text=reply,
-                    mode=mode,
+                    mode=self._assistant_mode_request_mode(mode),
                     provider=spec.key,
                     provider_label=spec.label,
                     model=spec.models[model_mode],
@@ -488,8 +491,17 @@ class AIService:
 
         return os.environ.get(spec.env_var, "").strip()
 
-    def _assistant_mode_enabled(self) -> bool:
-        return bool(str(self.settings.get("assistant_mode", "")).strip())
+    def _assistant_mode_enabled(self, mode: str | None = None) -> bool:
+        resolved = mode or resolve_assistant_mode(self.settings)
+        return resolved == "private"
+
+    def _effective_ai_mode(self, assistant_mode: str | None = None) -> str:
+        mode = assistant_mode or resolve_assistant_mode(self.settings)
+        if mode == "fast":
+            return "fast"
+        if mode == "smart":
+            return "quality"
+        return self._ai_mode()
 
     def _assistant_mode_request_mode(self, mode: str) -> str:
         if mode == "fast":
@@ -596,10 +608,6 @@ class AIService:
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
-            if role == "assistant":
-                text = sanitize_ai_reply_text(text, max_lines=3, max_chars=400)
-                if not text:
-                    continue
             messages.append({"role": role, "content": text})
         messages.append({"role": "user", "content": user_text})
         return messages

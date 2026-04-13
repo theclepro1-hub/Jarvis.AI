@@ -226,7 +226,7 @@ def test_stt_service_reports_missing_model_without_key(tmp_path):
 
     assert result.status == "model_missing"
     assert "backend" in result.detail.casefold() or "Groq" in result.detail
-    assert service.status_text() == "Нужен ключ Groq или локальный backend распознавания"
+    assert service.status_text() == "Нужен ключ облачного распознавания или локальный backend распознавания"
     assert service.can_transcribe() is False
 
 

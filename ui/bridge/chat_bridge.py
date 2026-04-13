@@ -9,6 +9,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 
 from core.ai.ai_service import SUPPORTED_AI_MODES, sanitize_ai_reply_text
+from core.policy.assistant_mode import resolve_assistant_mode
 
 
 class ChatBridge(QObject):
@@ -241,13 +242,6 @@ class ChatBridge(QObject):
     def _append_local_result(self, route) -> None:
         execution = getattr(route, "execution_result", None)
         if execution is not None and getattr(execution, "steps", None):
-            if self._should_collapse_single_step_execution(route, execution):
-                line = self._single_step_text(route, execution)
-                if line:
-                    self._append_message("assistant", line)
-                    self._speak_assistant_text(line)
-                    self._clear_wake_hint()
-                    return
             execution_title = self._build_execution_title(route)
             execution_steps = self._build_execution_steps(route)
             self._append_message(
@@ -279,31 +273,6 @@ class ChatBridge(QObject):
         )
         self._speak_assistant_text(execution_title)
         self._clear_wake_hint()
-
-    def _should_collapse_single_step_execution(self, route, execution) -> bool:  # noqa: ANN001
-        steps = list(getattr(execution, "steps", []) or [])
-        if len(steps) != 1:
-            return False
-        if len(getattr(route, "commands", []) or []) > 1:
-            return False
-        step = steps[0]
-        status = str(getattr(step, "status", "")).strip()
-        if status not in {"done", "sent_unverified"}:
-            return False
-        kind = str(getattr(step, "kind", "")).strip()
-        if kind in {"clarify", "unsupported"}:
-            return False
-        return True
-
-    def _single_step_text(self, route, execution) -> str:  # noqa: ANN001
-        lines = [str(line).strip() for line in getattr(route, "assistant_lines", []) or [] if str(line).strip()]
-        if lines:
-            return lines[0]
-        steps = list(getattr(execution, "steps", []) or [])
-        if not steps:
-            return ""
-        title = str(getattr(steps[0], "title", "")).strip()
-        return title
 
     def _build_execution_title(self, route) -> str:
         execution = getattr(route, "execution_result", None)
@@ -422,8 +391,8 @@ class ChatBridge(QObject):
             "слово активации",
             "не расслышал команду после слова активации",
             "не удалось разобрать команду после слова активации",
-            "нужен ключ groq для облачного распознавания",
-            "нужен ключ groq или локальная модель",
+            "нужен ключ облачного распознавания",
+            "нужен ключ облачного распознавания или локальная модель",
             "не удалось открыть микрофон",
         )
         return any(clean.startswith(prefix) for prefix in blocked_prefixes)
@@ -466,6 +435,10 @@ class ChatBridge(QObject):
 
     def _normalize_ai_mode(self, value: str) -> str:
         mode = str(value or "").strip().lower()
+        if mode == "smart":
+            return "quality"
+        if mode in {"standard", "private"}:
+            return "auto"
         if mode in SUPPORTED_AI_MODES:
             return mode
         return "auto"
@@ -507,11 +480,19 @@ class ChatBridge(QObject):
         settings = getattr(self.services, "settings", None)
         mode = "auto"
         provider = "auto"
+        assistant_mode = "standard"
         if settings is not None and hasattr(settings, "get"):
             mode = self._normalize_ai_mode(settings.get("ai_mode", "auto"))
             provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
+            assistant_mode = resolve_assistant_mode(settings)
         if route is not None and getattr(route, "execution_result", None) is not None:
             return "Локально не хватило уверенности, подключаю ИИ…"
+        if assistant_mode == "private":
+            return "Приватный режим: готовлю ответ…"
+        if assistant_mode == "fast":
+            return "Быстрый режим: готовлю ответ…"
+        if assistant_mode == "smart":
+            return "Умный режим: готовлю ответ…"
         if mode == "fast" or provider in {"groq", "cerebras"}:
             return "Быстрый режим: готовлю ответ…"
         if mode == "quality" or provider == "gemini":

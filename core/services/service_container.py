@@ -120,14 +120,13 @@ class ServiceContainer:
             return self._telegram_route_reply(route)
         clean = " ".join(route.commands).strip() if route.commands else text
         history = self._telegram_history(telegram_chat_id)
-        prompt = self._telegram_ai_prompt(clean)
         if hasattr(self.ai, "generate_reply_result"):
-            result = self.ai.generate_reply_result(prompt, history, status_callback=status_callback)
+            result = self.ai.generate_reply_result(clean, history, status_callback=status_callback)
             reply = str(getattr(result, "text", "") or "").strip()
         else:
             if status_callback is not None:
                 status_callback("telegram_ai")
-            reply = str(self.ai.generate_reply(prompt, history) or "").strip()
+            reply = str(self.ai.generate_reply(clean, history) or "").strip()
         compact = self._compact_telegram_reply(reply)
         self._remember_telegram_exchange(telegram_chat_id, clean, compact)
         return compact
@@ -381,9 +380,11 @@ class ServiceContainer:
         except (TypeError, ValueError):
             timeout = 12.0
         timeout = max(3.0, timeout)
+        poll_timeout = min(max(2.0, timeout - 1.0), 10.0)
         return transport_cls(
             token,
             timeout_seconds=timeout,
+            poll_timeout_seconds=poll_timeout,
             proxy_mode=proxy_mode,
             proxy_url=proxy_url,
         )
@@ -413,14 +414,7 @@ class ServiceContainer:
             history.append({"role": "assistant", "text": assistant})
 
     def _telegram_ai_prompt(self, text: str) -> str:
-        clean = str(text or "").strip()
-        if not clean:
-            return ""
-        return (
-            "Ответь кратко и по делу для Telegram. "
-            "Без длинных вступлений, лишней вежливой воды и длинных списков, если они не нужны.\n\n"
-            f"{clean}"
-        )
+        return str(text or "").strip()
 
     def _compact_telegram_reply(self, text: str) -> str:
         lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]

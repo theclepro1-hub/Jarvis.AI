@@ -52,7 +52,7 @@ def test_voice_runtime_without_key_reports_not_connected():
     status = voice.runtime_status()
 
     assert status["model"] == "не подключена"
-    assert status["command"] == "Нужен ключ Groq или локальный backend распознавания"
+    assert status["command"] == "Нужен ключ облачного распознавания или локальный backend распознавания"
     assert status["tts"] == "голосовые ответы выключены"
 
 

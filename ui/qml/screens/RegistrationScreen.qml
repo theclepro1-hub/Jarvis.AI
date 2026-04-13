@@ -72,7 +72,7 @@ Rectangle {
                     Text {
                         text: settingsBridge.assistantMode === "private"
                               ? "Для приватного режима нужен Telegram. Локальный пакет можно подготовить позже одной кнопкой в настройках."
-                              : "Для старта нужны только ключ Groq, токен Telegram-бота и Telegram ID. Режим можно выбрать сразу или позже в настройках."
+                              : "Для старта нужны ключ облачного ИИ, токен Telegram-бота и Telegram ID. Режим можно выбрать сразу или позже в настройках."
                         color: Theme.Colors.textSoft
                         font.family: Theme.Typography.bodyFamily
                         font.pixelSize: Theme.Typography.body
@@ -85,9 +85,9 @@ Rectangle {
                         objectName: "groqField"
                         visible: settingsBridge.assistantMode !== "private"
                         Layout.fillWidth: true
-                        label: "Ключ Groq"
+                        label: "Ключ облачного ИИ"
                         text: registrationBridge.registration["groq_api_key"] || ""
-                        placeholderText: "Вставьте ключ Groq"
+                        placeholderText: "Вставьте ключ облачного ИИ"
                         secret: true
                     }
 
@@ -188,7 +188,7 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: settingsBridge.assistantMode === "private"
-                                      ? "Ключ Groq не нужен. После первого запуска включите локальный режим одной кнопкой в настройках."
+                                      ? "Ключ облачного ИИ сейчас не нужен. После первого запуска включите локальный режим одной кнопкой в настройках."
                                       : "Если позже захотите полную локальную работу, режим можно сменить в настройках."
                                 color: Theme.Colors.textSoft
                                 font.family: Theme.Typography.bodyFamily

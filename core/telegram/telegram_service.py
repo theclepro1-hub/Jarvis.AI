@@ -15,9 +15,9 @@ import httpx
 from core.telegram.telegram_models import TelegramDispatchResult, TelegramStatusSnapshot, TelegramUpdate
 
 DEFAULT_POLL_INTERVAL_MS = 1000
-DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 15.0
+DEFAULT_LONG_POLL_TIMEOUT_SECONDS = 10.0
 DEFAULT_FAST_DISPATCH_WORKERS = 4
-DEFAULT_AI_DISPATCH_WORKERS = 2
+DEFAULT_AI_DISPATCH_WORKERS = 4
 DEFAULT_MAX_INFLIGHT_DISPATCHES = 24
 DEFAULT_CHAT_ACTION_INTERVAL_SECONDS = 2.5
 
@@ -85,8 +85,10 @@ class HttpTelegramTransport:
         proxy_url: str = "",
     ) -> None:
         self.bot_token = bot_token.strip()
-        self.timeout_seconds = timeout_seconds
-        self.poll_timeout_seconds = max(0.0, float(poll_timeout_seconds))
+        self.timeout_seconds = max(1.0, float(timeout_seconds))
+        poll_timeout = max(0.0, float(poll_timeout_seconds))
+        poll_timeout = min(poll_timeout, max(1.0, self.timeout_seconds - 1.0))
+        self.poll_timeout_seconds = poll_timeout
         self.proxy_mode = str(proxy_mode or "system").strip().lower()
         if self.proxy_mode not in {"system", "manual", "off"}:
             self.proxy_mode = "system"

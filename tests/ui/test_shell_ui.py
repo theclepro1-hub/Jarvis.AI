@@ -343,7 +343,7 @@ def test_registration_requires_all_fields_and_save_path_works(ui_runtime) -> Non
     runtime.registration_bridge.saveRegistration("", "", "")
     _pump(app, 120)
     assert runtime.state.currentScreen == "registration"
-    assert "Нужны три поля" in _find(window, "registrationFeedback").property("text")
+    assert "ключ облачного ИИ" in _find(window, "registrationFeedback").property("text")
 
     assert _find(window, "registrationSaveButton") is not None
 
@@ -504,6 +504,8 @@ def test_settings_sections_start_collapsed_and_updates_last(ui_runtime) -> None:
         'objectName: "settingsSection_theme"',
         'objectName: "settingsSection_updates"',
         'objectName: "settingsSection_advanced"',
+        'objectName: "installUpdateButton"',
+        'objectName: "downloadUpdateButton"',
     ]:
         assert section_name in source
 
