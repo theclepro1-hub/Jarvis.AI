@@ -10,18 +10,9 @@ $releaseDir = Join-Path $root "build\\release"
 $installerDir = Join-Path $root "build\\installer"
 $versionInfoFile = Join-Path $root "build\\pyinstaller\\version_info.txt"
 $iconPath = Join-Path $root "assets\\icons\\jarvis_unity.ico"
-$modelName = "vosk-model-small-ru-0.22"
-$modelCacheDir = Join-Path $root "build\\model_cache"
-$modelPath = Join-Path $modelCacheDir $modelName
-$modelZip = Join-Path $modelCacheDir "$modelName.zip"
-$modelUrl = "https://alphacephei.com/vosk/models/$modelName.zip"
+$sttModelRef = "small"
+$modelCacheDir = Join-Path $root "build\\model_cache\\faster-whisper"
 $buildStamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$requiredModelFiles = @(
-    "am\final.mdl",
-    "conf\model.conf",
-    "graph\Gr.fst",
-    "ivector\final.ie"
-)
 
 function Remove-Or-Fallback {
     param(
@@ -44,53 +35,36 @@ function Remove-Or-Fallback {
     }
 }
 
-function Test-ModelSourceReady {
+function Resolve-LocalSTTModelPath {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [string[]]$RequiredFiles = $requiredModelFiles
+        [string]$ModelRef,
+        [Parameter(Mandatory = $true)]
+        [string]$CacheDir
     )
 
-    if (!(Test-Path $Path)) {
-        return $false
+    $pythonScript = @"
+from pathlib import Path
+
+from core.voice.faster_whisper_runtime import load_faster_whisper_model, resolve_local_faster_whisper_model
+
+cache_dir = Path(r'''$CacheDir''')
+cache_dir.mkdir(parents=True, exist_ok=True)
+load_faster_whisper_model("$ModelRef", cache_dir, device="cpu", compute_type="int8")
+resolved = resolve_local_faster_whisper_model("$ModelRef", cache_dir)
+print(resolved or "")
+"@
+
+    $nativeErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $resolvedPath = ($pythonScript | & $venvPython - 2>$null)
+    $pythonExit = $LASTEXITCODE
+    $ErrorActionPreference = $nativeErrorActionPreference
+    if ($pythonExit -ne 0) {
+        return ""
     }
-
-    foreach ($relativePath in $RequiredFiles) {
-        if (!(Test-Path (Join-Path $Path $relativePath))) {
-            return $false
-        }
-    }
-
-    return $true
-}
-
-function Invoke-RetryDownload {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Uri,
-        [Parameter(Mandatory = $true)]
-        [string]$OutFile,
-        [int]$Attempts = 3
-    )
-
-    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
-        try {
-            Invoke-WebRequest -Uri $Uri -OutFile $OutFile
-            if (!(Test-Path $OutFile)) {
-                throw "download_missing"
-            }
-            if ((Get-Item -LiteralPath $OutFile).Length -le 0) {
-                throw "download_empty"
-            }
-            return
-        } catch {
-            Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
-            if ($attempt -ge $Attempts) {
-                throw
-            }
-            Start-Sleep -Seconds 2
-        }
-    }
+    $resolvedPath = "$resolvedPath".Trim()
+    return $resolvedPath
 }
 
 function Write-ChecksumFile {
@@ -199,19 +173,14 @@ Set-Content -LiteralPath $versionInfoFile -Value $versionInfoContent -Encoding U
 
 & $venvPython "$root\\tools\\generate_icon.py"
 
-if (!(Test-ModelSourceReady -Path $modelPath)) {
-    Remove-Item -Recurse -Force $modelPath -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $modelZip -Force -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path $modelCacheDir | Out-Null
-    Write-Host "MODEL_DOWNLOAD $modelUrl"
-    Invoke-RetryDownload -Uri $modelUrl -OutFile $modelZip
-    Expand-Archive -Path $modelZip -DestinationPath $modelCacheDir -Force
-    Remove-Item -LiteralPath $modelZip -Force
-}
-
-if (!(Test-ModelSourceReady -Path $modelPath)) {
-    Remove-Item -Recurse -Force $modelPath -ErrorAction SilentlyContinue
-    throw "Vosk model source is missing or empty: $modelPath"
+New-Item -ItemType Directory -Force -Path $modelCacheDir | Out-Null
+Write-Host "LOCAL_STT_MODEL_PREWARM $sttModelRef"
+$resolvedSttModelPath = Resolve-LocalSTTModelPath -ModelRef $sttModelRef -CacheDir $modelCacheDir
+if ([string]::IsNullOrWhiteSpace($resolvedSttModelPath) -or !(Test-Path $resolvedSttModelPath)) {
+    Write-Host "LOCAL_STT_MODEL_PREWARM_SKIPPED $sttModelRef"
+    Write-Host "LOCAL_STT_MODEL_RUNTIME_FALLBACK $modelCacheDir"
+} else {
+    Write-Host "LOCAL_STT_MODEL_READY $resolvedSttModelPath"
 }
 
 $distDir = Remove-Or-Fallback -Path $distDir -FallbackPath (Join-Path $root "dist_fresh_$buildStamp")
@@ -278,14 +247,13 @@ $ErrorActionPreference = "SilentlyContinue"
     --collect-all faster_whisper `
     --collect-all ctranslate2 `
     --collect-all av `
-    --collect-all vosk `
     --hidden-import pyttsx3.drivers.sapi5 `
     --hidden-import win32com.client `
     --hidden-import pythoncom `
     --hidden-import pywintypes `
     --add-data "$root\\ui;ui" `
     --add-data "$root\\assets;assets" `
-    --add-data "$modelPath;assets\\models\\$modelName" `
+    --add-data "$modelCacheDir;assets\\models\\faster-whisper" `
     "$root\\app\\main.py"
 $pyInstallerExit = $LASTEXITCODE
 $ErrorActionPreference = $nativeErrorActionPreference
@@ -358,14 +326,13 @@ $ErrorActionPreference = "SilentlyContinue"
     --collect-all faster_whisper `
     --collect-all ctranslate2 `
     --collect-all av `
-    --collect-all vosk `
     --hidden-import pyttsx3.drivers.sapi5 `
     --hidden-import win32com.client `
     --hidden-import pythoncom `
     --hidden-import pywintypes `
     --add-data "$root\\ui;ui" `
     --add-data "$root\\assets;assets" `
-    --add-data "$modelPath;assets\\models\\$modelName" `
+    --add-data "$modelCacheDir;assets\\models\\faster-whisper" `
     "$root\\app\\main.py"
 $pyInstallerExit = $LASTEXITCODE
 $ErrorActionPreference = $nativeErrorActionPreference

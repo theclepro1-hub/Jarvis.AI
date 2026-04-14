@@ -7,14 +7,13 @@ from core.ai.local_llm_service import LocalLLMService
 
 ASSISTANT_MODES = frozenset({"fast", "standard", "smart", "private"})
 TEXT_OVERRIDES = frozenset({"auto", "groq", "cerebras", "gemini", "openrouter", "deepseek", "xai", "local_llama"})
-STT_OVERRIDES = frozenset({"auto", "groq_whisper", "local_faster_whisper", "local_vosk"})
+STT_OVERRIDES = frozenset({"auto", "groq_whisper", "local_faster_whisper"})
 
 
 @dataclass(frozen=True, slots=True)
 class AssistantReadiness:
     local_llama_ready: bool = False
     local_faster_whisper_ready: bool = False
-    local_vosk_ready: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,21 +71,21 @@ def resolve_assistant_policy(settings_service, readiness: AssistantReadiness | N
 
     if mode == "fast":
         text_route = ("groq", "cerebras", "deepseek", "openrouter")
-        stt_route = ("groq_whisper", "local_faster_whisper", "local_vosk")
+        stt_route = ("groq_whisper", "local_faster_whisper")
         privacy = "cloud_first"
     elif mode == "smart":
         text_route = ("gemini", "xai", "deepseek", "groq", "cerebras", "openrouter")
-        stt_route = ("groq_whisper", "local_faster_whisper", "local_vosk")
+        stt_route = ("groq_whisper", "local_faster_whisper")
         privacy = "quality_first"
     elif mode == "private":
         text_route = ("local_llama",)
-        stt_route = ("local_faster_whisper", "local_vosk")
+        stt_route = ("local_faster_whisper",)
         text_cloud_allowed = False
         stt_cloud_allowed = False
         privacy = "no_cloud_ever"
     else:
         text_route = ("groq", "deepseek", "cerebras", "openrouter", "local_llama")
-        stt_route = ("local_faster_whisper", "local_vosk", "groq_whisper")
+        stt_route = ("local_faster_whisper", "groq_whisper")
 
     text_override = str(settings_service.get("text_backend_override", "auto")).strip().lower()
     if text_override in TEXT_OVERRIDES and text_override != "auto":
@@ -121,8 +120,6 @@ def resolve_assistant_policy(settings_service, readiness: AssistantReadiness | N
         issues.append("local_llama_missing")
     if "local_faster_whisper" in stt_route and not readiness.local_faster_whisper_ready:
         issues.append("local_faster_whisper_missing")
-    if "local_vosk" in stt_route and not readiness.local_vosk_ready:
-        issues.append("local_vosk_missing")
 
     return AssistantPolicy(
         mode=mode,

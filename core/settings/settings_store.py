@@ -28,6 +28,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ai_max_attempts": 1,
     "text_backend_override": "auto",
     "stt_backend_override": "auto",
+    "stt_local_model": "small",
     "local_llm_backend": "auto",
     "local_llm_model": "",
     "allow_text_cloud_fallback": True,

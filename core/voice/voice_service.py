@@ -204,13 +204,14 @@ class VoiceService:
             parts.append(metrics.final_status)
         return " · ".join(parts) if parts else "Нет последнего wake-сеанса."
 
-    def begin_wake_session(self, pre_roll: bytes, wake_backend: str = "vosk") -> None:
+    def begin_wake_session(self, pre_roll: bytes, wake_backend: str | None = None) -> None:
+        backend = str(wake_backend or self._wake_metrics.wake_backend or "unknown").strip() or "unknown"
         now = time.perf_counter()
         self._wake_metrics = WakeSessionMetrics(
             session_id=uuid.uuid4().hex[:12],
             phase="capturing_command",
             detail="Подхватываю начало команды",
-            wake_backend=wake_backend,
+            wake_backend=backend,
             detected_at=now,
             capture_started_at=now,
             pre_roll_bytes=len(pre_roll),
@@ -283,7 +284,6 @@ class VoiceService:
         readiness = AssistantReadiness(
             local_llama_ready=False,
             local_faster_whisper_ready=self.stt_service._local_faster_whisper_ready(),  # noqa: SLF001
-            local_vosk_ready=self.stt_service._local_vosk_available(),  # noqa: SLF001
         )
         return resolve_assistant_policy(self.settings, readiness=readiness)
 
@@ -352,12 +352,16 @@ class VoiceService:
         self.cancel_active_pipeline()
         return "Останавливаю запись..."
 
-    def capture_after_wake(self, pre_roll: bytes) -> str:
-        return self.capture_after_wake_result(pre_roll).text
+    def capture_after_wake(self, pre_roll: bytes, wake_backend: str | None = None) -> str:
+        return self.capture_after_wake_result(pre_roll, wake_backend=wake_backend).text
 
-    def capture_after_wake_result(self, pre_roll: bytes) -> TranscriptionResult:
+    def capture_after_wake_result(
+        self,
+        pre_roll: bytes,
+        wake_backend: str | None = None,
+    ) -> TranscriptionResult:
         self._begin_pipeline()
-        self.begin_wake_session(pre_roll)
+        self.begin_wake_session(pre_roll, wake_backend=wake_backend)
         max_seconds, silence_seconds, energy_threshold, pre_roll_grace = self._wake_capture_tuning()
         wake_capture = SpeechCaptureService(
             resolve_input_device=self._resolve_input_device,

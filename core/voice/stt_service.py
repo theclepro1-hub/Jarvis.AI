@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 import os
 import re
 import sys
@@ -11,12 +10,17 @@ import time
 import wave
 from pathlib import Path
 
+import numpy as np
+
 from core.policy.assistant_mode import AssistantReadiness, resolve_assistant_policy
 from core.routing.text_rules import normalize_text
-from core.voice.faster_whisper_runtime import load_faster_whisper_model, resolve_local_faster_whisper_model
-from core.voice.model_paths import is_vosk_model_ready, resolve_vosk_model_path
+from core.voice.faster_whisper_runtime import (
+    can_auto_download_faster_whisper_model,
+    load_faster_whisper_model,
+    resolve_local_faster_whisper_model,
+)
 from core.voice.voice_models import TranscriptionResult
-from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
+
 FASTER_WHISPER_CACHE_DIR = "faster-whisper"
 DEFAULT_FASTER_WHISPER_MODEL = os.environ.get("JARVIS_UNITY_FASTER_WHISPER_MODEL", "small").strip() or "small"
 COMMAND_HOTWORDS = ", ".join(
@@ -47,11 +51,36 @@ COMMAND_PROMPT = (
     "панель управления. Сделай громче, сделай тише, заблокируй экран. "
     "Привет, как дела, что умеешь, почему."
 )
+WAKE_HOTWORDS = ", ".join(
+    (
+        "джарвис",
+        "жарвис",
+        "жаравис",
+        "дарвис",
+        "гарри",
+        "гарви",
+        "гарвис",
+        "гаривис",
+        "джаврис",
+        "джарви",
+        "рыж",
+    )
+)
+WAKE_PROMPT = (
+    "Слово активации ассистента на русском: "
+    "джарвис, жарвис, жаравис, дарвис, гарри, гарви, гарвис, гаривис, джаврис, джарви, рыж."
+)
 LOCAL_FASTER_WHISPER_BEAM_SIZE = 4
 LOCAL_FASTER_WHISPER_BEST_OF = 3
 LOCAL_FASTER_WHISPER_VAD = {
     "min_silence_duration_ms": 480,
     "speech_pad_ms": 280,
+}
+WAKE_FASTER_WHISPER_BEAM_SIZE = 2
+WAKE_FASTER_WHISPER_BEST_OF = 2
+WAKE_FASTER_WHISPER_VAD = {
+    "min_silence_duration_ms": 180,
+    "speech_pad_ms": 160,
 }
 
 
@@ -59,7 +88,7 @@ class STTService:
     def __init__(self, settings_service, local_model_path: Path | None = None) -> None:
         self.settings = settings_service
         self._local_model_path_overridden = local_model_path is not None
-        self.local_model_path = local_model_path or resolve_vosk_model_path()
+        self._local_model_override = local_model_path
         self.faster_whisper_download_root = self._find_faster_whisper_download_root()
         self._http_client = None
         self._http_client_signature: tuple[str, str, float] | None = None
@@ -75,8 +104,6 @@ class STTService:
         value = str(self.settings.get("stt_engine", "auto")).strip().casefold()
         if value in {"groq", "groq_whisper"}:
             return "groq_whisper"
-        if value in {"vosk", "local_vosk"}:
-            return "local_vosk"
         if value in {"local", "whisper", "faster_whisper", "local_faster_whisper"}:
             return "local_faster_whisper"
         return "auto"
@@ -88,13 +115,9 @@ class STTService:
 
         if configured_engine == "groq_whisper":
             return "Облачное распознавание готово" if groq_key else "Нужен ключ для облачного распознавания"
-        if configured_engine == "local_vosk":
-            return "локальная модель Vosk готова" if self._local_vosk_available() else "Локальная модель Vosk не найдена"
         if configured_engine == "local_faster_whisper":
             if self._local_faster_whisper_ready():
                 return "локальное распознавание готово"
-            if self._local_vosk_available():
-                return "локальное распознавание работает через Vosk"
             if policy.stt_cloud_allowed:
                 return "Нужен ключ для облачного распознавания или локальный backend распознавания речи"
             return "Нужен локальный backend распознавания речи"
@@ -102,16 +125,10 @@ class STTService:
         if policy.mode == "private":
             if self._local_faster_whisper_ready():
                 return "локальное распознавание готово"
-            if self._local_vosk_available():
-                return "локальное распознавание работает через Vosk"
             return "Нужен локальный backend распознавания речи"
 
         if self._local_faster_whisper_ready():
             return "локальное распознавание готово"
-        if self._local_vosk_available():
-            return "локальное распознавание работает через Vosk"
-        if groq_key and self._local_faster_whisper_ready():
-            return "распознавание готово"
         if groq_key:
             return "Облачное распознавание готово"
         return "Нужен ключ для облачного распознавания или локальный backend распознавания речи"
@@ -120,51 +137,28 @@ class STTService:
         configured_engine = self._configured_engine()
         if configured_engine == "groq_whisper":
             return bool(self._groq_key())
-        if configured_engine == "local_vosk":
-            return self._local_vosk_available()
         if configured_engine == "local_faster_whisper":
-            return self._local_faster_whisper_ready() or self._local_vosk_available()
+            return self._local_faster_whisper_ready()
         policy = self._assistant_policy()
         return any(self._backend_available(backend) for backend in policy.stt_route)
 
     def warm_up_local_backend(self, cancel_event: threading.Event | None = None) -> bool:
         if self._is_cancelled(cancel_event):
             return False
-        preferred_local = self._preferred_local_engine()
-        if preferred_local == "local_faster_whisper":
-            model_source = self._resolve_local_faster_whisper_source()
-            if model_source is None:
-                if self._local_vosk_available():
-                    if self._is_cancelled(cancel_event):
-                        return False
-                    load_vosk_model(self.local_model_path)
-                    return True
-                return False
-            try:
-                if self._is_cancelled(cancel_event):
-                    return False
-                load_faster_whisper_model(
-                    str(model_source),
-                    self.faster_whisper_download_root,
-                    device="cpu",
-                    compute_type="int8",
-                    cpu_threads=self._cpu_threads(),
-                )
-                return True
-            except Exception:
-                if self._local_vosk_available():
-                    if self._is_cancelled(cancel_event):
-                        return False
-                    load_vosk_model(self.local_model_path)
-                    return True
-                return False
-
-        if self._local_vosk_available():
-            if self._is_cancelled(cancel_event):
-                return False
-            load_vosk_model(self.local_model_path)
-            return True
-        return False
+        model_source = self._resolve_local_faster_whisper_source()
+        if model_source is None:
+            return False
+        try:
+            load_faster_whisper_model(
+                str(model_source),
+                self.faster_whisper_download_root,
+                device="cpu",
+                compute_type="int8",
+                cpu_threads=self._cpu_threads(),
+            )
+            return not self._is_cancelled(cancel_event)
+        except Exception:
+            return False
 
     def transcribe_pcm_bytes(self, raw_bytes: bytes, cancel_event: threading.Event | None = None) -> TranscriptionResult:
         if self._is_cancelled(cancel_event):
@@ -179,12 +173,26 @@ class STTService:
             return self._transcribe_auto(raw_bytes, groq_key, cancel_event)
         if engine == "groq_whisper" and groq_key:
             return self._transcribe_with_groq(raw_bytes, cancel_event)
-        if engine == "local_vosk":
-            return self._transcribe_with_local_vosk(raw_bytes, cancel_event)
         if engine == "local_faster_whisper":
-            return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper", "local_vosk"), cancel_event)
+            return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper",), cancel_event)
 
         return self._transcribe_route(raw_bytes, self._resolved_stt_route(), cancel_event)
+
+    def transcribe_wake_window(
+        self,
+        raw_bytes: bytes,
+        cancel_event: threading.Event | None = None,
+    ) -> TranscriptionResult:
+        return self._transcribe_with_local_faster_whisper(
+            raw_bytes,
+            cancel_event=cancel_event,
+            initial_prompt=WAKE_PROMPT,
+            hotwords=WAKE_HOTWORDS,
+            beam_size=WAKE_FASTER_WHISPER_BEAM_SIZE,
+            best_of=WAKE_FASTER_WHISPER_BEST_OF,
+            vad_parameters=WAKE_FASTER_WHISPER_VAD,
+            chunk_length=3,
+        )
 
     def _transcribe_auto(
         self,
@@ -224,10 +232,6 @@ class STTService:
                 if not self._local_faster_whisper_ready():
                     continue
                 result = self._transcribe_with_local_faster_whisper(raw_bytes, cancel_event)
-            elif backend == "local_vosk":
-                if not self._local_vosk_available():
-                    continue
-                result = self._transcribe_with_local_vosk(raw_bytes, cancel_event)
             else:
                 continue
 
@@ -267,22 +271,13 @@ class STTService:
                     attempted,
                     total_latency,
                 )
-            if engine == "local_faster_whisper":
-                if not self._local_faster_whisper_ready():
-                    continue
-                result = self._transcribe_with_local_faster_whisper(raw_bytes, cancel_event)
-            elif engine == "local_vosk":
-                if not self._local_vosk_available():
-                    continue
-                result = self._transcribe_with_local_vosk(raw_bytes, cancel_event)
-            else:
+            if engine != "local_faster_whisper" or not self._local_faster_whisper_ready():
                 continue
 
+            result = self._transcribe_with_local_faster_whisper(raw_bytes, cancel_event)
             attempted.append(engine)
             total_latency += result.latency_ms
-            if result.ok:
-                return self._with_trace(result, attempted, total_latency)
-            if result.status == "cancelled":
+            if result.ok or result.status == "cancelled":
                 return self._with_trace(result, attempted, total_latency)
             last_failure = self._with_trace(result, attempted, total_latency)
 
@@ -366,6 +361,13 @@ class STTService:
         self,
         raw_bytes: bytes,
         cancel_event: threading.Event | None = None,
+        *,
+        initial_prompt: str = COMMAND_PROMPT,
+        hotwords: str = COMMAND_HOTWORDS,
+        beam_size: int = LOCAL_FASTER_WHISPER_BEAM_SIZE,
+        best_of: int = LOCAL_FASTER_WHISPER_BEST_OF,
+        vad_parameters: dict[str, int] | None = None,
+        chunk_length: int | None = None,
     ) -> TranscriptionResult:
         if self._is_cancelled(cancel_event):
             return self._cancelled_result(engine="local_faster_whisper", backend_trace=("local_faster_whisper",))
@@ -378,7 +380,15 @@ class STTService:
                 backend_trace=("local_faster_whisper",),
             )
 
-        temp_path = self._write_temp_wav(raw_bytes)
+        waveform = self._pcm_bytes_to_waveform(raw_bytes)
+        if waveform.size == 0:
+            return TranscriptionResult(
+                status="no_speech",
+                detail="Не удалось распознать речь.",
+                engine="local_faster_whisper",
+                backend_trace=("local_faster_whisper",),
+            )
+
         started_at = time.perf_counter()
         try:
             if self._is_cancelled(cancel_event):
@@ -392,18 +402,21 @@ class STTService:
             )
             if self._is_cancelled(cancel_event):
                 return self._cancelled_result(engine="local_faster_whisper", backend_trace=("local_faster_whisper",))
-            segments, _info = model.transcribe(
-                str(temp_path),
-                language="ru",
-                beam_size=LOCAL_FASTER_WHISPER_BEAM_SIZE,
-                best_of=LOCAL_FASTER_WHISPER_BEST_OF,
-                temperature=0.0,
-                vad_filter=True,
-                vad_parameters=LOCAL_FASTER_WHISPER_VAD,
-                condition_on_previous_text=False,
-                initial_prompt=COMMAND_PROMPT,
-                hotwords=COMMAND_HOTWORDS,
-            )
+            kwargs = {
+                "language": "ru",
+                "beam_size": beam_size,
+                "best_of": best_of,
+                "temperature": 0.0,
+                "vad_filter": True,
+                "vad_parameters": vad_parameters or LOCAL_FASTER_WHISPER_VAD,
+                "condition_on_previous_text": False,
+                "initial_prompt": initial_prompt,
+                "hotwords": hotwords,
+                "without_timestamps": True,
+            }
+            if chunk_length is not None:
+                kwargs["chunk_length"] = chunk_length
+            segments, _info = model.transcribe(waveform, **kwargs)
             segment_texts: list[str] = []
             for segment in segments:
                 if self._is_cancelled(cancel_event):
@@ -435,61 +448,6 @@ class STTService:
                 backend_trace=("local_faster_whisper",),
                 latency_ms=round((time.perf_counter() - started_at) * 1000.0, 1),
             )
-        finally:
-            temp_path.unlink(missing_ok=True)
-
-    def _transcribe_with_local_vosk(
-        self,
-        raw_bytes: bytes,
-        cancel_event: threading.Event | None = None,
-    ) -> TranscriptionResult:
-        if self._is_cancelled(cancel_event):
-            return self._cancelled_result(engine="local_vosk", backend_trace=("local_vosk",))
-        if not self._local_vosk_available():
-            return TranscriptionResult(
-                status="model_missing",
-                detail="Локальная модель Vosk не найдена.",
-                engine="local_vosk",
-                backend_trace=("local_vosk",),
-            )
-
-        started_at = time.perf_counter()
-        try:
-            if self._is_cancelled(cancel_event):
-                return self._cancelled_result(engine="local_vosk", backend_trace=("local_vosk",))
-            load_vosk_model(self.local_model_path)
-            recognizer = new_vosk_recognizer(self.local_model_path, 16_000)
-            recognizer.AcceptWaveform(raw_bytes)
-            if self._is_cancelled(cancel_event):
-                return self._cancelled_result(engine="local_vosk", backend_trace=("local_vosk",))
-            payload = recognizer.FinalResult()
-            data = json.loads(payload)
-            text = self._normalize_transcript_text(data.get("text", ""))
-            elapsed_ms = round((time.perf_counter() - started_at) * 1000.0, 1)
-            if not text:
-                return TranscriptionResult(
-                    status="no_speech",
-                    detail="Не удалось распознать речь.",
-                    engine="local_vosk",
-                    backend_trace=("local_vosk",),
-                    latency_ms=elapsed_ms,
-                )
-            return TranscriptionResult(
-                status="ok",
-                text=text,
-                detail="Речь распознана локально.",
-                engine="local_vosk",
-                backend_trace=("local_vosk",),
-                latency_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            return TranscriptionResult(
-                status="stt_failed",
-                detail=f"Не удалось распознать речь локально: {exc}",
-                engine="local_vosk",
-                backend_trace=("local_vosk",),
-                latency_ms=round((time.perf_counter() - started_at) * 1000.0, 1),
-            )
 
     def _normalize_transcript_text(self, text: object) -> str:
         normalized = normalize_text(str(text or ""))
@@ -500,41 +458,44 @@ class STTService:
         normalized = re.sub(r"([,.:;!?]){2,}", r"\1", normalized)
         return normalize_text(normalized)
 
+    def _pcm_bytes_to_waveform(self, raw_bytes: bytes) -> np.ndarray:
+        if not raw_bytes:
+            return np.asarray([], dtype=np.float32)
+        samples = np.frombuffer(raw_bytes, dtype=np.int16)
+        if samples.size == 0:
+            return np.asarray([], dtype=np.float32)
+        return samples.astype(np.float32) / 32768.0
+
     def _faster_whisper_available(self) -> bool:
         return importlib.util.find_spec("faster_whisper") is not None
-
-    def _local_vosk_available(self) -> bool:
-        if not self._local_model_path_overridden:
-            self.local_model_path = resolve_vosk_model_path()
-        return is_vosk_model_ready(self.local_model_path)
 
     def _local_faster_whisper_ready(self) -> bool:
         return self._faster_whisper_available() and self._resolve_local_faster_whisper_source() is not None
 
     def _preferred_local_engine(self) -> str:
-        engine = self.engine()
-        if engine == "local_vosk" and self._local_vosk_available():
-            return "local_vosk"
-        if engine == "local_faster_whisper" and self._local_faster_whisper_ready():
+        if self._local_faster_whisper_ready():
             return "local_faster_whisper"
-        for backend in self._resolved_stt_route():
-            if backend == "local_faster_whisper" and self._local_faster_whisper_ready():
-                return backend
-            if backend == "local_vosk" and self._local_vosk_available():
-                return backend
         return "local_faster_whisper"
 
     def _faster_whisper_model_ref(self) -> str:
         configured = str(self.settings.get("stt_local_model", DEFAULT_FASTER_WHISPER_MODEL)).strip()
         return configured or DEFAULT_FASTER_WHISPER_MODEL
 
-    def _resolve_local_faster_whisper_source(self) -> Path | None:
+    def _resolve_local_faster_whisper_source(self) -> str | Path | None:
         if not self._faster_whisper_available():
             return None
-        return resolve_local_faster_whisper_model(
-            self._faster_whisper_model_ref(),
-            self.faster_whisper_download_root,
-        )
+        if self._local_model_override is not None:
+            if self._local_model_override.exists():
+                return self._local_model_override
+            return None
+
+        model_ref = self._faster_whisper_model_ref()
+        local_path = resolve_local_faster_whisper_model(model_ref, self.faster_whisper_download_root)
+        if local_path is not None:
+            return local_path
+        if can_auto_download_faster_whisper_model(model_ref):
+            return model_ref
+        return None
 
     def _is_cancelled(self, cancel_event: threading.Event | None) -> bool:
         return bool(cancel_event is not None and cancel_event.is_set())
@@ -553,8 +514,8 @@ class STTService:
         )
 
     def _auto_local_chain(self) -> tuple[str, ...]:
-        route = tuple(step for step in self._resolved_stt_route() if step in {"local_faster_whisper", "local_vosk"})
-        return route or ("local_faster_whisper", "local_vosk")
+        route = tuple(step for step in self._resolved_stt_route() if step == "local_faster_whisper")
+        return route or ("local_faster_whisper",)
 
     def _find_faster_whisper_download_root(self) -> Path:
         data_dir = os.environ.get("JARVIS_UNITY_DATA_DIR")
@@ -563,7 +524,7 @@ class STTService:
         frozen_root = getattr(sys, "_MEIPASS", None)
         if frozen_root:
             bundled = Path(frozen_root) / "assets" / "models" / FASTER_WHISPER_CACHE_DIR
-            if bundled.exists():
+            if resolve_local_faster_whisper_model(self._faster_whisper_model_ref(), bundled) is not None:
                 return bundled
         local_root = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA", Path.home()))
         return local_root / "JarvisAi_Unity" / "models" / FASTER_WHISPER_CACHE_DIR
@@ -579,13 +540,12 @@ class STTService:
         readiness = AssistantReadiness(
             local_llama_ready=False,
             local_faster_whisper_ready=self._local_faster_whisper_ready(),
-            local_vosk_ready=self._local_vosk_available(),
         )
         return resolve_assistant_policy(self.settings, readiness=readiness)
 
     def _resolved_stt_route(self) -> tuple[str, ...]:
         override = str(self.settings.get("stt_backend_override", "auto")).strip().casefold()
-        if override in {"groq_whisper", "local_faster_whisper", "local_vosk"}:
+        if override in {"groq_whisper", "local_faster_whisper"}:
             return (override,)
         return self._assistant_policy().stt_route
 
@@ -594,8 +554,6 @@ class STTService:
             return bool(self._groq_key())
         if backend == "local_faster_whisper":
             return self._local_faster_whisper_ready()
-        if backend == "local_vosk":
-            return self._local_vosk_available()
         return False
 
     def _build_http_client(self):

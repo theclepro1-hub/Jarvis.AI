@@ -24,6 +24,7 @@ class FakeStore:
             "tts_voice_name": "Голос по умолчанию",
             "tts_rate": 185,
             "tts_volume": 85,
+            "stt_local_model": "small",
             "registration": {
                 "groq_api_key": "",
                 "telegram_user_id": "",
@@ -40,30 +41,19 @@ class FakeStore:
         self.payload = payload
 
 
-def test_wake_service_warm_up_model_loads_shared_vosk_cache(tmp_path, monkeypatch):
+def test_wake_service_warm_up_model_uses_local_backend(monkeypatch) -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
-    wake.model_path = tmp_path / "vosk-model-small-ru-0.22"
-    wake.model_path.mkdir(parents=True)
-    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
-        target = wake.model_path / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"test")
+    calls: list[bool] = []
 
-    calls: list[object] = []
-
-    def fake_load_vosk_model(path):  # noqa: ANN001
-        calls.append(path)
-        return object()
-
-    monkeypatch.setattr("core.voice.wake_service.load_vosk_model", fake_load_vosk_model)
+    monkeypatch.setattr(voice.stt_service, "warm_up_local_backend", lambda cancel_event=None: calls.append(True) or True)
 
     assert wake.warm_up_model() is True
-    assert calls == [wake.model_path]
+    assert calls == [True]
 
 
-def test_voice_service_warms_up_local_stt_backend(monkeypatch):
+def test_voice_service_warms_up_local_stt_backend(monkeypatch) -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     calls: list[bool] = []
@@ -74,13 +64,13 @@ def test_voice_service_warms_up_local_stt_backend(monkeypatch):
     assert calls == [True]
 
 
-def test_voice_service_reports_wake_timings_in_sequence():
+def test_voice_service_reports_wake_timings_in_sequence() -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     voice._wake_metrics = WakeSessionMetrics(  # noqa: SLF001
         session_id="abc123",
-        wake_backend="vosk",
-        stt_backend="local_vosk",
+        wake_backend="local_faster_whisper",
+        stt_backend="local_faster_whisper",
         pre_roll_bytes=3200,
         detected_at=1.0,
         capture_started_at=1.05,
@@ -94,10 +84,10 @@ def test_voice_service_reports_wake_timings_in_sequence():
     summary = voice.latest_wake_metrics_summary()
 
     assert summary.index("pre-roll") < summary.index("wake→capture") < summary.index("capture") < summary.index("stt") < summary.index("handoff") < summary.index("total")
-    assert "backend wake vosk · stt local_vosk" in summary
+    assert "backend wake local_faster_whisper · stt local_faster_whisper" in summary
 
 
-def test_wake_service_stop_cancels_active_voice_pipeline():
+def test_wake_service_stop_cancels_active_voice_pipeline() -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
@@ -110,7 +100,7 @@ def test_wake_service_stop_cancels_active_voice_pipeline():
     assert calls == ["cancelled"]
 
 
-def test_wake_service_recognizes_common_wake_mishears():
+def test_wake_service_recognizes_common_wake_mishears() -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)

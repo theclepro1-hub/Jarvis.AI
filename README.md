@@ -18,7 +18,7 @@
 - Qt Quick / QML
 - OpenAI-compatible Groq client via `openai`
 - `sounddevice` + `numpy` for manual mic capture
-- `vosk` for always-on local wake word
+- local wake detection built on speech bursts + `faster-whisper`
 - bundled `Golos Text` font for stable Cyrillic rendering in QML
 - generated Windows icon in `assets/icons/jarvis_unity.ico`
 
@@ -74,6 +74,7 @@ The release build produces:
 ## Voice Runtime
 
 - manual mic capture uses `sounddevice`
-- transcription uses Groq Whisper STT after capture
-- always-on local wake word uses a bundled Vosk Russian model and reports readiness only after the local model and microphone stream are actually available
+- local STT and wake recognition use `faster-whisper`
+- cloud STT still uses Groq Whisper when policy routes there
+- the release build tries to prewarm and bundle the local `faster-whisper` cache; if no local snapshot is available, the frozen app falls back to `%LOCALAPPDATA%` for the first model download instead of writing into the bundled runtime
 - registration secrets are protected with Windows DPAPI in the Windows build

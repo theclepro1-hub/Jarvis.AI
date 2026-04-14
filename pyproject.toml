@@ -16,7 +16,6 @@ dependencies = [
   "httpx>=0.28.1,<0.29",
   "sounddevice>=0.5.5,<0.6",
   "faster-whisper>=1.2.1,<2",
-  "vosk>=0.3.45,<0.4",
   "pyttsx3>=2.99,<3",
 ]
 

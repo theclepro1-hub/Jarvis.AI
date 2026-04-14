@@ -47,7 +47,6 @@ def test_voice_runtime_without_key_reports_not_connected():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     voice.stt_service._faster_whisper_available = lambda: False  # noqa: SLF001
-    voice.stt_service._local_vosk_available = lambda: False  # noqa: SLF001
 
     status = voice.runtime_status()
 
@@ -348,6 +347,30 @@ def test_capture_after_wake_keeps_short_real_command(monkeypatch):
     assert result.text == "ютуб"
 
 
+def test_capture_after_wake_records_supplied_wake_backend(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "transcribe_pcm_bytes",
+        lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text="джарвис открой ютуб", detail="ok", engine="stub"),
+    )
+
+    result = voice.capture_after_wake_result(b"", wake_backend="sherpa_onnx")
+
+    assert result.ok is True
+    assert voice.latest_wake_metrics()["wakeBackend"] == "sherpa_onnx"
+
+
 def test_manual_capture_stop_cancels_pending_transcription():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
@@ -401,7 +424,7 @@ def test_capture_after_wake_can_be_cancelled_during_transcription(monkeypatch):
         started.set()
         while cancel_event is not None and not cancel_event.is_set():
             time.sleep(0.01)
-        return TranscriptionResult(status="cancelled", detail="Запись остановлена.", engine="local_vosk")
+        return TranscriptionResult(status="cancelled", detail="Запись остановлена.", engine="local_faster_whisper")
 
     voice.stt_service.transcribe_pcm_bytes = fake_transcribe  # type: ignore[method-assign]
 

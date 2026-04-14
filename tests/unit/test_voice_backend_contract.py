@@ -5,10 +5,10 @@ import threading
 import time
 import types
 from array import array
+from pathlib import Path
 
 from core.settings.settings_service import SettingsService
 from core.voice.faster_whisper_runtime import clear_faster_whisper_model_cache, load_faster_whisper_model
-from core.voice.model_paths import MODEL_DIR_NAME
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
 from core.voice.stt_service import (
     COMMAND_HOTWORDS,
@@ -17,9 +17,13 @@ from core.voice.stt_service import (
     LOCAL_FASTER_WHISPER_BEST_OF,
     LOCAL_FASTER_WHISPER_VAD,
     STTService,
+    WAKE_FASTER_WHISPER_BEAM_SIZE,
+    WAKE_FASTER_WHISPER_BEST_OF,
+    WAKE_FASTER_WHISPER_VAD,
+    WAKE_HOTWORDS,
+    WAKE_PROMPT,
 )
 from core.voice.tts_service import TTSService
-from core.voice.voice_models import TranscriptionResult
 
 
 class FakeStore:
@@ -32,6 +36,7 @@ class FakeStore:
             "tts_rate": 185,
             "tts_volume": 85,
             "stt_engine": "auto",
+            "stt_local_model": "small",
             "network": {
                 "proxy_mode": "system",
                 "proxy_url": "",
@@ -53,12 +58,9 @@ class FakeStore:
         self.payload = payload
 
 
-def make_ready_vosk_model(model_path):
+def make_ready_faster_whisper_model(model_path: Path) -> None:
     model_path.mkdir(parents=True, exist_ok=True)
-    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
-        target = model_path / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"test")
+    (model_path / "model.bin").write_bytes(b"fw")
 
 
 def test_speech_capture_reports_mic_open_failed(monkeypatch):
@@ -106,14 +108,7 @@ def test_speech_capture_ignores_single_noise_spike_before_speech(monkeypatch):
     def pcm_block(amplitude: int) -> bytes:
         return array("h", [amplitude] * frames).tobytes()
 
-    blocks = iter(
-        (
-            pcm_block(205),  # short spike
-            pcm_block(0),
-            pcm_block(0),
-            pcm_block(0),
-        )
-    )
+    blocks = iter((pcm_block(205), pcm_block(0), pcm_block(0), pcm_block(0)))
 
     class FakeStream:
         def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
@@ -244,12 +239,7 @@ def test_speech_capture_adapts_to_steady_noise_before_real_speech(monkeypatch):
     service = SpeechCaptureService(
         lambda: None,
         threading.Event(),
-        config=CaptureConfig(
-            max_seconds=0.8,
-            silence_seconds=0.2,
-            energy_threshold=160.0,
-            noise_floor_frames=3,
-        ),
+        config=CaptureConfig(max_seconds=0.8, silence_seconds=0.2, energy_threshold=160.0, noise_floor_frames=3),
     )
     result = service.capture_until_silence()
 
@@ -287,140 +277,42 @@ def test_stt_service_prefers_local_faster_whisper_engine_alias(tmp_path):
     assert service.engine() == "local_faster_whisper"
 
 
-def test_stt_service_local_chain_falls_back_to_vosk(tmp_path):
-    settings = SettingsService(FakeStore())
-    settings.set("stt_engine", "local")
-    settings.set("stt_local_model", str(tmp_path / "fw-model"))
-    model_path = tmp_path / "vosk-model"
-    make_ready_vosk_model(model_path)
-    (tmp_path / "fw-model").mkdir(parents=True)
-    (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
-    service = STTService(settings, local_model_path=model_path)
-    service._faster_whisper_available = lambda: True  # noqa: SLF001
-    service._transcribe_with_local_faster_whisper = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
-        status="stt_failed",
-        detail="fw failed",
-        engine="local_faster_whisper",
-        backend_trace=("local_faster_whisper",),
-        latency_ms=120.0,
-    )
-    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
-        status="ok",
-        text="открой параметры",
-        detail="ok",
-        engine="local_vosk",
-        backend_trace=("local_vosk",),
-        latency_ms=35.0,
-    )
-
-    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
-
-    assert result.ok is True
-    assert result.text == "открой параметры"
-    assert result.backend_trace == ("local_faster_whisper", "local_vosk")
-    assert result.latency_ms == 155.0
-
-
-def test_stt_service_warmup_skips_remote_faster_whisper_and_uses_vosk(monkeypatch, tmp_path):
+def test_stt_service_warmup_uses_downloadable_faster_whisper_ref(monkeypatch, tmp_path):
     settings = SettingsService(FakeStore())
     settings.set("stt_engine", "local")
     settings.set("stt_local_model", "small")
-    model_path = tmp_path / "vosk-model"
-    make_ready_vosk_model(model_path)
-    service = STTService(settings, local_model_path=model_path)
+    service = STTService(settings)
     service.faster_whisper_download_root = tmp_path / "fw-cache"
     service._faster_whisper_available = lambda: True  # noqa: SLF001
 
-    faster_whisper_calls = []
-    vosk_calls = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     monkeypatch.setattr(
         "core.voice.stt_service.load_faster_whisper_model",
-        lambda *args, **kwargs: faster_whisper_calls.append((args, kwargs)),
+        lambda *args, **kwargs: calls.append((args, kwargs)) or object(),
     )
-    monkeypatch.setattr("core.voice.stt_service.load_vosk_model", lambda path: vosk_calls.append(path))
 
     assert service.warm_up_local_backend() is True
-    assert faster_whisper_calls == []
-    assert vosk_calls == [model_path]
+    assert calls[0][0][0] == "small"
 
 
-def test_stt_service_remote_faster_whisper_ref_does_not_block_local_vosk_path(monkeypatch, tmp_path):
+def test_stt_service_standard_route_prefers_local_faster_whisper(tmp_path):
     settings = SettingsService(FakeStore())
-    settings.set("stt_engine", "local")
-    settings.set("stt_local_model", "small")
-    model_path = tmp_path / "vosk-model"
-    make_ready_vosk_model(model_path)
-    service = STTService(settings, local_model_path=model_path)
-    service.faster_whisper_download_root = tmp_path / "fw-cache"
-    service._faster_whisper_available = lambda: True  # noqa: SLF001
+    model_path = tmp_path / "fw-model"
+    make_ready_faster_whisper_model(model_path)
+    settings.set("stt_local_model", str(model_path))
+    service = STTService(settings)
 
-    monkeypatch.setattr(
-        service,
-        "_transcribe_with_local_faster_whisper",
-        lambda _raw, _cancel_event=None: (_ for _ in ()).throw(AssertionError("faster-whisper should be skipped")),
-    )
-    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: TranscriptionResult(  # noqa: SLF001
-        status="ok",
-        text="открой проводник",
-        detail="ok",
-        engine="local_vosk",
-        backend_trace=("local_vosk",),
-        latency_ms=28.0,
-    )
-
-    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
-
-    assert result.ok is True
-    assert result.text == "открой проводник"
-    assert result.backend_trace == ("local_vosk",)
-
-
-def test_stt_service_balance_mode_prefers_faster_whisper_before_vosk(tmp_path):
-    settings = SettingsService(FakeStore())
-    settings.set("stt_engine", "auto")
-    settings.set("voice_mode", "balance")
-    settings.set("stt_local_model", str(tmp_path / "fw-model"))
-    model_path = tmp_path / "vosk-model"
-    make_ready_vosk_model(model_path)
-    (tmp_path / "fw-model").mkdir(parents=True)
-    (tmp_path / "fw-model" / "model.bin").write_bytes(b"fw")
-    service = STTService(settings, local_model_path=model_path)
-    service._faster_whisper_available = lambda: True  # noqa: SLF001
-    order: list[str] = []
-
-    service._transcribe_with_local_vosk = lambda _raw, _cancel_event=None: order.append("local_vosk") or TranscriptionResult(  # noqa: SLF001
-        status="ok",
-        text="открой параметры",
-        detail="ok",
-        engine="local_vosk",
-        backend_trace=("local_vosk",),
-        latency_ms=20.0,
-    )
-    service._transcribe_with_local_faster_whisper = lambda _raw, _cancel_event=None: order.append("local_faster_whisper") or TranscriptionResult(  # noqa: SLF001
-        status="ok",
-        text="открой параметры",
-        detail="ok",
-        engine="local_faster_whisper",
-        backend_trace=("local_faster_whisper",),
-        latency_ms=60.0,
-    )
-
-    result = service.transcribe_pcm_bytes(b"\x00" * 3200)
-
-    assert result.ok is True
-    assert order == ["local_faster_whisper"]
-    assert result.backend_trace == ("local_faster_whisper",)
+    assert service._resolved_stt_route() == ("local_faster_whisper", "groq_whisper")  # noqa: SLF001
 
 
 def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypatch, tmp_path):
     settings = SettingsService(FakeStore())
     settings.set("stt_engine", "local")
     model_path = tmp_path / "fw-model"
-    model_path.mkdir(parents=True)
-    (model_path / "model.bin").write_bytes(b"fw")
+    make_ready_faster_whisper_model(model_path)
     settings.set("stt_local_model", str(model_path))
-    service = STTService(settings, local_model_path=tmp_path / "vosk-model")
+    service = STTService(settings)
     service._faster_whisper_available = lambda: True  # noqa: SLF001
 
     captured: dict[str, object] = {}
@@ -432,7 +324,7 @@ def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypa
 
     monkeypatch.setattr("core.voice.stt_service.load_faster_whisper_model", lambda *args, **kwargs: FakeModel())
 
-    result = service._transcribe_with_local_faster_whisper(b"\x00" * 3200)
+    result = service._transcribe_with_local_faster_whisper(b"\x00" * 3200)  # noqa: SLF001
 
     assert result.ok is True
     assert result.text == "открой ютуб"
@@ -447,12 +339,40 @@ def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypa
     assert captured["hotwords"] == COMMAND_HOTWORDS
 
 
-def test_stt_service_explicit_local_vosk_override_wins_route_selection(tmp_path):
+def test_stt_service_wake_window_uses_wake_prompt_and_hotwords(monkeypatch, tmp_path):
     settings = SettingsService(FakeStore())
-    settings.set("stt_backend_override", "local_vosk")
-    service = STTService(settings, local_model_path=tmp_path / "vosk-model")
+    model_path = tmp_path / "fw-model"
+    make_ready_faster_whisper_model(model_path)
+    settings.set("stt_local_model", str(model_path))
+    service = STTService(settings)
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
 
-    assert service._resolved_stt_route() == ("local_vosk",)
+    captured: dict[str, object] = {}
+
+    class FakeModel:
+        def transcribe(self, _path, **kwargs):  # noqa: ANN001
+            captured.update(kwargs)
+            return [types.SimpleNamespace(text="джарвис открой ютуб")], types.SimpleNamespace()
+
+    monkeypatch.setattr("core.voice.stt_service.load_faster_whisper_model", lambda *args, **kwargs: FakeModel())
+
+    result = service.transcribe_wake_window(b"\x00" * 3200)
+
+    assert result.ok is True
+    assert captured["initial_prompt"] == WAKE_PROMPT
+    assert captured["hotwords"] == WAKE_HOTWORDS
+    assert captured["beam_size"] == WAKE_FASTER_WHISPER_BEAM_SIZE
+    assert captured["best_of"] == WAKE_FASTER_WHISPER_BEST_OF
+    assert captured["vad_parameters"] == WAKE_FASTER_WHISPER_VAD
+    assert captured["chunk_length"] == 3
+
+
+def test_stt_service_explicit_local_faster_whisper_override_wins_route_selection(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_backend_override", "local_faster_whisper")
+    service = STTService(settings, local_model_path=tmp_path / "fw-model")
+
+    assert service._resolved_stt_route() == ("local_faster_whisper",)  # noqa: SLF001
 
 
 def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeypatch, tmp_path):
@@ -495,9 +415,10 @@ def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeyp
 def test_stt_service_cancels_before_entering_backend(tmp_path):
     settings = SettingsService(FakeStore())
     settings.set("stt_engine", "local")
-    model_path = tmp_path / "vosk-model"
-    model_path.mkdir(parents=True)
-    service = STTService(settings, local_model_path=model_path)
+    model_path = tmp_path / "fw-model"
+    make_ready_faster_whisper_model(model_path)
+    settings.set("stt_local_model", str(model_path))
+    service = STTService(settings)
     cancelled = threading.Event()
     cancelled.set()
 
@@ -567,21 +488,3 @@ def test_tts_engine_selection_hides_unready_online_voice(monkeypatch):
 
     assert service.tts_engine() == "system"
     assert [engine.key for engine in service.available_engines()] == ["system"]
-
-
-def test_stt_service_prefers_repo_vosk_cache_before_appdata(tmp_path, monkeypatch):
-    repo_root = tmp_path / "repo"
-    cached_model = repo_root / "build" / "model_cache" / MODEL_DIR_NAME
-    cached_model.mkdir(parents=True)
-    for relative_path in ("am/final.mdl", "conf/model.conf", "graph/Gr.fst", "ivector/final.ie"):
-        target = cached_model / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"test")
-    monkeypatch.setattr("core.voice.model_paths._repo_root", lambda: repo_root)
-    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
-
-    settings = SettingsService(FakeStore())
-    service = STTService(settings)
-
-    assert service.local_model_path == cached_model

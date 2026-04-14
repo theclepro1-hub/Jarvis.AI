@@ -470,6 +470,23 @@ class VoiceBridge(QObject):
     def _emit_wake_status_updated(self) -> None:
         self.wakeStatusUpdated.emit()
 
+    def _wake_backend_name(self) -> str:
+        return getattr(self.services.wake, "backend_name", "unknown")
+
+    def _capture_after_wake_result(self, pre_roll: bytes):  # noqa: ANN202
+        capture = getattr(self.services.voice, "capture_after_wake_result")
+        try:
+            return capture(pre_roll, wake_backend=self._wake_backend_name())
+        except TypeError:
+            return capture(pre_roll)
+
+    def _capture_after_wake(self, pre_roll: bytes) -> str:
+        capture = getattr(self.services.voice, "capture_after_wake")
+        try:
+            return capture(pre_roll, wake_backend=self._wake_backend_name())
+        except TypeError:
+            return capture(pre_roll)
+
     def _handle_wake_detected(self, pre_roll: bytes) -> None:
         if self.services.voice.is_recording:
             return
@@ -502,7 +519,7 @@ class VoiceBridge(QObject):
         self.state.status = "Распознаю команду после «Джарвис»"
         self.statusChanged.emit()
         if hasattr(self.services.voice, "capture_after_wake_result"):
-            result = self.services.voice.capture_after_wake_result(pre_roll)
+            result = self._capture_after_wake_result(pre_roll)
             if result.ok and result.text.strip():
                 self.transcribedTextReady.emit(result.text)
             else:
@@ -510,7 +527,7 @@ class VoiceBridge(QObject):
             self.captureFinished.emit()
             return
 
-        text = self.services.voice.capture_after_wake(pre_roll)
+        text = self._capture_after_wake(pre_roll)
         if text:
             self.transcribedTextReady.emit(text)
         else:

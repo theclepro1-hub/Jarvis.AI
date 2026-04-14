@@ -69,22 +69,22 @@ def test_project_version_is_sourced_from_core_version() -> None:
 def test_build_script_keeps_expected_release_inputs() -> None:
     build_script = Path("build/build_release.ps1").read_text(encoding="utf-8")
 
-    assert "--collect-all vosk" in build_script
+    assert "--collect-all vosk" not in build_script
     assert "--hidden-import win32com.client" in build_script
     assert "--hidden-import pythoncom" in build_script
-    assert "MODEL_DOWNLOAD" in build_script
-    assert "Test-ModelSourceReady" in build_script
-    assert "Invoke-RetryDownload" in build_script
+    assert "LOCAL_STT_MODEL_PREWARM" in build_script
+    assert "Resolve-LocalSTTModelPath" in build_script
+    assert "load_faster_whisper_model" in build_script
+    assert "resolve_local_faster_whisper_model" in build_script
     assert "Write-ChecksumFile" in build_script
     assert "Assert-ChecksumFile" in build_script
     assert "Get-FileHash" in build_script
-    assert r"assets\\models\\$modelName" in build_script
+    assert r"assets\\models\\faster-whisper" in build_script
     assert "release_metadata.py" in build_script
     assert 'Assert-NativeSuccess -Step "Installer metadata render"' in build_script
-    assert "am\\final.mdl" in build_script
-    assert "conf\\model.conf" in build_script
-    assert "graph\\Gr.fst" in build_script
-    assert "ivector\\final.ie" in build_script
+    assert "alphacephei.com/vosk" not in build_script
+    assert "vosk-model-small-ru-0.22" not in build_script
+    assert '--collect-all faster_whisper' in build_script
     assert '--windowed `' in build_script
     assert '--onefile `' in build_script
     assert '--icon $iconPath' in build_script

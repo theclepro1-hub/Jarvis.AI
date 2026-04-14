@@ -89,6 +89,13 @@ def resolve_local_faster_whisper_model(model_ref: str, download_root: Path) -> P
     return None
 
 
+def can_auto_download_faster_whisper_model(model_ref: str) -> bool:
+    normalized = str(model_ref or "").strip()
+    if not normalized:
+        return False
+    return _canonical_model_repo(normalized) is not None
+
+
 def load_faster_whisper_model(
     model_ref: str,
     download_root: Path,
