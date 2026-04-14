@@ -47,13 +47,16 @@ COMMAND_HOTWORDS = ", ".join(
 )
 COMMAND_PROMPT = (
     "Русские голосовые команды и короткий разговор с ассистентом в Windows. "
-    "Джарвис, жарвис, жаравис, дарвис, гарри, гарви, рыж. "
+    "Джарвис, жарвис, жаравис, дарвис, гарри, гарви, горы, гори, гарий, рыж. "
     "Открой YouTube, Steam, Discord, браузер, Яндекс Музыку, параметры, проводник, "
     "панель управления. Сделай громче, сделай тише, заблокируй экран. "
     "Привет, как дела, что умеешь, почему."
 )
 WAKE_HOTWORDS = ", ".join(
     (
+        "горы",
+        "гори",
+        "гарий",
         "джарвис",
         "жарвис",
         "жаравис",
@@ -69,19 +72,19 @@ WAKE_HOTWORDS = ", ".join(
 )
 WAKE_PROMPT = (
     "Слово активации ассистента на русском: "
-    "джарвис, жарвис, жаравис, дарвис, гарри, гарви, гарвис, гаривис, джаврис, джарви, рыж."
+    "джарвис, жарвис, жаравис, дарвис, гарри, гарви, гарвис, гаривис, джаврис, джарви, горы, гори, гарий, рыж."
 )
-LOCAL_FASTER_WHISPER_BEAM_SIZE = 4
-LOCAL_FASTER_WHISPER_BEST_OF = 3
+LOCAL_FASTER_WHISPER_BEAM_SIZE = 5
+LOCAL_FASTER_WHISPER_BEST_OF = 4
 LOCAL_FASTER_WHISPER_VAD = {
-    "min_silence_duration_ms": 480,
-    "speech_pad_ms": 280,
+    "min_silence_duration_ms": 420,
+    "speech_pad_ms": 320,
 }
-WAKE_FASTER_WHISPER_BEAM_SIZE = 2
-WAKE_FASTER_WHISPER_BEST_OF = 2
+WAKE_FASTER_WHISPER_BEAM_SIZE = 4
+WAKE_FASTER_WHISPER_BEST_OF = 4
 WAKE_FASTER_WHISPER_VAD = {
-    "min_silence_duration_ms": 180,
-    "speech_pad_ms": 160,
+    "min_silence_duration_ms": 220,
+    "speech_pad_ms": 220,
 }
 
 

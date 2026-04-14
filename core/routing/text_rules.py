@@ -5,6 +5,9 @@ import re
 
 
 WAKE_PREFIX_ALIASES = (
+    "горы",
+    "гори",
+    "гарий",
     "гарви с",
     "гарви",
     "гарри",
@@ -36,6 +39,12 @@ STRICT_WAKE_ALIASES = (
     "джервис",
     "jarvis",
 )
+
+WEAK_WAKE_PREFIX_ALIASES = (
+    "горы",
+)
+
+VOICE_WAKE_PREFIX_ALIASES = WAKE_PREFIX_ALIASES + WEAK_WAKE_PREFIX_ALIASES
 
 COMMAND_FRAGMENT_TOKENS = (
     "открой",

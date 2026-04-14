@@ -18,12 +18,12 @@ from core.routing.text_rules import WAKE_PREFIX_ALIASES, normalize_text, strip_l
 class WakeService:
     SAMPLE_RATE = 16_000
     BLOCK_FRAMES = 1600
-    PRE_ROLL_FRAMES = 6
+    PRE_ROLL_FRAMES = 8
     HANDOFF_PHASES = {"capturing_command", "transcribing", "routing", "executing"}
-    DETECTION_MAX_SECONDS = 2.4
-    DETECTION_SILENCE_SECONDS = 0.22
+    DETECTION_MAX_SECONDS = 2.8
+    DETECTION_SILENCE_SECONDS = 0.28
     DETECTION_COOLDOWN_SECONDS = 2.2
-    ENERGY_THRESHOLD = 96.0
+    ENERGY_THRESHOLD = 88.0
     MIN_START_FRAMES = 2
     NOISE_FLOOR_FRAMES = 8
     NOISE_MARGIN = 16.0

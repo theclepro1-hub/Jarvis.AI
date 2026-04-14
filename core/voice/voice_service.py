@@ -25,9 +25,9 @@ class VoiceService:
     MANUAL_MAX_SECONDS = 8.0
     SILENCE_SECONDS = 0.9
     WAKE_MAX_SECONDS = 5.0
-    WAKE_SILENCE_SECONDS = 0.55
-    WAKE_PRE_ROLL_GRACE_SECONDS = 0.45
-    ENERGY_THRESHOLD = 128.0
+    WAKE_SILENCE_SECONDS = 0.62
+    WAKE_PRE_ROLL_GRACE_SECONDS = 0.55
+    ENERGY_THRESHOLD = 118.0
     WAKE_FILLER_TOKENS = {
         "а",
         "э",
@@ -563,11 +563,11 @@ class VoiceService:
         mode = resolve_assistant_mode(self.settings)
         command_style = str(self.settings.get("command_style", "one_shot")).strip().casefold()
         if mode == "smart":
-            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 5.4, 0.65, 118.0, 0.5
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 5.8, 0.72, 112.0, 0.62
         elif mode == "private":
-            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.8, 0.55, 122.0, 0.42
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 5.1, 0.62, 116.0, 0.52
         elif mode == "fast":
-            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.4, 0.4, 140.0, 0.28
+            max_seconds, silence_seconds, energy_threshold, pre_roll_grace = 4.8, 0.48, 132.0, 0.36
         else:
             max_seconds, silence_seconds, energy_threshold, pre_roll_grace = (
                 self.WAKE_MAX_SECONDS,
@@ -577,8 +577,8 @@ class VoiceService:
             )
 
         if command_style == "one_shot":
-            max_seconds += 0.8
-            silence_seconds += 0.12
+            max_seconds += 1.0
+            silence_seconds += 0.16
         return max_seconds, silence_seconds, energy_threshold, pre_roll_grace
 
     def _capture_until_silence(

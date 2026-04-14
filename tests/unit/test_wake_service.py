@@ -57,6 +57,7 @@ def test_wake_service_detects_wake_word_in_payloads() -> None:
     assert wake._contains_wake('{"text": "жаравис открой steam"}') is True  # noqa: SLF001
     assert wake._contains_wake("гарри открой steam") is True  # noqa: SLF001
     assert wake._contains_wake("гаривис открой steam") is True  # noqa: SLF001
+    assert wake._contains_wake("горы открой steam") is True  # noqa: SLF001
 
 
 def test_wake_service_ignores_non_matching_noise() -> None:
