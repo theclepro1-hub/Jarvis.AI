@@ -8,7 +8,13 @@ from array import array
 from pathlib import Path
 
 from core.settings.settings_service import SettingsService
-from core.voice.faster_whisper_runtime import clear_faster_whisper_model_cache, load_faster_whisper_model
+from core.voice.faster_whisper_runtime import (
+    clear_faster_whisper_model_cache,
+    find_existing_faster_whisper_model,
+    load_faster_whisper_model,
+    preseed_faster_whisper_model,
+    resolve_local_faster_whisper_model,
+)
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
 from core.voice.stt_service import (
     COMMAND_HOTWORDS,
@@ -410,6 +416,62 @@ def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeyp
     assert len(constructor_calls) == 2
     assert suite_elapsed < 0.35
     assert max(elapsed.values()) < 0.35
+
+
+def test_find_existing_faster_whisper_model_uses_local_appdata_cache(monkeypatch, tmp_path):
+    localappdata = tmp_path / "localappdata"
+    source_root = localappdata / "JarvisAi_Unity" / "models" / "faster-whisper"
+    model_path = source_root / "small"
+    make_ready_faster_whisper_model(model_path)
+    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(localappdata))
+
+    resolved = find_existing_faster_whisper_model("small")
+
+    assert resolved == model_path
+
+
+def test_preseed_faster_whisper_model_copies_existing_hf_snapshot(monkeypatch, tmp_path):
+    hf_cache = tmp_path / "hf-cache"
+    snapshot = hf_cache / "models--Systran--faster-whisper-small" / "snapshots" / "abc123"
+    make_ready_faster_whisper_model(snapshot)
+    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.setenv("HF_HUB_CACHE", str(hf_cache))
+
+    target_root = tmp_path / "bundle-cache"
+    preseeded = preseed_faster_whisper_model("small", target_root)
+    resolved = resolve_local_faster_whisper_model("small", target_root)
+
+    assert preseeded == resolved
+    assert resolved is not None
+    assert (resolved / "model.bin").exists()
+    assert (target_root / "models--Systran--faster-whisper-small" / "refs" / "main").read_text(encoding="utf-8").strip() == "preseed"
+
+
+def test_preseed_faster_whisper_model_prefers_explicit_seed_root(monkeypatch, tmp_path):
+    source_root = tmp_path / "seed-root"
+    snapshot = source_root / "models--Systran--faster-whisper-small" / "snapshots" / "seeded"
+    make_ready_faster_whisper_model(snapshot)
+    refs_dir = source_root / "models--Systran--faster-whisper-small" / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    (refs_dir / "main").write_text("seeded", encoding="utf-8")
+    monkeypatch.delenv("JARVIS_UNITY_DATA_DIR", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.delenv("APPDATA", raising=False)
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
+    monkeypatch.setenv("JARVIS_UNITY_FASTER_WHISPER_SEED_DIR", str(source_root))
+
+    target_root = tmp_path / "bundle-cache"
+    preseeded = preseed_faster_whisper_model("small", target_root)
+
+    assert preseeded is not None
+    assert resolve_local_faster_whisper_model("small", target_root) == preseeded
+    assert preseeded.name == "preseed"
 
 
 def test_stt_service_cancels_before_entering_backend(tmp_path):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ def resolve_local_faster_whisper_model(model_ref: str, download_root: Path) -> P
     direct_path = Path(normalized).expanduser()
     if _looks_like_local_model_path(direct_path):
         return direct_path
+
     if direct_path.is_absolute():
         candidate_path = direct_path
     elif normalized.startswith(".") or any(separator in normalized for separator in ("/", "\\")):
@@ -87,6 +89,48 @@ def resolve_local_faster_whisper_model(model_ref: str, download_root: Path) -> P
         if _looks_like_local_model_path(snapshot):
             return snapshot
     return None
+
+
+def find_existing_faster_whisper_model(model_ref: str, preferred_root: Path | None = None) -> Path | None:
+    for root in _candidate_download_roots(preferred_root):
+        resolved = resolve_local_faster_whisper_model(model_ref, root)
+        if resolved is not None:
+            return resolved
+    return None
+
+
+def preseed_faster_whisper_model(model_ref: str, target_root: Path, preferred_root: Path | None = None) -> Path | None:
+    existing = resolve_local_faster_whisper_model(model_ref, target_root)
+    if existing is not None:
+        return existing
+
+    source = find_existing_faster_whisper_model(model_ref, preferred_root)
+    if source is None:
+        return None
+
+    repo_id = _canonical_model_repo(model_ref)
+    if repo_id is None:
+        destination = target_root / source.name
+        return _copy_model_dir(source, destination)
+
+    repo_root = target_root / f"models--{repo_id.replace('/', '--')}"
+    snapshot_path = repo_root / "snapshots" / "preseed"
+    copied = _copy_model_dir(source, snapshot_path)
+    if copied is None:
+        return None
+
+    refs_dir = repo_root / "refs"
+    refs_dir.mkdir(parents=True, exist_ok=True)
+    (refs_dir / "main").write_text("preseed", encoding="utf-8")
+    return resolve_local_faster_whisper_model(model_ref, target_root)
+
+
+def copy_local_faster_whisper_model(
+    model_ref: str,
+    target_root: Path,
+    preferred_root: Path | None = None,
+) -> Path | None:
+    return preseed_faster_whisper_model(model_ref, target_root, preferred_root)
 
 
 def can_auto_download_faster_whisper_model(model_ref: str) -> bool:
@@ -146,8 +190,88 @@ def _canonical_model_repo(model_ref: str) -> str | None:
     return _CANONICAL_MODEL_REPOS.get(normalized.casefold())
 
 
+def _candidate_download_roots(preferred_root: Path | None = None) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path | None) -> None:
+        if path is None:
+            return
+        candidate = path.expanduser()
+        key = _path_key(candidate)
+        if key in seen:
+            return
+        seen.add(key)
+        roots.append(candidate)
+
+    add(preferred_root)
+
+    explicit_seed_root = str(os.environ.get("JARVIS_UNITY_FASTER_WHISPER_SEED_DIR", "") or "").strip()
+    if explicit_seed_root:
+        add(Path(explicit_seed_root))
+
+    data_dir = str(os.environ.get("JARVIS_UNITY_DATA_DIR", "") or "").strip()
+    if data_dir:
+        add(Path(data_dir) / "models" / "faster-whisper")
+
+    for env_name in ("LOCALAPPDATA", "APPDATA"):
+        base = str(os.environ.get(env_name, "") or "").strip()
+        if base:
+            add(Path(base) / "JarvisAi_Unity" / "models" / "faster-whisper")
+
+    program_files = str(os.environ.get("ProgramFiles", "") or "").strip()
+    if program_files:
+        add(Path(program_files) / "JARVIS Unity" / "assets" / "models" / "faster-whisper")
+
+    hf_cache = str(
+        os.environ.get("HF_HUB_CACHE")
+        or os.environ.get("HUGGINGFACE_HUB_CACHE")
+        or _huggingface_hub_cache()
+        or ""
+    ).strip()
+    if hf_cache:
+        add(Path(hf_cache))
+
+    add(Path.home() / ".cache" / "huggingface" / "hub")
+    return tuple(roots)
+
+
+def _huggingface_hub_cache() -> str:
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except Exception:
+        return ""
+    return str(HF_HUB_CACHE or "").strip()
+
+
+def _copy_model_dir(source: Path, destination: Path) -> Path | None:
+    if _same_path(source, destination):
+        return source if _looks_like_local_model_path(source) else None
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        shutil.rmtree(destination, ignore_errors=True)
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+    return destination if _looks_like_local_model_path(destination) else None
+
+
 def _looks_like_local_model_path(path: Path) -> bool:
     try:
         return path.exists() and path.is_dir() and any((path / marker).exists() for marker in _MODEL_MARKER_FILES)
     except OSError:
         return False
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve(strict=False) == right.resolve(strict=False)
+    except OSError:
+        return False
+
+
+def _path_key(path: Path) -> str:
+    try:
+        return str(path.resolve(strict=False))
+    except OSError:
+        return str(path)
+

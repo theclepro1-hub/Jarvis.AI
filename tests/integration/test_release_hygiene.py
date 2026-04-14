@@ -39,6 +39,7 @@ def test_gitignore_covers_release_and_runtime_temp_artifacts() -> None:
         "build/*runtime*/",
         "build/smoke_runtime/",
         "dist_onefile/",
+        "JarvisAi_Unity.spec",
     ]
 
     for pattern in expected_patterns:
@@ -69,26 +70,34 @@ def test_project_version_is_sourced_from_core_version() -> None:
 def test_build_script_keeps_expected_release_inputs() -> None:
     build_script = Path("build/build_release.ps1").read_text(encoding="utf-8")
 
+    assert not Path("JarvisAi_Unity.spec").exists()
     assert "--collect-all vosk" not in build_script
-    assert "--hidden-import win32com.client" in build_script
-    assert "--hidden-import pythoncom" in build_script
+    assert "win32com.client" in build_script
+    assert "pythoncom" in build_script
     assert "LOCAL_STT_MODEL_PREWARM" in build_script
     assert "Resolve-LocalSTTModelPath" in build_script
+    assert "Patch-PyInstallerSpec" in build_script
+    assert "pyi-makespec.exe" in build_script
+    assert "Write-ZipArchive" in build_script
     assert "load_faster_whisper_model" in build_script
+    assert "preseed_faster_whisper_model" in build_script
     assert "resolve_local_faster_whisper_model" in build_script
+    assert "QtQuick" in build_script
+    assert "designer" in build_script
     assert "Write-ChecksumFile" in build_script
     assert "Assert-ChecksumFile" in build_script
     assert "Get-FileHash" in build_script
+    assert "Compress-Archive -Path $portableDistPath" not in build_script
     assert r"assets\\models\\faster-whisper" in build_script
     assert "release_metadata.py" in build_script
     assert 'Assert-NativeSuccess -Step "Installer metadata render"' in build_script
     assert "alphacephei.com/vosk" not in build_script
     assert "vosk-model-small-ru-0.22" not in build_script
-    assert '--collect-all faster_whisper' in build_script
-    assert '--windowed `' in build_script
-    assert '--onefile `' in build_script
-    assert '--icon $iconPath' in build_script
-    assert '--version-file $versionInfoFile' in build_script
+    assert '"--collect-all", "faster_whisper"' in build_script
+    assert '"--windowed"' in build_script
+    assert '--onefile' in build_script
+    assert '"--icon", $iconPath' in build_script
+    assert '"--version-file", $versionInfoFile' in build_script
     assert "RELEASE_VERSION $version" in build_script
     assert "SetupMutex=JarvisAi_Unity_setup_mutex" in build_script
 

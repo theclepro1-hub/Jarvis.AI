@@ -76,5 +76,6 @@ The release build produces:
 - manual mic capture uses `sounddevice`
 - local STT and wake recognition use `faster-whisper`
 - cloud STT still uses Groq Whisper when policy routes there
-- the release build tries to prewarm and bundle the local `faster-whisper` cache; if no local snapshot is available, the frozen app falls back to `%LOCALAPPDATA%` for the first model download instead of writing into the bundled runtime
+- the release build first tries to preseed and bundle the local `faster-whisper` cache from explicit/local caches (`JARVIS_UNITY_FASTER_WHISPER_SEED_DIR`, `%LOCALAPPDATA%`, installed app assets) before it attempts a network download
+- if no local snapshot is available, the frozen app falls back to `%LOCALAPPDATA%` for the first model download instead of writing into the bundled runtime
 - registration secrets are protected with Windows DPAPI in the Windows build

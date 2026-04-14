@@ -1,5 +1,6 @@
 .venv/
 dist/
+JarvisAi_Unity.spec
 dist_fresh_*/
 build/pyinstaller/
 build/pyinstaller_fresh_*/

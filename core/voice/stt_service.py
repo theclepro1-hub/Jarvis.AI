@@ -16,6 +16,7 @@ from core.policy.assistant_mode import AssistantReadiness, resolve_assistant_pol
 from core.routing.text_rules import normalize_text
 from core.voice.faster_whisper_runtime import (
     can_auto_download_faster_whisper_model,
+    find_existing_faster_whisper_model,
     load_faster_whisper_model,
     resolve_local_faster_whisper_model,
 )
@@ -493,6 +494,9 @@ class STTService:
         local_path = resolve_local_faster_whisper_model(model_ref, self.faster_whisper_download_root)
         if local_path is not None:
             return local_path
+        existing_path = find_existing_faster_whisper_model(model_ref, self.faster_whisper_download_root)
+        if existing_path is not None:
+            return existing_path
         if can_auto_download_faster_whisper_model(model_ref):
             return model_ref
         return None
