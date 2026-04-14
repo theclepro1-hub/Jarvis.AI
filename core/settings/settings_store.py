@@ -51,15 +51,17 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "pinned_commands": [],
     "custom_apps": [],
     "default_music_app": "",
-    "registration": {
-        "groq_api_key": "",
-        "cerebras_api_key": "",
-        "gemini_api_key": "",
-        "openrouter_api_key": "",
-        "telegram_user_id": "",
-        "telegram_bot_token": "",
-        "skipped": False,
-    },
+        "registration": {
+            "groq_api_key": "",
+            "cerebras_api_key": "",
+            "gemini_api_key": "",
+            "openrouter_api_key": "",
+            "deepseek_api_key": "",
+            "xai_api_key": "",
+            "telegram_user_id": "",
+            "telegram_bot_token": "",
+            "skipped": False,
+        },
 }
 
 SECRET_REGISTRATION_FIELDS = (
@@ -67,6 +69,8 @@ SECRET_REGISTRATION_FIELDS = (
     "cerebras_api_key",
     "gemini_api_key",
     "openrouter_api_key",
+    "deepseek_api_key",
+    "xai_api_key",
     "telegram_user_id",
     "telegram_bot_token",
 )

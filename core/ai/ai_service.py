@@ -25,7 +25,15 @@ SYSTEM_PROMPT = """
 
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 SUPPORTED_AI_MODE_SET = frozenset(SUPPORTED_AI_MODES)
-SUPPORTED_AI_PROFILES = ("auto", "groq_fast", "cerebras_fast", "gemini_quality", "openrouter_free")
+SUPPORTED_AI_PROFILES = (
+    "auto",
+    "groq_fast",
+    "cerebras_fast",
+    "deepseek_standard",
+    "gemini_quality",
+    "xai_quality",
+    "openrouter_free",
+)
 AI_MODES = SUPPORTED_AI_MODE_SET
 DEFAULT_NO_PROXY = "localhost,127.0.0.1,::1"
 AI_MODE_BUDGET_SECONDS: dict[str, float] = {
@@ -152,12 +160,38 @@ PROVIDERS: dict[str, ProviderSpec] = {
         },
         notes="Last-resort free-model aggregator; daily limits and available models are dynamic.",
     ),
+    "deepseek": ProviderSpec(
+        key="deepseek",
+        label="DeepSeek",
+        base_url="https://api.deepseek.com",
+        api_key_field="deepseek_api_key",
+        env_var="DEEPSEEK_API_KEY",
+        models={
+            "auto": "deepseek-chat",
+            "fast": "deepseek-chat",
+            "quality": "deepseek-reasoner",
+        },
+        notes="DeepSeek OpenAI-compatible endpoint; API access requires a provider key.",
+    ),
+    "xai": ProviderSpec(
+        key="xai",
+        label="xAI",
+        base_url="https://api.x.ai/v1",
+        api_key_field="xai_api_key",
+        env_var="XAI_API_KEY",
+        models={
+            "auto": "grok-4-1-fast-non-reasoning",
+            "fast": "grok-4-1-fast-non-reasoning",
+            "quality": "grok-4.20-beta-latest-non-reasoning",
+        },
+        notes="xAI OpenAI-compatible endpoint; API access requires a provider key.",
+    ),
 }
 
 PROVIDER_PLANS: dict[str, tuple[str, ...]] = {
-    "auto": ("groq", "cerebras", "gemini", "openrouter"),
-    "fast": ("groq", "cerebras"),
-    "quality": ("gemini", "groq", "cerebras", "openrouter"),
+    "auto": ("groq", "cerebras", "deepseek", "gemini", "xai", "openrouter"),
+    "fast": ("groq", "cerebras", "deepseek"),
+    "quality": ("gemini", "xai", "deepseek", "groq", "cerebras", "openrouter"),
 }
 
 

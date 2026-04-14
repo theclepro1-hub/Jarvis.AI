@@ -343,7 +343,7 @@ def test_registration_requires_all_fields_and_save_path_works(ui_runtime) -> Non
     runtime.registration_bridge.saveRegistration("", "", "")
     _pump(app, 120)
     assert runtime.state.currentScreen == "registration"
-    assert "Нужны три поля: ключ Groq, Telegram ID и токен Telegram-бота." in _find(window, "registrationFeedback").property("text")
+    assert "Нужны три поля: ключ облачного ИИ, Telegram ID и токен Telegram-бота." in _find(window, "registrationFeedback").property("text")
 
     assert _find(window, "registrationSaveButton") is not None
 
@@ -544,8 +544,10 @@ def test_settings_connections_can_update_registration_fields(ui_runtime) -> None
     assert runtime.settings_bridge.saveConnections(
         "fake_groq_settings_key",
         runtime.settings_bridge.cerebrasApiKey,
+        runtime.settings_bridge.deepseekApiKey,
         runtime.settings_bridge.geminiApiKey,
         runtime.settings_bridge.openrouterApiKey,
+        runtime.settings_bridge.xaiApiKey,
         "bot_settings_token",
         "987654321",
     ) is True
@@ -556,6 +558,44 @@ def test_settings_connections_can_update_registration_fields(ui_runtime) -> None
     assert registration.telegram_bot_token == "bot_settings_token"
     assert registration.telegram_user_id == "987654321"
     assert "Подключения сохранены" in _find(window, "settingsConnectionsFeedback").property("text")
+
+
+def test_delete_all_data_popup_keeps_actions_inside_dialog(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _complete_registration(runtime, app, window)
+    _click(app, window, _find(window, "navButton_settings"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "settings")
+
+    history_section = _find(window, "settingsSection_historyData")
+    history_section.setProperty("expanded", True)
+    _pump(app, 120)
+
+    popup = _wait_for_object(app, window, "deleteAllDataConfirmPopup")
+    popup.open()
+    popup_item = _find_popup(window)
+    _wait_for(
+        app,
+        lambda: popup_item.width() > 0 and popup_item.height() > 0,
+        timeout_ms=3000,
+    )
+    cancel_button = _wait_for_object(app, window, "deleteAllDataCancelButton")
+    confirm_button = _wait_for_object(app, window, "deleteAllDataConfirmButton")
+
+    assert isinstance(popup_item, QQuickItem)
+    assert isinstance(cancel_button, QQuickItem)
+    assert isinstance(confirm_button, QQuickItem)
+
+    popup_top_left = popup_item.mapToScene(popup_item.boundingRect().topLeft())
+    popup_bottom_right = popup_item.mapToScene(popup_item.boundingRect().bottomRight())
+
+    for button in (cancel_button, confirm_button):
+        button_top_left = button.mapToScene(button.boundingRect().topLeft())
+        button_bottom_right = button.mapToScene(button.boundingRect().bottomRight())
+        assert button_top_left.x() >= popup_top_left.x() - 1
+        assert button_top_left.y() >= popup_top_left.y() - 1
+        assert button_bottom_right.x() <= popup_bottom_right.x() + 1
+        assert button_bottom_right.y() <= popup_bottom_right.y() + 1
 
 
 def test_settings_sections_start_collapsed_and_updates_last(ui_runtime) -> None:
@@ -592,7 +632,7 @@ def test_settings_sections_start_collapsed_and_updates_last(ui_runtime) -> None:
     assert 'visible: settingsBridge.updateStatus.update_available' in source
     assert "Ключ Groq" not in source
     assert "Ключ облачного ИИ" in source
-    assert "Ключ Groq" in registration_source
+    assert "Основной ключ (Groq)" in registration_source
     assert "Advanced routing" not in source
     assert "Cloud model id" not in source
     assert "Text route" not in source

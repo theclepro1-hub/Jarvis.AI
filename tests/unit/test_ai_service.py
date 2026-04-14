@@ -26,6 +26,8 @@ class FakeSettings:
             "cerebras_api_key": "cerebras-key",
             "gemini_api_key": "gemini-key",
             "openrouter_api_key": "openrouter-key",
+            "deepseek_api_key": "deepseek-key",
+            "xai_api_key": "xai-key",
             **(registration or {}),
         }
 
@@ -174,8 +176,50 @@ def test_quality_mode_prioritizes_quality_plan() -> None:
 
     plan = service.provider_plan()
 
-    assert [attempt.provider for attempt in plan][:3] == ["gemini", "groq", "cerebras"]
+    assert [attempt.provider for attempt in plan][:5] == ["gemini", "xai", "deepseek", "groq", "cerebras"]
     assert plan[0].model == "gemini-3-flash-preview"
+
+
+def test_deepseek_manual_provider_selection_uses_official_openai_compatible_base_url() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.deepseek.com": "ответ deepseek",
+    }
+
+    service = AIService(
+        FakeSettings({"ai_mode": "auto", "ai_provider": "deepseek"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    result = service.generate_reply_result("объясни коротко")
+
+    assert result.provider == "deepseek"
+    assert result.provider_label == "DeepSeek"
+    assert result.text == "ответ deepseek"
+    assert calls[0]["base_url"] == "https://api.deepseek.com"
+    assert calls[0]["model"] == "deepseek-chat"
+
+
+def test_xai_quality_provider_selection_uses_current_grok_model() -> None:
+    calls: list[dict] = []
+    behavior = {
+        "https://api.x.ai/v1": "ответ xai",
+    }
+
+    service = AIService(
+        FakeSettings({"ai_mode": "quality", "ai_provider": "xai"}),
+        client_factory=lambda **kwargs: FakeClient(calls, behavior, **kwargs),
+        sleep=lambda _: None,
+    )
+
+    result = service.generate_reply_result("объясни глубже")
+
+    assert result.provider == "xai"
+    assert result.provider_label == "xAI"
+    assert result.text == "ответ xai"
+    assert calls[0]["base_url"] == "https://api.x.ai/v1"
+    assert calls[0]["model"] == "grok-4.20-beta-latest-non-reasoning"
 
 
 def test_fast_mode_prefers_low_latency_provider_order() -> None:
@@ -508,7 +552,14 @@ def test_private_assistant_mode_refuses_cloud_without_fallback(monkeypatch) -> N
 
 
 def test_legacy_local_mode_is_normalized_to_auto_without_cloud_calls(monkeypatch) -> None:
-    for key in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+    for key in (
+        "GROQ_API_KEY",
+        "CEREBRAS_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "XAI_API_KEY",
+    ):
         monkeypatch.delenv(key, raising=False)
 
     def fail_factory(**_kwargs):
@@ -522,6 +573,8 @@ def test_legacy_local_mode_is_normalized_to_auto_without_cloud_calls(monkeypatch
                 "cerebras_api_key": "",
                 "gemini_api_key": "",
                 "openrouter_api_key": "",
+                "deepseek_api_key": "",
+                "xai_api_key": "",
             },
         ),
         client_factory=fail_factory,
@@ -535,7 +588,14 @@ def test_legacy_local_mode_is_normalized_to_auto_without_cloud_calls(monkeypatch
 
 
 def test_missing_provider_keys_uses_fallback(monkeypatch) -> None:
-    for key in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+    for key in (
+        "GROQ_API_KEY",
+        "CEREBRAS_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENROUTER_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "XAI_API_KEY",
+    ):
         monkeypatch.delenv(key, raising=False)
 
     service = AIService(
@@ -545,6 +605,8 @@ def test_missing_provider_keys_uses_fallback(monkeypatch) -> None:
                 "cerebras_api_key": "",
                 "gemini_api_key": "",
                 "openrouter_api_key": "",
+                "deepseek_api_key": "",
+                "xai_api_key": "",
             }
         )
     )

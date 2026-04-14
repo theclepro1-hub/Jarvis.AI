@@ -55,8 +55,10 @@ def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> Non
     assert bridge.saveConnections(
         "fake_groq_new",
         "fake_cerebras_new",
+        "fake_deepseek_new",
         "fake_gemini_new",
         "fake_openrouter_new",
+        "fake_xai_new",
         "bot_new",
         "987654321",
     ) is True
@@ -64,20 +66,26 @@ def test_settings_bridge_saves_connection_fields_and_refreshes_telegram() -> Non
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_new"
     assert registration["cerebras_api_key"] == "fake_cerebras_new"
+    assert registration["deepseek_api_key"] == "fake_deepseek_new"
     assert registration["gemini_api_key"] == "fake_gemini_new"
     assert registration["openrouter_api_key"] == "fake_openrouter_new"
+    assert registration["xai_api_key"] == "fake_xai_new"
     assert registration["telegram_bot_token"] == "bot_new"
     assert registration["telegram_user_id"] == "987654321"
     assert registration["skipped"] is False
     assert telegram.refreshes == 1
     assert bridge.connectionFeedback == "Подключения сохранены."
     assert bridge.cerebrasApiKey == "fake_cerebras_new"
+    assert bridge.deepseekApiKey == "fake_deepseek_new"
     assert bridge.geminiApiKey == "fake_gemini_new"
     assert bridge.openrouterApiKey == "fake_openrouter_new"
+    assert bridge.xaiApiKey == "fake_xai_new"
     assert bridge.connections["groqApiKeySet"] is True
     assert bridge.connections["cerebrasApiKeySet"] is True
+    assert bridge.connections["deepseekApiKeySet"] is True
     assert bridge.connections["geminiApiKeySet"] is True
     assert bridge.connections["openrouterApiKeySet"] is True
+    assert bridge.connections["xaiApiKeySet"] is True
     assert bridge.connections["telegramBotTokenMasked"] == "••••••••"
 
 
@@ -101,14 +109,18 @@ def test_settings_bridge_mask_placeholder_keeps_existing_secrets() -> None:
         "••••••••",
         "••••••••",
         "••••••••",
+        "••••••••",
+        "••••••••",
         "2",
     ) is True
 
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_existing"
     assert registration["cerebras_api_key"] == ""
+    assert registration["deepseek_api_key"] == ""
     assert registration["gemini_api_key"] == ""
     assert registration["openrouter_api_key"] == ""
+    assert registration["xai_api_key"] == ""
     assert registration["telegram_bot_token"] == "bot_existing"
     assert registration["telegram_user_id"] == "2"
 
@@ -128,9 +140,11 @@ def test_settings_bridge_saves_advanced_connection_fields() -> None:
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
     assert bridge.saveAdvancedConnections(
+        "fake_deepseek_new",
         "fake_gemini_new",
         "fake_cerebras_new",
         "fake_openrouter_new",
+        "fake_xai_new",
         "ollama",
         "llama3.2:1b",
     ) is True
@@ -138,8 +152,10 @@ def test_settings_bridge_saves_advanced_connection_fields() -> None:
     registration = settings.get_registration()
     assert registration["groq_api_key"] == "fake_groq_existing"
     assert registration["cerebras_api_key"] == "fake_cerebras_new"
+    assert registration["deepseek_api_key"] == "fake_deepseek_new"
     assert registration["gemini_api_key"] == "fake_gemini_new"
     assert registration["openrouter_api_key"] == "fake_openrouter_new"
+    assert registration["xai_api_key"] == "fake_xai_new"
     assert registration["telegram_bot_token"] == "bot_existing"
     assert registration["telegram_user_id"] == "1"
     assert settings.get("local_llm_backend") == "ollama"
@@ -265,7 +281,9 @@ def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
         "auto",
         "groq_fast",
         "cerebras_fast",
+        "deepseek_standard",
         "gemini_quality",
+        "xai_quality",
         "openrouter_free",
     ]
 

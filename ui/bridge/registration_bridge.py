@@ -36,8 +36,8 @@ class RegistrationBridge(QObject):
             self.registrationChanged.emit()
             self.app_bridge.finishRegistration()
             return
-        if self.services.registration.requires_groq_for_completion():
-            self._feedback = "Нужны три поля: ключ Groq, Telegram ID и токен Telegram-бота."
+        if self.services.registration.requires_cloud_for_completion():
+            self._feedback = "Нужны три поля: ключ облачного ИИ, Telegram ID и токен Telegram-бота."
         else:
             self._feedback = "Для приватного режима нужны Telegram ID и токен Telegram-бота."
         self.feedbackChanged.emit()

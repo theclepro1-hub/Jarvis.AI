@@ -6,7 +6,7 @@ from core.ai.local_llm_service import LocalLLMService
 
 
 ASSISTANT_MODES = frozenset({"fast", "standard", "smart", "private"})
-TEXT_OVERRIDES = frozenset({"auto", "groq", "cerebras", "gemini", "openrouter", "local_llama"})
+TEXT_OVERRIDES = frozenset({"auto", "groq", "cerebras", "gemini", "openrouter", "deepseek", "xai", "local_llama"})
 STT_OVERRIDES = frozenset({"auto", "groq_whisper", "local_faster_whisper", "local_vosk"})
 
 
@@ -71,11 +71,11 @@ def resolve_assistant_policy(settings_service, readiness: AssistantReadiness | N
     privacy = "local_first_with_fallback"
 
     if mode == "fast":
-        text_route = ("groq", "cerebras", "openrouter")
+        text_route = ("groq", "cerebras", "deepseek", "openrouter")
         stt_route = ("groq_whisper", "local_faster_whisper", "local_vosk")
         privacy = "cloud_first"
     elif mode == "smart":
-        text_route = ("gemini", "groq", "cerebras", "openrouter")
+        text_route = ("gemini", "xai", "deepseek", "groq", "cerebras", "openrouter")
         stt_route = ("groq_whisper", "local_faster_whisper", "local_vosk")
         privacy = "quality_first"
     elif mode == "private":
@@ -85,7 +85,7 @@ def resolve_assistant_policy(settings_service, readiness: AssistantReadiness | N
         stt_cloud_allowed = False
         privacy = "no_cloud_ever"
     else:
-        text_route = ("groq", "cerebras", "openrouter", "local_llama")
+        text_route = ("groq", "deepseek", "cerebras", "openrouter", "local_llama")
         stt_route = ("local_faster_whisper", "local_vosk", "groq_whisper")
 
     text_override = str(settings_service.get("text_backend_override", "auto")).strip().lower()

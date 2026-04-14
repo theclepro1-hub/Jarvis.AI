@@ -69,7 +69,10 @@ Rectangle {
         closePolicy: Popup.CloseOnEscape
         anchors.centerIn: Overlay.overlay
         width: Math.min(560, settingsRoot.width - 40)
+        height: implicitHeight
+        implicitHeight: deleteAllDataLayout.implicitHeight + 56
         padding: 0
+        clip: true
 
         background: Rectangle {
             radius: 28
@@ -79,9 +82,10 @@ Rectangle {
         }
 
         ColumnLayout {
+            id: deleteAllDataLayout
             anchors.fill: parent
-            anchors.margins: 24
-            spacing: 16
+            anchors.margins: 28
+            spacing: 18
 
             Rectangle {
                 Layout.fillWidth: true
@@ -127,26 +131,37 @@ Rectangle {
                 opacity: 0.9
             }
 
-            RowLayout {
+            Rectangle {
                 Layout.fillWidth: true
-                spacing: 12
+                Layout.topMargin: 4
+                color: Theme.Colors.cardAlt
+                radius: 20
+                border.color: Theme.Colors.borderSoft
+                border.width: 1
+                implicitHeight: deleteAllDataActions.implicitHeight + 22
 
-                Item { Layout.fillWidth: true }
+                Row {
+                    id: deleteAllDataActions
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.rightMargin: 14
+                    spacing: 12
 
-                SecondaryButton {
-                    objectName: "deleteAllDataCancelButton"
-                    text: "Отмена"
-                    onClicked: deleteAllDataConfirmPopup.close()
-                }
+                    SecondaryButton {
+                        objectName: "deleteAllDataCancelButton"
+                        text: "Отмена"
+                        onClicked: deleteAllDataConfirmPopup.close()
+                    }
 
-                SecondaryButton {
-                    objectName: "deleteAllDataConfirmButton"
-                    text: "Удалить без возврата"
-                    danger: true
-                    compact: false
-                    onClicked: {
-                        deleteAllDataConfirmPopup.close()
-                        settingsBridge.deleteAllData()
+                    SecondaryButton {
+                        objectName: "deleteAllDataConfirmButton"
+                        text: "Удалить без возврата"
+                        danger: true
+                        compact: false
+                        onClicked: {
+                            deleteAllDataConfirmPopup.close()
+                            settingsBridge.deleteAllData()
+                        }
                     }
                 }
             }
@@ -245,8 +260,10 @@ Rectangle {
                         onClicked: settingsBridge.saveConnections(
                                        groqConnectionField.text,
                                        settingsBridge.cerebrasApiKey,
+                                       settingsBridge.deepseekApiKey,
                                        settingsBridge.geminiApiKey,
                                        settingsBridge.openrouterApiKey,
+                                       settingsBridge.xaiApiKey,
                                        telegramBotTokenField.text,
                                        telegramUserIdField.text
                                    )
@@ -544,6 +561,25 @@ Rectangle {
 
                 SettingRow {
                     Layout.fillWidth: true
+                    title: "DeepSeek"
+                    description: "Сильный основной облачный маршрут без Groq-завязки."
+                    helpText: "DeepSeek можно использовать как стандартный облачный маршрут или резерв."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    InputField {
+                        id: deepSeekField
+                        objectName: "settingsDeepSeekField"
+                        Layout.fillWidth: true
+                        label: "Ключ DeepSeek"
+                        text: settingsBridge.deepseekApiKey
+                        placeholderText: "Вставьте ключ DeepSeek"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
                     title: "Gemini"
                     description: "Дополнительный ключ для умного режима."
                     helpText: "Нужен только если хотите подключить Google Gemini как дополнительный маршрут."
@@ -576,6 +612,25 @@ Rectangle {
                         label: "Ключ Cerebras"
                         text: settingsBridge.cerebrasApiKey
                         placeholderText: "Вставьте ключ Cerebras"
+                        secret: true
+                    }
+                }
+
+                SettingRow {
+                    Layout.fillWidth: true
+                    title: "xAI"
+                    description: "Маршрут Grok для quality-ответов."
+                    helpText: "Используйте xAI, если нужен отдельный quality-провайдер на Grok."
+                    onHelpRequested: (text) => settingsRoot.helpRequested(text)
+                    onHelpCleared: settingsRoot.helpCleared()
+
+                    InputField {
+                        id: xaiField
+                        objectName: "settingsXaiField"
+                        Layout.fillWidth: true
+                        label: "Ключ xAI"
+                        text: settingsBridge.xaiApiKey
+                        placeholderText: "Вставьте ключ xAI"
                         secret: true
                     }
                 }
@@ -616,9 +671,11 @@ Rectangle {
                         objectName: "settingsAdvancedSaveButton"
                         text: "Сохранить ключи"
                         onClicked: settingsBridge.saveAdvancedConnections(
+                                       deepSeekField.text,
                                        geminiField.text,
                                        cerebrasField.text,
                                        openRouterField.text,
+                                       xaiField.text,
                                        settingsBridge.localLlmBackend,
                                        settingsBridge.localLlmModel
                                    )

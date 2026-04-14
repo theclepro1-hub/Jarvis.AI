@@ -485,7 +485,9 @@ class SettingsBridge(QObject):
             {"key": "local_llama", "title": "Локальная Llama"},
             {"key": "groq", "title": "Groq"},
             {"key": "cerebras", "title": "Cerebras"},
+            {"key": "deepseek", "title": "DeepSeek"},
             {"key": "gemini", "title": "Gemini"},
+            {"key": "xai", "title": "xAI"},
             {"key": "openrouter", "title": "OpenRouter"},
         ]
 
@@ -520,7 +522,7 @@ class SettingsBridge(QObject):
 
     @aiProvider.setter
     def aiProvider(self, value: str) -> None:
-        if value not in {"auto", "groq", "cerebras", "gemini", "openrouter"}:
+        if value not in {"auto", "groq", "cerebras", "deepseek", "gemini", "xai", "openrouter"}:
             value = "auto"
         with _SETTINGS_WRITE_LOCK:
             self.services.settings.set("ai_provider", value)
@@ -533,10 +535,14 @@ class SettingsBridge(QObject):
         provider = self.aiProvider
         if provider == "groq" and mode == "fast":
             return "groq_fast"
-        if provider == "gemini" and mode == "quality":
-            return "gemini_quality"
         if provider == "cerebras" and mode == "fast":
             return "cerebras_fast"
+        if provider == "deepseek" and mode == "auto":
+            return "deepseek_standard"
+        if provider == "gemini" and mode == "quality":
+            return "gemini_quality"
+        if provider == "xai" and mode == "quality":
+            return "xai_quality"
         if provider == "openrouter":
             return "openrouter_free"
         return "auto"
@@ -553,8 +559,10 @@ class SettingsBridge(QObject):
         profile_map = {
             "auto": ("auto", "auto"),
             "groq_fast": ("fast", "groq"),
-            "gemini_quality": ("quality", "gemini"),
             "cerebras_fast": ("fast", "cerebras"),
+            "deepseek_standard": ("auto", "deepseek"),
+            "gemini_quality": ("quality", "gemini"),
+            "xai_quality": ("quality", "xai"),
             "openrouter_free": ("auto", "openrouter"),
         }
         mode, provider = profile_map.get(value, profile_map["auto"])
@@ -596,6 +604,14 @@ class SettingsBridge(QObject):
         return bool(self.cerebrasApiKey)
 
     @Property(str, notify=connectionsChanged)
+    def deepseekApiKey(self) -> str:
+        return str(self._registration().get("deepseek_api_key", "")).strip()
+
+    @Property(bool, notify=connectionsChanged)
+    def deepseekApiKeySet(self) -> bool:
+        return bool(self.deepseekApiKey)
+
+    @Property(str, notify=connectionsChanged)
     def geminiApiKey(self) -> str:
         return str(self._registration().get("gemini_api_key", "")).strip()
 
@@ -610,6 +626,14 @@ class SettingsBridge(QObject):
     @Property(bool, notify=connectionsChanged)
     def openrouterApiKeySet(self) -> bool:
         return bool(self.openrouterApiKey)
+
+    @Property(str, notify=connectionsChanged)
+    def xaiApiKey(self) -> str:
+        return str(self._registration().get("xai_api_key", "")).strip()
+
+    @Property(bool, notify=connectionsChanged)
+    def xaiApiKeySet(self) -> bool:
+        return bool(self.xaiApiKey)
 
     @Property(str, notify=connectionsChanged)
     def telegramBotToken(self) -> str:
@@ -667,12 +691,18 @@ class SettingsBridge(QObject):
             "cerebrasApiKey": self.cerebrasApiKey,
             "cerebrasApiKeyMasked": self._mask_secret(self.cerebrasApiKey),
             "cerebrasApiKeySet": self.cerebrasApiKeySet,
+            "deepseekApiKey": self.deepseekApiKey,
+            "deepseekApiKeyMasked": self._mask_secret(self.deepseekApiKey),
+            "deepseekApiKeySet": self.deepseekApiKeySet,
             "geminiApiKey": self.geminiApiKey,
             "geminiApiKeyMasked": self._mask_secret(self.geminiApiKey),
             "geminiApiKeySet": self.geminiApiKeySet,
             "openrouterApiKey": self.openrouterApiKey,
             "openrouterApiKeyMasked": self._mask_secret(self.openrouterApiKey),
             "openrouterApiKeySet": self.openrouterApiKeySet,
+            "xaiApiKey": self.xaiApiKey,
+            "xaiApiKeyMasked": self._mask_secret(self.xaiApiKey),
+            "xaiApiKeySet": self.xaiApiKeySet,
             "telegramBotToken": self.telegramBotToken,
             "telegramBotTokenMasked": self.telegramBotTokenMasked,
             "telegramBotTokenSet": self.telegramBotTokenSet,
@@ -682,8 +712,10 @@ class SettingsBridge(QObject):
             "skipped": bool(registration.get("skipped", False)),
             "groq_api_key": self.groqApiKey,
             "cerebras_api_key": self.cerebrasApiKey,
+            "deepseek_api_key": self.deepseekApiKey,
             "gemini_api_key": self.geminiApiKey,
             "openrouter_api_key": self.openrouterApiKey,
+            "xai_api_key": self.xaiApiKey,
             "telegram_bot_token": self.telegramBotToken,
             "telegram_user_id": self.telegramUserId,
         }
@@ -729,13 +761,15 @@ class SettingsBridge(QObject):
         if self._local_llm_probe_requested():
             self._refresh_local_llm_diagnostics()
 
-    @Slot(str, str, str, str, str, str, result=bool)
+    @Slot(str, str, str, str, str, str, str, str, result=bool)
     def saveConnections(
         self,
         groq_api_key: str,
         cerebras_api_key: str,
+        deepseek_api_key: str,
         gemini_api_key: str,
         openrouter_api_key: str,
+        xai_api_key: str,
         telegram_bot_token: str,
         telegram_user_id: str,
     ) -> bool:
@@ -748,6 +782,10 @@ class SettingsBridge(QObject):
                         cerebras_api_key,
                         str(registration.get("cerebras_api_key", "")),
                     ),
+                    "deepseek_api_key": self._resolve_secret_input(
+                        deepseek_api_key,
+                        str(registration.get("deepseek_api_key", "")),
+                    ),
                     "gemini_api_key": self._resolve_secret_input(
                         gemini_api_key,
                         str(registration.get("gemini_api_key", "")),
@@ -755,6 +793,10 @@ class SettingsBridge(QObject):
                     "openrouter_api_key": self._resolve_secret_input(
                         openrouter_api_key,
                         str(registration.get("openrouter_api_key", "")),
+                    ),
+                    "xai_api_key": self._resolve_secret_input(
+                        xai_api_key,
+                        str(registration.get("xai_api_key", "")),
                     ),
                     "telegram_bot_token": self._resolve_secret_input(
                         telegram_bot_token,
@@ -771,12 +813,14 @@ class SettingsBridge(QObject):
         self.telegramStatusChanged.emit()
         return True
 
-    @Slot(str, str, str, str, str, result=bool)
+    @Slot(str, str, str, str, str, str, str, result=bool)
     def saveAdvancedConnections(
         self,
+        deepseek_api_key: str,
         gemini_api_key: str,
         cerebras_api_key: str,
         openrouter_api_key: str,
+        xai_api_key: str,
         local_llm_backend: str,
         local_llm_model: str,
     ) -> bool:
@@ -788,6 +832,10 @@ class SettingsBridge(QObject):
                         cerebras_api_key,
                         str(self._registration().get("cerebras_api_key", "")),
                     ),
+                    "deepseek_api_key": self._resolve_secret_input(
+                        deepseek_api_key,
+                        str(self._registration().get("deepseek_api_key", "")),
+                    ),
                     "gemini_api_key": self._resolve_secret_input(
                         gemini_api_key,
                         str(self._registration().get("gemini_api_key", "")),
@@ -795,6 +843,10 @@ class SettingsBridge(QObject):
                     "openrouter_api_key": self._resolve_secret_input(
                         openrouter_api_key,
                         str(self._registration().get("openrouter_api_key", "")),
+                    ),
+                    "xai_api_key": self._resolve_secret_input(
+                        xai_api_key,
+                        str(self._registration().get("xai_api_key", "")),
                     ),
                     "telegram_bot_token": str(self.telegramBotToken),
                     "telegram_user_id": str(self.telegramUserId),

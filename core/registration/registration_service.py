@@ -11,9 +11,12 @@ class RegistrationService:
         payload = self.settings.get_registration()
         return RegistrationModel(**payload)
 
-    def requires_groq_for_completion(self) -> bool:
+    def requires_cloud_for_completion(self) -> bool:
         mode = str(self.settings.get("assistant_mode", "standard")).strip().casefold()
         return mode != "private"
+
+    def requires_groq_for_completion(self) -> bool:
+        return self.requires_cloud_for_completion()
 
     def is_complete(self, record: RegistrationModel | None = None) -> bool:
         current = record or self.load()
@@ -22,7 +25,7 @@ class RegistrationService:
         )
         if not telegram_ready:
             return False
-        if self.requires_groq_for_completion():
+        if self.requires_cloud_for_completion():
             return current.is_complete
         return True
 

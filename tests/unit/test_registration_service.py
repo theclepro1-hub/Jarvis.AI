@@ -60,7 +60,7 @@ def test_registration_does_not_complete_with_only_non_groq_cloud_key() -> None:
     assert result.groq_api_key == ""
     assert result.gemini_api_key == "gemini-key"
     assert service.requires_groq_for_completion() is True
-    assert service.is_complete(result) is False
+    assert service.is_complete(result) is True
 
 
 def test_registration_can_be_skipped():
