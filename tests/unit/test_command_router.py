@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from core.models.action_models import ActionOutcome
+from core.models.action_models import ActionOutcome, ExecutionPlan, ExecutionStep
 from core.reminders.reminder_service import ReminderService
 from core.reminders.reminder_store import ReminderStore
 from core.routing.batch_router import BatchRouter
@@ -596,6 +596,16 @@ def test_command_router_strips_short_wake_alias_before_open_command() -> None:
     assert result.execution_result.steps[0].kind == "open_items"
 
 
+def test_command_router_strips_garri_like_prefix_before_open_command() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("гарри открой ютуб")
+
+    assert result.kind == "local"
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
 def test_command_router_recovers_noisy_wake_command_after_alias() -> None:
     router, actions, _pc_control = make_router()
 
@@ -650,15 +660,64 @@ def test_command_router_requests_voice_retry_for_short_noise_fragment() -> None:
     assert result.execution_result.steps[0].status == "needs_input"
 
 
-def test_command_router_clarifies_short_text_noise_without_sending_it_to_ai() -> None:
+def test_command_router_keeps_short_text_noise_as_ai_fallback() -> None:
     router, _actions, _pc_control = make_router()
 
     result = router.handle("раз больше")
 
-    assert result.kind == "local"
-    assert result.assistant_lines == ["Уточните команду целиком. Не понял: раз больше"]
-    assert result.execution_result is not None
-    assert result.execution_result.steps[0].kind == "clarify"
+    assert result.kind == "ai"
+    assert result.commands == ["раз больше"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_short_ui_greeting_as_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("прив")
+
+    assert result.kind == "ai"
+    assert result.commands == ["прив"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_short_ui_acknowledgement_as_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("ок")
+
+    assert result.kind == "ai"
+    assert result.commands == ["ок"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_short_ui_question_as_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("почему")
+
+    assert result.kind == "ai"
+    assert result.commands == ["почему"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_short_ui_affirmation_as_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("ага")
+
+    assert result.kind == "ai"
+    assert result.commands == ["ага"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_short_ui_negation_as_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("неа")
+
+    assert result.kind == "ai"
+    assert result.commands == ["неа"]
+    assert result.execution_result is None
 
 
 def test_command_router_keeps_short_plain_topic_as_ai_for_text_input() -> None:
@@ -680,6 +739,34 @@ def test_command_router_keeps_voice_garbage_out_of_ai_even_when_phrase_is_longer
     assert result.assistant_lines == ["Не расслышал команду. Скажите ещё раз."]
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_routes_short_voice_small_talk_to_ai_after_wake_alias() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("гарри все топ", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["все топ"]
+    assert result.execution_result is None
+
+
+def test_command_router_keeps_confident_voice_action_without_forced_abort_on_single_unsupported_tail() -> None:
+    router, _actions, _pc_control = make_router()
+    actionable_plan = ExecutionPlan(
+        command="открой ютуб",
+        steps=[ExecutionStep(id="open-youtube", kind="open", title="Открываю YouTube", status="done")],
+    )
+
+    should_abort = router._should_abort_for_clarification(  # noqa: SLF001
+        commands=["открой ютуб", "раз больше"],
+        actionable_plans=[actionable_plan],
+        clarification_steps=[],
+        unsupported=["раз больше"],
+        source="voice",
+    )
+
+    assert should_abort is False
 
 
 def test_command_router_clarifies_bare_search_command() -> None:

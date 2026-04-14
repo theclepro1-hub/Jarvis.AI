@@ -91,8 +91,7 @@ Rectangle {
                     ? (root.busyHint.length ? root.busyHint : "Обрабатываю предыдущий запрос...")
                     : root.hasWakeHint
                       ? root.wakeHint
-                      : (root.idleHint.length ? root.idleHint
-                        : (root.recordingHint.length ? root.recordingHint : "Введите сообщение или нажмите микрофон."))
+                      : (root.idleHint.length ? root.idleHint : "Введите сообщение или нажмите микрофон.")
             color: root.hasWakeHint || root.recording || root.busy
                    ? Theme.Colors.accent
                    : Theme.Colors.textSoft

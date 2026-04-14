@@ -68,20 +68,38 @@ Rectangle {
         focus: true
         closePolicy: Popup.CloseOnEscape
         anchors.centerIn: Overlay.overlay
-        width: Math.min(480, settingsRoot.width - 48)
+        width: Math.min(560, settingsRoot.width - 40)
         padding: 0
 
         background: Rectangle {
-            radius: 24
-            color: Theme.Colors.card
-            border.color: Theme.Colors.border
+            radius: 28
+            color: Theme.Colors.panel
+            border.color: Qt.rgba(1.0, 0.49, 0.49, 0.22)
             border.width: 1
         }
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 20
-            spacing: 14
+            anchors.margins: 24
+            spacing: 16
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 4
+                radius: 2
+                color: Theme.Colors.danger
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Критическое действие"
+                color: Theme.Colors.danger
+                font.family: Theme.Typography.displayFamily
+                font.pixelSize: Theme.Typography.small
+                font.bold: true
+                font.capitalization: Font.AllUppercase
+                font.letterSpacing: 1.0
+            }
 
             Text {
                 Layout.fillWidth: true
@@ -96,10 +114,17 @@ Rectangle {
             Text {
                 Layout.fillWidth: true
                 text: "Это удалит локальные ключи, историю, Telegram-состояние и профиль JARVIS на этом компьютере."
-                color: Theme.Colors.textMuted
+                color: Theme.Colors.textSoft
                 font.family: Theme.Typography.bodyFamily
                 font.pixelSize: Theme.Typography.body
                 wrapMode: Text.WordWrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 1
+                color: Theme.Colors.borderSoft
+                opacity: 0.9
             }
 
             RowLayout {
@@ -118,6 +143,7 @@ Rectangle {
                     objectName: "deleteAllDataConfirmButton"
                     text: "Удалить без возврата"
                     danger: true
+                    compact: false
                     onClicked: {
                         deleteAllDataConfirmPopup.close()
                         settingsBridge.deleteAllData()

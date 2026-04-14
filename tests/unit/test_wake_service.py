@@ -5,6 +5,7 @@ import queue
 import sys
 
 from core.settings.settings_service import SettingsService
+from core.routing.text_rules import WAKE_PREFIX_ALIASES
 from core.voice.model_paths import MODEL_DIR_NAME
 from core.voice.voice_service import VoiceService
 from core.voice.wake_service import WakeService
@@ -54,16 +55,20 @@ def test_wake_service_detects_wake_word_in_partial_payload():
     assert wake._contains_wake(payload, partial=True) is True  # noqa: SLF001
     alias_payload = json.dumps({"partial": "жарвис открой steam"}, ensure_ascii=False)
     assert wake._contains_wake(alias_payload, partial=True) is True  # noqa: SLF001
+    garri_payload = json.dumps({"partial": "гарри открой steam"}, ensure_ascii=False)
+    assert wake._contains_wake(garri_payload, partial=True) is True  # noqa: SLF001
+    fuzzy_payload = json.dumps({"partial": "гаривис открой steam"}, ensure_ascii=False)
+    assert wake._contains_wake(fuzzy_payload, partial=True) is True  # noqa: SLF001
 
 
-def test_wake_service_ignores_short_wake_aliases_in_strict_partial_detection():
+def test_wake_service_ignores_non_matching_short_partial_noise():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
 
-    short_alias_payload = json.dumps({"partial": "гарви открой steam"}, ensure_ascii=False)
+    short_alias_payload = json.dumps({"partial": "герой открой steam"}, ensure_ascii=False)
     assert wake._contains_wake(short_alias_payload, partial=True) is False  # noqa: SLF001
-    clipped_alias_payload = json.dumps({"partial": "джарви открой steam"}, ensure_ascii=False)
+    clipped_alias_payload = json.dumps({"partial": "жук открой steam"}, ensure_ascii=False)
     assert wake._contains_wake(clipped_alias_payload, partial=True) is False  # noqa: SLF001
 
 
@@ -203,6 +208,35 @@ def test_wake_service_uses_shared_vosk_runtime_cache(tmp_path, monkeypatch):
     assert calls[0][0] == wake.model_path
     assert calls[0][1] == wake.SAMPLE_RATE
     assert "\u0434\u0436\u0430\u0440\u0432\u0438\u0441" in calls[0][2]
+
+
+def test_wake_service_uses_all_wake_prefix_aliases_in_recognizer_grammar(tmp_path, monkeypatch):
+    clear_vosk_model_cache()
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    wake.model_path = tmp_path / "vosk-model-small-ru-0.22"
+    wake.model_path.mkdir(parents=True)
+
+    calls: list[tuple[object, ...]] = []
+
+    class DummyRecognizer:
+        pass
+
+    def fake_new_recognizer(path, sample_rate, grammar=None):  # noqa: ANN001, ANN202
+        calls.append((path, sample_rate, tuple(grammar or ())))
+        return DummyRecognizer()
+
+    monkeypatch.setattr("core.voice.wake_service.new_vosk_recognizer", fake_new_recognizer)
+
+    recognizer = wake._new_recognizer()  # noqa: SLF001
+
+    assert isinstance(recognizer, DummyRecognizer)
+    assert len(calls) == 1
+    assert set(calls[0][2]) == set(WAKE_PREFIX_ALIASES) | {"[unk]"}
+    assert "гарри" in calls[0][2]
+    assert "дарвис" in calls[0][2]
+    assert "гарви" in calls[0][2]
 
 
 def test_voice_service_reports_handoff_honestly_after_wake_session():

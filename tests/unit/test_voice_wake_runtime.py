@@ -117,3 +117,4 @@ def test_wake_service_recognizes_common_wake_mishears():
 
     assert wake._contains_wake('{"text": "жаравис"}') is True  # noqa: SLF001
     assert wake._contains_wake('{"text": "дарвис"}') is True  # noqa: SLF001
+    assert wake._contains_wake('{"text": "гаривис"}') is True  # noqa: SLF001

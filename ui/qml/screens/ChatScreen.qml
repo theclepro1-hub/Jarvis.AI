@@ -313,7 +313,7 @@ Rectangle {
             wakeHint: voiceBridge.wakeHint
             idleHint: chatBridge.lastResponseHint
             recording: voiceBridge.isRecording
-            recordingHint: voiceBridge.recordingHint
+            recordingHint: voiceBridge.isRecording ? voiceBridge.recordingHint : ""
             onSubmit: (text) => chatBridge.sendMessage(text)
             onMicPressed: () => voiceBridge.toggleManualCapture()
         }

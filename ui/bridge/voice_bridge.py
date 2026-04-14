@@ -415,6 +415,8 @@ class VoiceBridge(QObject):
         self._refresh_voice_status_cache()
         if self._chat_bridge is not None:
             self._chat_bridge.submitTranscribedText(raw_text)
+        self._recording_hint = "Ручной микрофон готов."
+        self.recordingHintChanged.emit()
 
     def _push_voice_note(self, note: str) -> None:
         self._recording_hint = note
@@ -441,7 +443,7 @@ class VoiceBridge(QObject):
     def _finalize_capture(self) -> None:
         self._wake_capture_active = False
         self.recordingChanged.emit()
-        if self._should_reset_status_after_capture(self.state.status):
+        if self._should_reset_status_after_capture(self.state.status) or self._recording_hint == "Команда распознана. Передаю в обработку...":
             self._recording_hint = "Ручной микрофон готов."
             self.recordingHintChanged.emit()
             self.state.status = "Готов"

@@ -178,7 +178,7 @@ def test_voice_bridge_prewarm_refreshes_cached_status(monkeypatch):
     assert services.wake.start_calls == 0
 
 
-def test_voice_bridge_deliver_transcribed_text_sets_handoff_status():
+def test_voice_bridge_deliver_transcribed_text_clears_transient_handoff_status():
     services = _Services()
     chat_bridge = _ChatBridge()
     state = SimpleNamespace(status="Готов")
@@ -189,7 +189,7 @@ def test_voice_bridge_deliver_transcribed_text_sets_handoff_status():
     assert state.status == "Передаю команду в обработку"
     assert services.voice.handoff_calls == 1
     assert chat_bridge.received == ["открой ютуб"]
-    assert bridge.recordingHint == "Команда распознана. Передаю в обработку..."
+    assert bridge.recordingHint == "Ручной микрофон готов."
 
 
 def test_voice_bridge_preserves_recognized_text_when_wake_hint_is_active():
@@ -286,6 +286,7 @@ def test_voice_bridge_marks_wake_command_as_recognizing_before_handoff():
     assert services.voice.handoff_calls == 1
     assert chat_bridge.received == ["открой параметры"]
     assert state.status == "Готов"
+    assert bridge.recordingHint == "Ручной микрофон готов."
 
 
 def test_voice_bridge_treats_wake_capture_as_active_recording_until_finalize():

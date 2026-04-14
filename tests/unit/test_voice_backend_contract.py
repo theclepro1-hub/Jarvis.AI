@@ -10,7 +10,14 @@ from core.settings.settings_service import SettingsService
 from core.voice.faster_whisper_runtime import clear_faster_whisper_model_cache, load_faster_whisper_model
 from core.voice.model_paths import MODEL_DIR_NAME
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
-from core.voice.stt_service import STTService
+from core.voice.stt_service import (
+    COMMAND_HOTWORDS,
+    COMMAND_PROMPT,
+    LOCAL_FASTER_WHISPER_BEAM_SIZE,
+    LOCAL_FASTER_WHISPER_BEST_OF,
+    LOCAL_FASTER_WHISPER_VAD,
+    STTService,
+)
 from core.voice.tts_service import TTSService
 from core.voice.voice_models import TranscriptionResult
 
@@ -253,8 +260,10 @@ def test_speech_capture_adapts_to_steady_noise_before_real_speech(monkeypatch):
 def test_speech_capture_default_gate_stays_less_aggressive() -> None:
     config = CaptureConfig()
 
-    assert config.noise_margin <= 24.0
-    assert config.speech_gate_ratio <= 1.18
+    assert config.energy_threshold <= 128.0
+    assert config.noise_margin <= 18.0
+    assert config.speech_gate_ratio <= 1.08
+    assert config.end_threshold_ratio <= 0.68
 
 
 def test_stt_service_reports_missing_model_without_key(tmp_path):
@@ -402,6 +411,48 @@ def test_stt_service_balance_mode_prefers_faster_whisper_before_vosk(tmp_path):
     assert result.ok is True
     assert order == ["local_faster_whisper"]
     assert result.backend_trace == ("local_faster_whisper",)
+
+
+def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypatch, tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "local")
+    model_path = tmp_path / "fw-model"
+    model_path.mkdir(parents=True)
+    (model_path / "model.bin").write_bytes(b"fw")
+    settings.set("stt_local_model", str(model_path))
+    service = STTService(settings, local_model_path=tmp_path / "vosk-model")
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
+
+    captured: dict[str, object] = {}
+
+    class FakeModel:
+        def transcribe(self, _path, **kwargs):  # noqa: ANN001
+            captured.update(kwargs)
+            return [types.SimpleNamespace(text="открой "), types.SimpleNamespace(text="ютуб")], types.SimpleNamespace()
+
+    monkeypatch.setattr("core.voice.stt_service.load_faster_whisper_model", lambda *args, **kwargs: FakeModel())
+
+    result = service._transcribe_with_local_faster_whisper(b"\x00" * 3200)
+
+    assert result.ok is True
+    assert result.text == "открой ютуб"
+    assert captured["language"] == "ru"
+    assert captured["beam_size"] == LOCAL_FASTER_WHISPER_BEAM_SIZE
+    assert captured["best_of"] == LOCAL_FASTER_WHISPER_BEST_OF
+    assert captured["temperature"] == 0.0
+    assert captured["vad_filter"] is True
+    assert captured["vad_parameters"] == LOCAL_FASTER_WHISPER_VAD
+    assert captured["condition_on_previous_text"] is False
+    assert captured["initial_prompt"] == COMMAND_PROMPT
+    assert captured["hotwords"] == COMMAND_HOTWORDS
+
+
+def test_stt_service_explicit_local_vosk_override_wins_route_selection(tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_backend_override", "local_vosk")
+    service = STTService(settings, local_model_path=tmp_path / "vosk-model")
+
+    assert service._resolved_stt_route() == ("local_vosk",)
 
 
 def test_faster_whisper_model_load_does_not_hold_global_lock_during_init(monkeypatch, tmp_path):

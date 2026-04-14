@@ -19,11 +19,40 @@ from core.voice.voice_models import TranscriptionResult
 from core.voice.vosk_runtime import load_vosk_model, new_vosk_recognizer
 FASTER_WHISPER_CACHE_DIR = "faster-whisper"
 DEFAULT_FASTER_WHISPER_MODEL = os.environ.get("JARVIS_UNITY_FASTER_WHISPER_MODEL", "small").strip() or "small"
-COMMAND_PROMPT = (
-    "Русские голосовые команды для Windows. "
-    "Джарвис, открой YouTube, Steam, Discord, браузер, музыку, параметры, проводник, "
-    "панель управления, сделай громче, сделай тише, заблокируй экран."
+COMMAND_HOTWORDS = ", ".join(
+    (
+        "джарвис",
+        "жарвис",
+        "жаравис",
+        "дарвис",
+        "гарри",
+        "гарви",
+        "гарвис",
+        "рыж",
+        "ютуб",
+        "youtube",
+        "steam",
+        "discord",
+        "браузер",
+        "яндекс музыка",
+        "музыка",
+        "параметры",
+        "проводник",
+    )
 )
+COMMAND_PROMPT = (
+    "Русские голосовые команды и короткий разговор с ассистентом в Windows. "
+    "Джарвис, жарвис, жаравис, дарвис, гарри, гарви, рыж. "
+    "Открой YouTube, Steam, Discord, браузер, Яндекс Музыку, параметры, проводник, "
+    "панель управления. Сделай громче, сделай тише, заблокируй экран. "
+    "Привет, как дела, что умеешь, почему."
+)
+LOCAL_FASTER_WHISPER_BEAM_SIZE = 4
+LOCAL_FASTER_WHISPER_BEST_OF = 3
+LOCAL_FASTER_WHISPER_VAD = {
+    "min_silence_duration_ms": 480,
+    "speech_pad_ms": 280,
+}
 
 
 class STTService:
@@ -366,16 +395,14 @@ class STTService:
             segments, _info = model.transcribe(
                 str(temp_path),
                 language="ru",
-                beam_size=2,
-                best_of=2,
+                beam_size=LOCAL_FASTER_WHISPER_BEAM_SIZE,
+                best_of=LOCAL_FASTER_WHISPER_BEST_OF,
                 temperature=0.0,
                 vad_filter=True,
-                vad_parameters={
-                    "min_silence_duration_ms": 320,
-                    "speech_pad_ms": 160,
-                },
+                vad_parameters=LOCAL_FASTER_WHISPER_VAD,
                 condition_on_previous_text=False,
                 initial_prompt=COMMAND_PROMPT,
+                hotwords=COMMAND_HOTWORDS,
             )
             segment_texts: list[str] = []
             for segment in segments:

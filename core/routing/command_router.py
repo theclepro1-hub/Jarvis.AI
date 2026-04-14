@@ -19,6 +19,21 @@ from core.routing.text_rules import (
 
 VOICE_SOURCES = {"voice", "wake", "speech"}
 VOICE_RETRY_PROMPT = "Не расслышал команду. Скажите ещё раз."
+VOICE_NOISE_WORDS = {
+    "а",
+    "э",
+    "ээ",
+    "эээ",
+    "эм",
+    "эмм",
+    "эммм",
+    "мм",
+    "ммм",
+    "ну",
+    "ой",
+    "и",
+    "не",
+}
 
 
 @dataclass(slots=True)
@@ -256,6 +271,8 @@ class CommandRouter:
             return False
         if source.casefold() in VOICE_SOURCES:
             return all(looks_like_voice_conversation(command) for command in normalized)
+        if all(len(command.split()) <= 2 for command in normalized):
+            return True
         return all(looks_like_conversation(command) for command in normalized)
 
     def _should_clarify_unsupported_only(self, commands: list[str], *, source: str) -> bool:
@@ -266,7 +283,7 @@ class CommandRouter:
             return False
         if any(looks_like_conversation(command) for command in normalized):
             return False
-        return all(len(command.split()) <= 2 for command in normalized)
+        return all(len(command.split()) <= 2 and looks_like_broken_command(command) for command in normalized)
 
     def _normalize_incoming_text(self, text: str, *, source: str) -> str:
         # Voice transcripts often miss commas/joins; post-process before planner.
@@ -293,7 +310,7 @@ class CommandRouter:
         if ambiguity_count == 0:
             return False
         if source.casefold() in {"voice", "wake", "speech"}:
-            return True
+            return bool(clarification_steps) or len(actionable_plans) > 1 or len(unsupported) > 1
         return len(commands) > 1
 
     def _should_retry_voice_fragment(
@@ -320,7 +337,7 @@ class CommandRouter:
         words = text.split()
         if len(words) > 4:
             return False
-        return True
+        return all(len(word) <= 6 or word in VOICE_NOISE_WORDS for word in words)
 
     def _planner_confidence(
         self,

@@ -117,12 +117,29 @@ def test_voice_service_strips_wake_word_from_transcription():
 
     assert voice._strip_wake_word("Джарвис открой YouTube") == "открой YouTube"  # noqa: SLF001
     assert voice._strip_wake_word("jarvis запусти музыку") == "запусти музыку"  # noqa: SLF001
+    assert voice._strip_wake_word("гарри открой YouTube") == "открой YouTube"  # noqa: SLF001
+    assert voice._strip_wake_word("гаривис открой YouTube") == "открой YouTube"  # noqa: SLF001
     assert voice._strip_wake_word("гарви с как дела") == "как дела"  # noqa: SLF001
     assert voice._strip_wake_word("гарви открой YouTube") == "открой YouTube"  # noqa: SLF001
     assert voice._strip_wake_word("джарви открой браузер") == "открой браузер"  # noqa: SLF001
+    assert voice._strip_wake_word("джаврис включи музыку") == "включи музыку"  # noqa: SLF001
     assert voice._strip_wake_word("жарвис, как дела?") == "как дела?"  # noqa: SLF001
+    assert voice._strip_wake_word("дарвис, как дела?") == "как дела?"  # noqa: SLF001
+    assert voice._strip_wake_word("рыж, как дела?") == "как дела?"  # noqa: SLF001
     assert voice._strip_wake_word("как у джарвиса дела") == "как у джарвиса дела"  # noqa: SLF001
     assert voice._strip_wake_word("джарвис") == ""  # noqa: SLF001
+
+
+def test_voice_service_uses_softer_wake_capture_tuning_in_standard_mode() -> None:
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    max_seconds, silence_seconds, energy_threshold, pre_roll_grace = voice._wake_capture_tuning()  # noqa: SLF001
+
+    assert max_seconds >= 5.0
+    assert silence_seconds >= 0.55
+    assert energy_threshold <= 128.0
+    assert pre_roll_grace >= 0.45
 
 
 def test_voice_service_normalizes_output_devices_and_filters_inputs(monkeypatch):

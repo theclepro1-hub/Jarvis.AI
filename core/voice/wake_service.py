@@ -8,7 +8,7 @@ from collections import deque
 
 import sounddevice as sd
 
-from core.routing.text_rules import STRICT_WAKE_ALIASES, normalize_text, strip_leading_wake_prefix
+from core.routing.text_rules import WAKE_PREFIX_ALIASES, normalize_text, strip_leading_wake_prefix
 from core.voice.model_paths import (
     resolve_vosk_bundled_model_path,
     resolve_vosk_model_path,
@@ -155,7 +155,7 @@ class WakeService:
                 self._set_phase("idle", "Слово активации не запущено", ready=False)
 
     def _new_recognizer(self):
-        grammar = [*STRICT_WAKE_ALIASES, "[unk]"]
+        grammar = [*WAKE_PREFIX_ALIASES, "[unk]"]
         return new_vosk_recognizer(self.model_path, self.SAMPLE_RATE, grammar=grammar)
 
     def _refresh_model_path(self) -> None:
@@ -171,8 +171,8 @@ class WakeService:
         text = normalize_text(str(data.get(key, "")))
         if not text:
             return False
-        stripped = strip_leading_wake_prefix(text, aliases=STRICT_WAKE_ALIASES)
-        return stripped != text or text.casefold().strip(" ,.:;!?-") in STRICT_WAKE_ALIASES
+        stripped = strip_leading_wake_prefix(text, aliases=WAKE_PREFIX_ALIASES)
+        return stripped != text or text.casefold().strip(" ,.:;!?-") in WAKE_PREFIX_ALIASES
 
     def _collect_post_wake_bridge(self, audio_queue: "queue.Queue[bytes]") -> bytes:
         bridge: list[bytes] = []
