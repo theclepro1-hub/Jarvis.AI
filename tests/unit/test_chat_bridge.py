@@ -40,11 +40,10 @@ class _Actions:
 class _Router:
     def __init__(self, route) -> None:  # noqa: ANN001
         self.route = route
-        self.received: list[str] = []
+        self.received: list[tuple[str, str]] = []
 
     def handle(self, text: str, *, source: str = "ui"):  # noqa: ANN201
-        _ = source
-        self.received.append(text)
+        self.received.append((text, source))
         return self.route
 
 
@@ -275,6 +274,26 @@ def test_chat_bridge_uses_cleaned_ai_text_after_wake_like_prefix(monkeypatch) ->
 
     assert services.ai.received == ["как дела"]
     assert bridge.messages[-1]["text"] == "AI fallback: как дела"
+
+
+def test_chat_bridge_does_not_log_passive_wake_privacy_block() -> None:
+    route = SimpleNamespace(
+        kind="local",
+        commands=[],
+        assistant_lines=["Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."],
+        queue_items=[],
+        execution_result=None,
+        suppress_user_message=True,
+    )
+    bridge, services = _bridge_for(route)
+
+    bridge.submitTranscribedText("обсуждаем проект и критику", source="wake")
+
+    assert services.command_router.received == [("обсуждаем проект и критику", "wake")]
+    assert len(bridge.messages) == 2
+    assert bridge.messages[0]["role"] == "assistant"
+    assert bridge.messages[1]["role"] == "assistant"
+    assert bridge.messages[1]["text"] == "Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."
 
 
 def test_chat_bridge_snapshots_ai_history_per_submission(monkeypatch) -> None:

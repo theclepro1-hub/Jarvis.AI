@@ -128,17 +128,22 @@ class ChatBridge(QObject):
         if not self._reserve_submission(signature):
             self.state.status = "Уже отправлено, жду ответ"
             return
-
-        self._append_message("user", clean)
         self.state.status = "Разбираю запрос"
 
         try:
-            route = self.services.command_router.handle(clean, source=source)
+            try:
+                route = self.services.command_router.handle(clean, source=source)
+            except TypeError:
+                route = self.services.command_router.handle(clean)
         except Exception as exc:  # noqa: BLE001
             self._append_message("assistant", f"Ошибка обработки команды: {type(exc).__name__}")
             self._release_submission(signature)
             self.state.status = "Готов"
             return
+
+        if not getattr(route, "suppress_user_message", False):
+            self._append_message("user", clean)
+        self.state.status = "Разбираю запрос"
         self._queue_items = route.queue_items
         self.queueChanged.emit()
 
@@ -176,8 +181,8 @@ class ChatBridge(QObject):
         self.sendMessage(f"открой {action['title']}")
 
     @Slot(str)
-    def submitTranscribedText(self, text: str) -> None:
-        self._submit_message(text, source="voice")
+    def submitTranscribedText(self, text: str, source: str = "voice") -> None:
+        self._submit_message(text, source=source)
 
     @Slot(str)
     def appendAssistantNote(self, text: str) -> None:

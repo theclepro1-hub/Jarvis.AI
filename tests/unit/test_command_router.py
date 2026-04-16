@@ -637,6 +637,18 @@ def test_command_router_keeps_wake_noise_alias_out_of_ai_path() -> None:
     assert result.execution_result is None
 
 
+def test_command_router_blocks_ai_fallback_for_passive_wake_speech() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("как дела", source="wake")
+
+    assert result.kind == "local"
+    assert result.commands == []
+    assert result.assistant_lines == ["Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."]
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "clarify"
+
+
 def test_command_router_keeps_broken_command_as_local_clarification() -> None:
     router, _actions, _pc_control = make_router()
 

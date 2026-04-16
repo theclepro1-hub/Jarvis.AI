@@ -405,6 +405,7 @@ class VoiceBridge(QObject):
 
     def _deliver_transcribed_text(self, text: str) -> None:
         raw_text = text.strip()
+        submission_source = "wake" if self._wake_capture_active else "voice"
         self._recording_hint = "Команда распознана. Передаю в обработку..."
         self.recordingHintChanged.emit()
         self.state.status = "Передаю команду в обработку"
@@ -414,7 +415,7 @@ class VoiceBridge(QObject):
         self.voiceTimingsChanged.emit()
         self._refresh_voice_status_cache()
         if self._chat_bridge is not None:
-            self._chat_bridge.submitTranscribedText(raw_text)
+            self._chat_bridge.submitTranscribedText(raw_text, source=submission_source)
         self._recording_hint = "Ручной микрофон готов."
         self.recordingHintChanged.emit()
 

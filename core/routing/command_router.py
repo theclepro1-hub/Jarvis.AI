@@ -19,6 +19,7 @@ from core.routing.text_rules import (
 
 VOICE_SOURCES = {"voice", "wake", "speech"}
 VOICE_RETRY_PROMPT = "Не расслышал команду. Скажите ещё раз."
+PASSIVE_WAKE_PRIVACY_PROMPT = "Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."
 VOICE_NOISE_WORDS = {
     "а",
     "э",
@@ -43,6 +44,7 @@ class RouteResult:
     assistant_lines: list[str]
     queue_items: list[str]
     execution_result: ExecutionResult | None = None
+    suppress_user_message: bool = False
 
 
 class CommandRouter:
@@ -121,6 +123,8 @@ class CommandRouter:
             actionable_plans.append(plan)
 
         if not actionable_plans and not clarification_steps and not unsupported:
+            if self._should_block_passive_wake_ai(source):
+                return self._passive_wake_privacy_route(clean_text, execute=execute)
             return RouteResult("ai" if execute else "preview", commands, [], queue_items)
 
         if unsupported and not actionable_plans and not clarification_steps and all(
@@ -136,6 +140,8 @@ class CommandRouter:
             )
 
         if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands, source=source):
+            if self._should_block_passive_wake_ai(source):
+                return self._passive_wake_privacy_route(clean_text, execute=execute)
             return RouteResult("ai", [clean_text], [], [clean_text])
 
         if unsupported and not actionable_plans and not clarification_steps and self._should_clarify_unsupported_only(
@@ -240,6 +246,7 @@ class CommandRouter:
         detail: str | None = None,
         payload: dict[str, object] | None = None,
         queue_items: list[str] | None = None,
+        suppress_user_message: bool = False,
     ) -> RouteResult:
         queue = queue_items if queue_items is not None else [command]
         step = ExecutionStep(
@@ -259,7 +266,27 @@ class CommandRouter:
             queue_items=queue,
             question=question,
         )
-        return RouteResult("local" if execute else "preview", queue, result.assistant_lines, queue, result)
+        return RouteResult(
+            "local" if execute else "preview",
+            queue,
+            result.assistant_lines,
+            queue,
+            result,
+            suppress_user_message=suppress_user_message,
+        )
+
+    def _passive_wake_privacy_route(self, command: str, *, execute: bool) -> RouteResult:
+        return self._clarification_route(
+            command,
+            PASSIVE_WAKE_PRIVACY_PROMPT,
+            execute=execute,
+            detail="Фоновую речь после слова активации не отправляю в ИИ без явного ручного микрофона.",
+            queue_items=[],
+            suppress_user_message=True,
+        )
+
+    def _should_block_passive_wake_ai(self, source: str) -> bool:
+        return str(source or "").strip().casefold() == "wake"
 
     def _should_fallback_to_ai(self, commands: list[str], *, source: str = "ui") -> bool:
         normalized = [normalize_text(command) for command in commands if normalize_text(command)]
