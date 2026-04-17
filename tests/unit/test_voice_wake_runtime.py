@@ -41,20 +41,24 @@ class FakeStore:
         self.payload = payload
 
 
-def test_wake_service_warm_up_model_uses_local_backend(monkeypatch) -> None:
+def test_wake_service_warm_up_model_loads_openwakeword_runtime() -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
-    calls: list[tuple[object | None, bool]] = []
 
-    monkeypatch.setattr(
-        voice.stt_service,
-        "warm_up_local_backend",
-        lambda cancel_event=None, allow_download=True: calls.append((cancel_event, allow_download)) or True,
-    )
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def load(self) -> bool:
+            self.calls += 1
+            return True
+
+    runtime = Runtime()
+    wake._runtime = runtime  # noqa: SLF001
 
     assert wake.warm_up_model() is True
-    assert calls == [(wake._stop_event, False)]  # noqa: SLF001
+    assert runtime.calls == 1
 
 
 def test_voice_service_warms_up_local_stt_backend(monkeypatch) -> None:
@@ -77,7 +81,7 @@ def test_voice_service_reports_wake_timings_in_sequence() -> None:
     voice = VoiceService(settings)
     voice._wake_metrics = WakeSessionMetrics(  # noqa: SLF001
         session_id="abc123",
-        wake_backend="local_faster_whisper",
+        wake_backend="openwakeword",
         stt_backend="local_faster_whisper",
         pre_roll_bytes=3200,
         detected_at=1.0,
@@ -92,7 +96,7 @@ def test_voice_service_reports_wake_timings_in_sequence() -> None:
     summary = voice.latest_wake_metrics_summary()
 
     assert summary.index("pre-roll") < summary.index("wake→capture") < summary.index("capture") < summary.index("stt") < summary.index("handoff") < summary.index("total")
-    assert "backend wake local_faster_whisper · stt local_faster_whisper" in summary
+    assert "backend wake openwakeword · stt local_faster_whisper" in summary
 
 
 def test_wake_service_stop_cancels_active_voice_pipeline() -> None:
@@ -108,11 +112,9 @@ def test_wake_service_stop_cancels_active_voice_pipeline() -> None:
     assert calls == ["cancelled"]
 
 
-def test_wake_service_recognizes_common_wake_mishears() -> None:
+def test_wake_service_scores_named_model_prediction() -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
 
-    assert wake._contains_wake('{"text": "жаравис"}') is True  # noqa: SLF001
-    assert wake._contains_wake('{"text": "дарвис"}') is True  # noqa: SLF001
-    assert wake._contains_wake('{"text": "гаривис"}') is True  # noqa: SLF001
+    assert wake._prediction_score({"hey_jarvis_v0.1": 0.7, "alexa": 0.9}) == 0.7  # noqa: SLF001

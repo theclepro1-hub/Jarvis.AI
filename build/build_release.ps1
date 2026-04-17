@@ -12,7 +12,9 @@ $installerDir = Join-Path $root "build\\installer"
 $versionInfoFile = Join-Path $root "build\\pyinstaller\\version_info.txt"
 $iconPath = Join-Path $root "assets\\icons\\jarvis_unity.ico"
 $sttModelRef = "small"
+$wakeModelRef = "hey_jarvis_v0.1"
 $modelCacheDir = Join-Path $root "build\\model_cache\\faster-whisper"
+$wakeModelCacheDir = Join-Path $root "build\\model_cache\\openwakeword"
 $buildStamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
 function Remove-Or-Fallback {
@@ -60,6 +62,41 @@ if resolved is None:
     load_faster_whisper_model("$ModelRef", cache_dir, device="cpu", compute_type="int8")
 resolved = resolve_local_faster_whisper_model("$ModelRef", cache_dir)
 print(resolved or "")
+"@
+
+    $nativeErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $resolvedPath = ($pythonScript | & $venvPython - 2>$null)
+    $pythonExit = $LASTEXITCODE
+    $ErrorActionPreference = $nativeErrorActionPreference
+    if ($pythonExit -ne 0) {
+        return ""
+    }
+    $resolvedPath = "$resolvedPath".Trim()
+    return $resolvedPath
+}
+
+function Resolve-OpenWakeWordModelPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ModelRef,
+        [Parameter(Mandatory = $true)]
+        [string]$CacheDir
+    )
+
+    $pythonScript = @"
+from pathlib import Path
+
+from openwakeword.utils import download_models
+
+cache_dir = Path(r'''$CacheDir''')
+cache_dir.mkdir(parents=True, exist_ok=True)
+download_models([r'''$ModelRef'''], target_directory=str(cache_dir))
+for suffix in (".onnx", ".tflite"):
+    candidate = cache_dir / f"$ModelRef{suffix}"
+    if candidate.exists():
+        print(candidate)
+        break
 "@
 
     $nativeErrorActionPreference = $ErrorActionPreference
@@ -224,13 +261,16 @@ function Invoke-PyInstallerBuild {
         "--collect-all", "faster_whisper",
         "--collect-all", "ctranslate2",
         "--collect-all", "av",
+        "--collect-all", "openwakeword",
+        "--collect-all", "onnxruntime",
         "--hidden-import", "pyttsx3.drivers.sapi5",
         "--hidden-import", "win32com.client",
         "--hidden-import", "pythoncom",
         "--hidden-import", "pywintypes",
         "--add-data", "$root\\ui;ui",
         "--add-data", "$root\\assets;assets",
-        "--add-data", "$modelCacheDir;assets\\models\\faster-whisper"
+        "--add-data", "$modelCacheDir;assets\\models\\faster-whisper",
+        "--add-data", "$wakeModelCacheDir;assets\\models\\openwakeword"
     )
     if ($OneFile) {
         $makeSpecArgs += "--onefile"
@@ -334,6 +374,14 @@ if ([string]::IsNullOrWhiteSpace($resolvedSttModelPath) -or !(Test-Path $resolve
 } else {
     Write-Host "LOCAL_STT_MODEL_READY $resolvedSttModelPath"
 }
+
+New-Item -ItemType Directory -Force -Path $wakeModelCacheDir | Out-Null
+Write-Host "OPENWAKEWORD_MODEL_PREWARM $wakeModelRef"
+$resolvedWakeModelPath = Resolve-OpenWakeWordModelPath -ModelRef $wakeModelRef -CacheDir $wakeModelCacheDir
+if ([string]::IsNullOrWhiteSpace($resolvedWakeModelPath) -or !(Test-Path $resolvedWakeModelPath)) {
+    throw "OpenWakeWord model prewarm failed: $wakeModelRef"
+}
+Write-Host "OPENWAKEWORD_MODEL_READY $resolvedWakeModelPath"
 
 $portableRuntimeRoot = Join-Path $root "build\\portable_runtime_$buildStamp"
 $oneFileRuntimeRoot = Join-Path $root "build\\onefile_runtime_$buildStamp"

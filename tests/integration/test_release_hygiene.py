@@ -65,6 +65,8 @@ def test_project_version_is_sourced_from_core_version() -> None:
     assert update_service.status_snapshot()["current_update_version"] == UPDATE_VERSION
     assert project.get("dynamic", []) == ["version"]
     assert pyproject["tool"]["setuptools"]["dynamic"]["version"]["attr"] == "core.version.DEFAULT_VERSION"
+    assert "openwakeword>=0.6.0,<1" in project["dependencies"]
+    assert "onnxruntime>=1.24.4,<2" in project["dependencies"]
 
 
 def test_build_script_keeps_expected_release_inputs() -> None:
@@ -75,7 +77,9 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert "win32com.client" in build_script
     assert "pythoncom" in build_script
     assert "LOCAL_STT_MODEL_PREWARM" in build_script
+    assert "OPENWAKEWORD_MODEL_PREWARM" in build_script
     assert "Resolve-LocalSTTModelPath" in build_script
+    assert "Resolve-OpenWakeWordModelPath" in build_script
     assert "Patch-PyInstallerSpec" in build_script
     assert "pyi-makespec.exe" in build_script
     assert "Write-ZipArchive" in build_script
@@ -89,11 +93,14 @@ def test_build_script_keeps_expected_release_inputs() -> None:
     assert "Get-FileHash" in build_script
     assert "Compress-Archive -Path $portableDistPath" not in build_script
     assert r"assets\\models\\faster-whisper" in build_script
+    assert r"assets\\models\\openwakeword" in build_script
     assert "release_metadata.py" in build_script
     assert 'Assert-NativeSuccess -Step "Installer metadata render"' in build_script
     assert "alphacephei.com/vosk" not in build_script
     assert "vosk-model-small-ru-0.22" not in build_script
     assert '"--collect-all", "faster_whisper"' in build_script
+    assert '"--collect-all", "openwakeword"' in build_script
+    assert '"--collect-all", "onnxruntime"' in build_script
     assert '"--windowed"' in build_script
     assert '--onefile' in build_script
     assert '"--icon", $iconPath' in build_script
@@ -160,3 +167,11 @@ def test_owned_startup_files_have_no_stale_22x_tails() -> None:
     )
 
     assert "22." not in owned_text
+
+
+def test_readme_mentions_openwakeword_release_packaging() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "openWakeWord" in readme
+    assert "onnxruntime" in readme
+    assert "local wake detection built on speech bursts + `faster-whisper`" not in readme

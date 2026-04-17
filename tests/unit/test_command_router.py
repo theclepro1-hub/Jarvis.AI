@@ -664,9 +664,21 @@ def test_command_router_blocks_ai_fallback_for_passive_wake_speech() -> None:
 
     assert result.kind == "local"
     assert result.commands == []
-    assert result.assistant_lines == ["Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."]
-    assert result.execution_result is not None
-    assert result.execution_result.steps[0].kind == "clarify"
+    assert result.assistant_lines == []
+    assert result.execution_result is None
+    assert result.suppress_user_message is True
+
+
+def test_command_router_silences_broken_passive_wake_fragment() -> None:
+    router, _actions, _pc_control = make_router()
+
+    result = router.handle("открой", source="wake")
+
+    assert result.kind == "local"
+    assert result.commands == []
+    assert result.assistant_lines == []
+    assert result.execution_result is None
+    assert result.suppress_user_message is True
 
 
 def test_command_router_can_allow_ai_fallback_for_passive_wake_speech() -> None:

@@ -280,7 +280,7 @@ def test_chat_bridge_does_not_log_passive_wake_privacy_block() -> None:
     route = SimpleNamespace(
         kind="local",
         commands=[],
-        assistant_lines=["Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."],
+        assistant_lines=[],
         queue_items=[],
         execution_result=None,
         suppress_user_message=True,
@@ -290,10 +290,8 @@ def test_chat_bridge_does_not_log_passive_wake_privacy_block() -> None:
     bridge.submitTranscribedText("обсуждаем проект и критику", source="wake")
 
     assert services.command_router.received == [("обсуждаем проект и критику", "wake")]
-    assert len(bridge.messages) == 2
+    assert len(bridge.messages) == 1
     assert bridge.messages[0]["role"] == "assistant"
-    assert bridge.messages[1]["role"] == "assistant"
-    assert bridge.messages[1]["text"] == "Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."
 
 
 def test_chat_bridge_logs_wake_text_when_router_allows_ai_dialog(monkeypatch) -> None:

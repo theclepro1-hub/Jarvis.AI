@@ -19,7 +19,6 @@ from core.routing.text_rules import (
 
 VOICE_SOURCES = {"voice", "wake", "speech"}
 VOICE_RETRY_PROMPT = "Не расслышал команду. Скажите ещё раз."
-PASSIVE_WAKE_PRIVACY_PROMPT = "Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."
 VOICE_NOISE_WORDS = {
     "а",
     "э",
@@ -82,6 +81,8 @@ class CommandRouter:
 
         early_question = clarification_question(clean_text) if looks_like_broken_command(clean_text) else ""
         if early_question:
+            if self._should_block_passive_wake_ai(source):
+                return self._passive_wake_privacy_route(clean_text, execute=execute)
             return self._clarification_route(clean_text, early_question, execute=execute)
 
         reminder_result = (
@@ -165,6 +166,8 @@ class CommandRouter:
             unsupported=unsupported,
             source=source,
         ):
+            if self._should_block_passive_wake_ai(source):
+                return self._passive_wake_privacy_route(clean_text, execute=execute)
             return self._clarification_route(
                 clean_text,
                 VOICE_RETRY_PROMPT,
@@ -180,6 +183,8 @@ class CommandRouter:
             unsupported=unsupported,
             source=source,
         ):
+            if self._should_block_passive_wake_ai(source):
+                return self._passive_wake_privacy_route(clean_text, execute=execute)
             confidence = self._planner_confidence(commands, clarification_steps, unsupported)
             question = self._planner_clarification_message(clarification_steps, unsupported)
             return self._clarification_route(
@@ -278,12 +283,12 @@ class CommandRouter:
         )
 
     def _passive_wake_privacy_route(self, command: str, *, execute: bool) -> RouteResult:
-        return self._clarification_route(
-            command,
-            PASSIVE_WAKE_PRIVACY_PROMPT,
-            execute=execute,
-            detail="Фоновую речь после слова активации не отправляю в ИИ без явного ручного микрофона.",
-            queue_items=[],
+        return RouteResult(
+            "local" if execute else "preview",
+            [],
+            [],
+            [],
+            None,
             suppress_user_message=True,
         )
 

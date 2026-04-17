@@ -23,11 +23,6 @@ from core.voice.stt_service import (
     LOCAL_FASTER_WHISPER_BEST_OF,
     LOCAL_FASTER_WHISPER_VAD,
     STTService,
-    WAKE_FASTER_WHISPER_BEAM_SIZE,
-    WAKE_FASTER_WHISPER_BEST_OF,
-    WAKE_FASTER_WHISPER_VAD,
-    WAKE_HOTWORDS,
-    WAKE_PROMPT,
 )
 from core.voice.tts_service import TTSService
 
@@ -395,34 +390,6 @@ def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypa
     assert captured["condition_on_previous_text"] is False
     assert captured["initial_prompt"] == COMMAND_PROMPT
     assert captured["hotwords"] == COMMAND_HOTWORDS
-
-
-def test_stt_service_wake_window_uses_wake_prompt_and_hotwords(monkeypatch, tmp_path):
-    settings = SettingsService(FakeStore())
-    model_path = tmp_path / "fw-model"
-    make_ready_faster_whisper_model(model_path)
-    settings.set("stt_local_model", str(model_path))
-    service = STTService(settings)
-    service._faster_whisper_available = lambda: True  # noqa: SLF001
-
-    captured: dict[str, object] = {}
-
-    class FakeModel:
-        def transcribe(self, _path, **kwargs):  # noqa: ANN001
-            captured.update(kwargs)
-            return [types.SimpleNamespace(text="джарвис открой ютуб")], types.SimpleNamespace()
-
-    monkeypatch.setattr("core.voice.stt_service.load_faster_whisper_model", lambda *args, **kwargs: FakeModel())
-
-    result = service.transcribe_wake_window(b"\x00" * 3200)
-
-    assert result.ok is True
-    assert captured["initial_prompt"] == WAKE_PROMPT
-    assert captured["hotwords"] == WAKE_HOTWORDS
-    assert captured["beam_size"] == WAKE_FASTER_WHISPER_BEAM_SIZE
-    assert captured["best_of"] == WAKE_FASTER_WHISPER_BEST_OF
-    assert captured["vad_parameters"] == WAKE_FASTER_WHISPER_VAD
-    assert captured["chunk_length"] == 3
 
 
 def test_stt_service_explicit_local_faster_whisper_override_wins_route_selection(tmp_path):

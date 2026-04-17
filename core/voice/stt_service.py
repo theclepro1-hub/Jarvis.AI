@@ -52,39 +52,11 @@ COMMAND_PROMPT = (
     "панель управления. Сделай громче, сделай тише, заблокируй экран. "
     "Привет, как дела, что умеешь, почему."
 )
-WAKE_HOTWORDS = ", ".join(
-    (
-        "горы",
-        "гори",
-        "гарий",
-        "джарвис",
-        "жарвис",
-        "жаравис",
-        "дарвис",
-        "гарри",
-        "гарви",
-        "гарвис",
-        "гаривис",
-        "джаврис",
-        "джарви",
-        "рыж",
-    )
-)
-WAKE_PROMPT = (
-    "Слово активации ассистента на русском: "
-    "джарвис, жарвис, жаравис, дарвис, гарри, гарви, гарвис, гаривис, джаврис, джарви, горы, гори, гарий, рыж."
-)
 LOCAL_FASTER_WHISPER_BEAM_SIZE = 5
 LOCAL_FASTER_WHISPER_BEST_OF = 4
 LOCAL_FASTER_WHISPER_VAD = {
     "min_silence_duration_ms": 420,
     "speech_pad_ms": 320,
-}
-WAKE_FASTER_WHISPER_BEAM_SIZE = 4
-WAKE_FASTER_WHISPER_BEST_OF = 4
-WAKE_FASTER_WHISPER_VAD = {
-    "min_silence_duration_ms": 220,
-    "speech_pad_ms": 220,
 }
 
 
@@ -186,22 +158,6 @@ class STTService:
             return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper",), cancel_event)
 
         return self._transcribe_route(raw_bytes, self._resolved_stt_route(), cancel_event)
-
-    def transcribe_wake_window(
-        self,
-        raw_bytes: bytes,
-        cancel_event: threading.Event | None = None,
-    ) -> TranscriptionResult:
-        return self._transcribe_with_local_faster_whisper(
-            raw_bytes,
-            cancel_event=cancel_event,
-            initial_prompt=WAKE_PROMPT,
-            hotwords=WAKE_HOTWORDS,
-            beam_size=WAKE_FASTER_WHISPER_BEAM_SIZE,
-            best_of=WAKE_FASTER_WHISPER_BEST_OF,
-            vad_parameters=WAKE_FASTER_WHISPER_VAD,
-            chunk_length=3,
-        )
 
     def transcribe_wake_command(
         self,
