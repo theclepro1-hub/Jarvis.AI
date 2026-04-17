@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from core.routing.text_rules import normalize_text
+
 
 OPEN_VERBS = ("открой", "открыть", "запусти", "запустить", "включи", "включить")
 SEARCH_VERBS = ("найди", "поищи", "ищи", "поиск")
@@ -60,7 +62,8 @@ class BatchRouter:
             for action_segment in self._split_by_action_starts(segment):
                 expanded.extend(self._expand_segment(action_segment))
         inherited = self._apply_open_verb_inheritance(expanded)
-        return inherited or [normalized]
+        deduped = self._dedupe_commands(inherited)
+        return deduped or [normalized]
 
     def _starts_with_search(self, segment: str) -> bool:
         lower = segment.casefold().strip()
@@ -98,6 +101,9 @@ class BatchRouter:
             if lower.startswith(prefix):
                 actual_verb = clean.split(" ", 1)[0]
                 tail = clean[len(actual_verb) :].strip()
+                parts = [part.strip() for part in re.split(r"\s+и\s+", tail, flags=re.IGNORECASE) if part.strip()]
+                if len(parts) > 1 and all(not self._looks_like_short_action(part.casefold()) for part in parts):
+                    return [f"{actual_verb} {part}" for part in parts]
                 split_with_registry = getattr(self.action_registry, "split_open_target_sequence", None)
                 if callable(split_with_registry):
                     phrases, remainder = split_with_registry(tail)
@@ -106,9 +112,6 @@ class BatchRouter:
                         expanded.extend(self._expand_segment(remainder))
                     if len(expanded) > 1 or (expanded and remainder):
                         return expanded
-                parts = [part.strip() for part in re.split(r"\s+и\s+", tail) if part.strip()]
-                if len(parts) > 1 and all(not self._looks_like_short_action(part.casefold()) for part in parts):
-                    return [f"{actual_verb} {part}" for part in parts]
                 by_catalog = self._expand_open_targets_with_catalog(actual_verb, tail)
                 if by_catalog:
                     return by_catalog
@@ -266,3 +269,14 @@ class BatchRouter:
             if index >= 0:
                 return index, index + len(candidate)
         return None
+
+    def _dedupe_commands(self, commands: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for command in commands:
+            key = normalize_text(command).casefold()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(command)
+        return unique

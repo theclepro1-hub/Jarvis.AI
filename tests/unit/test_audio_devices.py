@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from core.voice.audio_device_service import AudioDeviceService
 
 
@@ -47,3 +49,19 @@ def test_audio_device_service_groups_physical_devices_and_hides_duplicates():
     assert grouped_qml["displayName"] == "Logitech PRO X"
     assert len(grouped_input.inputEndpoints) == 2
     assert grouped_input.inputEndpoints[0].isDefault is True or grouped_input.inputEndpoints[1].isDefault is True
+
+
+def test_audio_device_service_raises_when_saved_microphone_disappears():
+    backend = FakeAudioBackend(
+        devices=[
+            {"name": "Microphone (Logitech PRO X Gaming Headset)", "max_input_channels": 2, "hostapi": 0},
+        ]
+    )
+    service = AudioDeviceService(
+        query_devices=lambda: backend.devices,
+        query_hostapis=lambda: backend.hostapis,
+        default_device_getter=lambda: backend.default,
+    )
+
+    with pytest.raises(LookupError, match='Выбранный микрофон "Missing Mic" недоступен'):
+        service.resolve_input_device("Missing Mic")

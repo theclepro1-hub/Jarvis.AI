@@ -92,7 +92,7 @@ class WakeService:
         self._status_callback = on_status
         if self._thread and self._thread.is_alive():
             return self.status()
-        if self._wake_model_source() is None:
+        if self._wake_model_source(allow_download=False) is None:
             self._set_phase("error", "Локальный wake backend не готов", ready=False)
             return self.status()
 
@@ -124,7 +124,10 @@ class WakeService:
         return "не загружена"
 
     def warm_up_model(self) -> bool:
-        return self.voice.stt_service.warm_up_local_backend(cancel_event=self._stop_event)
+        return self.voice.stt_service.warm_up_local_backend(
+            cancel_event=self._stop_event,
+            allow_download=False,
+        )
 
     def _run(self) -> None:
         try:
@@ -228,8 +231,8 @@ class WakeService:
             self._callback(raw_bytes)
         return True
 
-    def _wake_model_source(self) -> str | Path | None:
-        return self.voice.stt_service._resolve_local_faster_whisper_source()  # noqa: SLF001
+    def _wake_model_source(self, *, allow_download: bool = True) -> str | Path | None:
+        return self.voice.stt_service._resolve_local_faster_whisper_source(allow_download=allow_download)  # noqa: SLF001
 
     def _contains_wake(self, payload: str, partial: bool = False) -> bool:
         text = self._payload_text(payload, partial=partial)

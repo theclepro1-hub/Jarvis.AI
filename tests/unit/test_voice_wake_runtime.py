@@ -45,23 +45,31 @@ def test_wake_service_warm_up_model_uses_local_backend(monkeypatch) -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
-    calls: list[bool] = []
+    calls: list[tuple[object | None, bool]] = []
 
-    monkeypatch.setattr(voice.stt_service, "warm_up_local_backend", lambda cancel_event=None: calls.append(True) or True)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "warm_up_local_backend",
+        lambda cancel_event=None, allow_download=True: calls.append((cancel_event, allow_download)) or True,
+    )
 
     assert wake.warm_up_model() is True
-    assert calls == [True]
+    assert calls == [(wake._stop_event, False)]  # noqa: SLF001
 
 
 def test_voice_service_warms_up_local_stt_backend(monkeypatch) -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
-    calls: list[bool] = []
+    calls: list[tuple[object | None, bool]] = []
 
-    monkeypatch.setattr(voice.stt_service, "warm_up_local_backend", lambda cancel_event=None: calls.append(True) or True)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "warm_up_local_backend",
+        lambda cancel_event=None, allow_download=True: calls.append((cancel_event, allow_download)) or True,
+    )
 
     assert voice.warm_up_local_stt_backend() is True
-    assert calls == [True]
+    assert calls == [(voice._manual_stop_event, True)]  # noqa: SLF001
 
 
 def test_voice_service_reports_wake_timings_in_sequence() -> None:

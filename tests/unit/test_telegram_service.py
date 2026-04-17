@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from concurrent.futures import Future
 from pathlib import Path
 import time
+import threading
 from types import SimpleNamespace
 
 from core.telegram.telegram_models import TelegramDispatchResult, TelegramUpdate
 from core.telegram.telegram_service import DEFAULT_POLL_INTERVAL_MS, HttpTelegramTransport, TelegramService
+from core.services.service_container import ServiceContainer
 
 
 class FakeSettings:
@@ -409,22 +411,23 @@ def test_telegram_service_routes_plain_conversation_through_service_container_ai
 
     class Ai:
         def __init__(self) -> None:
-            self.received: list[str] = []
+            self.received: list[tuple[str, list[dict[str, str]]]] = []
 
-        def generate_reply(self, text: str, _history: list[dict[str, object]]) -> str:
-            self.received.append(text)
-            return f"AI:{text}"
+        def generate_reply_result(self, text: str, history: list[dict[str, str]], *, status_callback=None):  # noqa: ANN001, ANN201
+            self.received.append((text, history))
+            if "отвечай полностью по-русски" in text.casefold():
+                return SimpleNamespace(text="Как дела? Всё нормально.")
+            return SimpleNamespace(text="Как дела? how?")
 
-    runtime = SimpleNamespace(command_router=Router(), ai=Ai())
+    runtime = ServiceContainer.__new__(ServiceContainer)
+    runtime._command_router = Router()
+    runtime._ai = Ai()
+    runtime._telegram_history_lock = threading.RLock()
+    runtime._telegram_history_by_chat_id = {}
+    runtime._telegram_history_limit = 12
 
     def external_handler(text: str, chat_id: str) -> str:
-        resolved = runtime.command_router.handle(text, source="telegram", telegram_chat_id=chat_id)
-        if resolved.assistant_lines:
-            return "\n".join(resolved.assistant_lines)
-        if resolved.kind != "ai" and not resolved.commands:
-            return ""
-        clean = " ".join(resolved.commands).strip() if resolved.commands else text
-        return runtime.ai.generate_reply(clean, [])
+        return ServiceContainer.handle_external_command(runtime, text, telegram_chat_id=chat_id)
 
     service = TelegramService(
         FakeSettings(),
@@ -436,10 +439,11 @@ def test_telegram_service_routes_plain_conversation_through_service_container_ai
     results = service.poll_once()
 
     assert results[0].handled is True
-    assert results[0].reply_text == "AI:как дела?"
-    assert runtime.command_router.calls == [("как дела?", "telegram", "777")]
-    assert runtime.ai.received == ["как дела?"]
-    assert transport.sent_messages == [(777, "AI:как дела?")]
+    assert results[0].reply_text == "Как дела? Всё нормально."
+    assert runtime._command_router.calls == [("как дела?", "telegram", "777")]
+    assert runtime._ai.received[0][0].startswith("Ты отвечаешь в Telegram как JARVIS.")
+    assert "Если пользователь пишет по-русски, отвечай полностью по-русски." in runtime._ai.received[0][0]
+    assert transport.sent_messages == [(777, "Как дела? Всё нормально.")]
 
 
 def test_empty_handler_reply_uses_fallback_text_instead_of_silent_drop() -> None:

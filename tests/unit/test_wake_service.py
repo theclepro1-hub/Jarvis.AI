@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from core.settings.settings_service import SettingsService
@@ -73,7 +74,7 @@ def test_wake_service_reports_missing_backend_without_source(monkeypatch) -> Non
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
-    monkeypatch.setattr(wake, "_wake_model_source", lambda: None)
+    monkeypatch.setattr(wake, "_wake_model_source", lambda allow_download=True: None)
 
     result = wake.start(lambda _pre_roll: None)
 
@@ -111,12 +112,33 @@ def test_wake_service_warm_up_delegates_to_local_backend(monkeypatch) -> None:
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
-    calls: list[bool] = []
+    calls: list[tuple[threading.Event | None, bool]] = []
 
-    monkeypatch.setattr(voice.stt_service, "warm_up_local_backend", lambda cancel_event=None: calls.append(True) or True)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "warm_up_local_backend",
+        lambda cancel_event=None, allow_download=True: calls.append((cancel_event, allow_download)) or True,
+    )
 
     assert wake.warm_up_model() is True
-    assert calls == [True]
+    assert calls == [(wake._stop_event, False)]  # noqa: SLF001
+
+
+def test_wake_service_does_not_start_when_model_requires_download(monkeypatch) -> None:
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    monkeypatch.setattr(
+        wake,
+        "_wake_model_source",
+        lambda allow_download=True: "small" if allow_download else None,
+    )
+
+    result = wake.start(lambda _pre_roll: None)
+
+    assert wake.phase == "error"
+    assert "wake backend" in result
 
 
 def test_wake_service_candidate_burst_hands_audio_to_callback(monkeypatch) -> None:

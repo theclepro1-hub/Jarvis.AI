@@ -146,10 +146,15 @@ class STTService:
         policy = self._assistant_policy()
         return any(self._backend_available(backend) for backend in policy.stt_route)
 
-    def warm_up_local_backend(self, cancel_event: threading.Event | None = None) -> bool:
+    def warm_up_local_backend(
+        self,
+        cancel_event: threading.Event | None = None,
+        *,
+        allow_download: bool = True,
+    ) -> bool:
         if self._is_cancelled(cancel_event):
             return False
-        model_source = self._resolve_local_faster_whisper_source()
+        model_source = self._resolve_local_faster_whisper_source(allow_download=allow_download)
         if model_source is None:
             return False
         try:
@@ -339,6 +344,8 @@ class STTService:
                     language="ru",
                     temperature=0.0,
                 )
+            if self._is_cancelled(cancel_event):
+                return self._cancelled_result(engine="groq_whisper", backend_trace=("groq_whisper",))
             text = self._normalize_transcript_text(getattr(response, "text", ""))
             elapsed_ms = round((time.perf_counter() - started_at) * 1000.0, 1)
             if not text:
@@ -481,7 +488,7 @@ class STTService:
         return importlib.util.find_spec("faster_whisper") is not None
 
     def _local_faster_whisper_ready(self) -> bool:
-        return self._faster_whisper_available() and self._resolve_local_faster_whisper_source() is not None
+        return self._faster_whisper_available() and self._resolve_local_faster_whisper_source(allow_download=False) is not None
 
     def _preferred_local_engine(self) -> str:
         if self._local_faster_whisper_ready():
@@ -495,7 +502,7 @@ class STTService:
         configured = str(self.settings.get("stt_local_model", DEFAULT_FASTER_WHISPER_MODEL)).strip()
         return configured or DEFAULT_FASTER_WHISPER_MODEL
 
-    def _resolve_local_faster_whisper_source(self) -> str | Path | None:
+    def _resolve_local_faster_whisper_source(self, *, allow_download: bool = True) -> str | Path | None:
         if not self._faster_whisper_available():
             return None
         if self._local_model_override is not None:
@@ -510,7 +517,7 @@ class STTService:
         existing_path = find_existing_faster_whisper_model(model_ref, self.faster_whisper_download_root)
         if existing_path is not None:
             return existing_path
-        if can_auto_download_faster_whisper_model(model_ref):
+        if allow_download and can_auto_download_faster_whisper_model(model_ref):
             return model_ref
         return None
 

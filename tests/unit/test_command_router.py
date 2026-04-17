@@ -194,6 +194,19 @@ def test_command_router_runs_open_chain_without_ai():
     assert [step.kind for step in result.execution_result.steps] == ["open_items", "open_items"]
 
 
+def test_command_router_dedupes_identical_open_commands_in_single_phrase() -> None:
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой steam и Steam")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой steam"]
+    assert actions.opened == ["steam"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert [step.kind for step in result.execution_result.steps] == ["open_items"]
+
+
 def test_command_router_runs_open_then_volume_chain_without_ai():
     router, actions, pc_control = make_router()
 

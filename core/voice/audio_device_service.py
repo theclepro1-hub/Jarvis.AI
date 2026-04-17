@@ -96,7 +96,10 @@ class AudioDeviceService:
         selected = self.normalize_microphone_selection(
             value or self.DEFAULT_INPUT_LABEL,
         )
-        return self._resolve_device_index(selected, "max_input_channels")
+        resolved = self._resolve_device_index(selected, "max_input_channels")
+        if resolved is None and selected != self.DEFAULT_INPUT_LABEL:
+            raise LookupError(f'Выбранный микрофон "{selected}" недоступен.')
+        return resolved
 
     def resolve_output_device(self, value: str | None = None) -> int | None:
         selected = self.normalize_output_selection(value or self.DEFAULT_OUTPUT_LABEL)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -44,6 +45,9 @@ TelegramService = None
 UpdateService = None
 VoiceService = None
 WakeService = None
+
+_CYRILLIC_PATTERN = re.compile(r"[А-Яа-яЁё]")
+_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 
 
 def _boot_log(message: str) -> None:
@@ -458,19 +462,39 @@ class ServiceContainer:
         prompt_lines = [
             "Ты отвечаешь в Telegram как JARVIS.",
             "Отвечай на языке пользователя.",
-            "Держи ответы короткими, но не сухими.",
-            "Если это команда, отвечай кратко и по делу без лишних вступлений.",
-            "Если это обычный разговор, отвечай естественно и по-человечески.",
-            "Если пользователь отвечает коротко вроде да/ок/ясно, опирайся на контекст.",
-            "Если не уверен или не знаешь ответ, скажи это прямо и задай один короткий уточняющий вопрос.",
-            "Не выдумывай факты.",
         ]
+        prompt_lines.extend(self._telegram_language_guard_lines(clean))
+        prompt_lines.extend(
+            [
+                "Держи ответы короткими, но не сухими.",
+                "Если это команда, отвечай кратко и по делу без лишних вступлений.",
+                "Если это обычный разговор, отвечай естественно и по-человечески.",
+                "Если пользователь отвечает коротко вроде да/ок/ясно, опирайся на контекст.",
+                "Если не уверен или не знаешь ответ, скажи это прямо и задай один короткий уточняющий вопрос.",
+                "Не выдумывай факты.",
+            ]
+        )
         context_lines = self._telegram_recent_context(history)
         if context_lines:
             prompt_lines.extend(["", "Контекст чата:"])
             prompt_lines.extend(context_lines)
         prompt_lines.extend(["", f"Текущий запрос: {clean}"])
         return "\n".join(prompt_lines)
+
+    def _telegram_language_guard_lines(self, text: str) -> list[str]:
+        clean = normalize_text(str(text or "").strip())
+        if not clean:
+            return []
+        if not _CYRILLIC_PATTERN.search(clean):
+            return []
+
+        lines = [
+            "Если пользователь пишет по-русски, отвечай полностью по-русски.",
+            "Не смешивай русский и английский в одном ответе, кроме неизбежных названий, брендов и технических терминов.",
+        ]
+        if _LATIN_PATTERN.search(clean):
+            lines.append("Если входное сообщение смешанное, русский язык ответа должен оставаться основным.")
+        return lines
 
     def _compact_telegram_reply(self, text: str, *, max_lines: int = 4) -> str:
         lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]

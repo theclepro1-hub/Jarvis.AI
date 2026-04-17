@@ -165,7 +165,14 @@ def test_split_voice_sequence_with_system_and_spoken_launcher_targets_escapes() 
         "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b "
         "\u0441 \u0442\u0438\u043c \u0438 \u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a"
     ) == [
-        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b",
-        "\u043e\u0442\u043a\u0440\u043e\u0439 \u0441 \u0442\u0438\u043c",
+        "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u0441 \u0442\u0438\u043c",
         "\u043e\u0442\u043a\u0440\u043e\u0439 \u043f\u0440\u043e\u0432\u043e\u0434\u043d\u0438\u043a",
+    ]
+
+
+def test_split_dedupes_identical_open_commands_after_expansion() -> None:
+    router = make_router()
+
+    assert router.split("открой steam и Steam") == [
+        "открой steam",
     ]

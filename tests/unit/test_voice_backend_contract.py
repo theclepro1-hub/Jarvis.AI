@@ -303,6 +303,25 @@ def test_stt_service_warmup_uses_downloadable_faster_whisper_ref(monkeypatch, tm
     assert calls[0][0][0] == "small"
 
 
+def test_stt_service_warmup_refuses_download_in_strict_local_mode(monkeypatch, tmp_path):
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "local")
+    settings.set("stt_local_model", "small")
+    service = STTService(settings)
+    service.faster_whisper_download_root = tmp_path / "fw-cache"
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
+
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        "core.voice.stt_service.load_faster_whisper_model",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or object(),
+    )
+
+    assert service.warm_up_local_backend(allow_download=False) is False
+    assert calls == []
+
+
 def test_stt_service_standard_route_prefers_local_faster_whisper(tmp_path):
     settings = SettingsService(FakeStore())
     model_path = tmp_path / "fw-model"
@@ -330,6 +349,19 @@ def test_stt_service_prefers_env_override_for_local_model(monkeypatch) -> None:
     service = STTService(settings)
 
     assert service._faster_whisper_model_ref() == "medium"  # noqa: SLF001
+
+
+def test_stt_service_readiness_requires_existing_local_model(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    settings = SettingsService(FakeStore())
+    settings.set("assistant_mode", "private")
+    settings.set("stt_local_model", "small")
+    service = STTService(settings)
+    service.faster_whisper_download_root = tmp_path / "fw-cache"
+    service._faster_whisper_available = lambda: True  # noqa: SLF001
+
+    assert service._local_faster_whisper_ready() is False  # noqa: SLF001
+    assert service.status_text() == "Нужен локальный backend распознавания речи"
 
 
 def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypatch, tmp_path):
@@ -570,3 +602,29 @@ def test_tts_engine_selection_hides_unready_online_voice(monkeypatch):
 
     assert service.tts_engine() == "system"
     assert [engine.key for engine in service.available_engines()] == ["system"]
+
+
+def test_speech_capture_reports_missing_selected_microphone(monkeypatch):
+    opened = {"value": False}
+
+    class FakeStream:
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            opened["value"] = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):  # noqa: ANN001, ANN002, ANN003
+            return False
+
+    def missing_device():
+        raise LookupError('Выбранный микрофон "Missing Mic" недоступен.')
+
+    monkeypatch.setattr("core.voice.speech_capture_service.sd.RawInputStream", FakeStream)
+
+    service = SpeechCaptureService(missing_device, threading.Event())
+    result = service.capture_until_silence()
+
+    assert result.status == "mic_open_failed"
+    assert "Выбранный микрофон" in result.detail
+    assert opened["value"] is False

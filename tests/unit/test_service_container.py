@@ -77,6 +77,36 @@ def test_handle_external_command_routes_plain_conversation_to_ai() -> None:
     assert "Telegram" in runtime._ai.received[0][0]
 
 
+def test_handle_external_command_applies_russian_language_guard_to_telegram_prompt() -> None:
+    class GuardedAi:
+        def __init__(self) -> None:
+            self.received: list[tuple[str, list[dict[str, str]]]] = []
+
+        def generate_reply_result(self, text: str, history: list[dict[str, str]], *, status_callback=None):  # noqa: ANN001, ANN201
+            self.received.append((text, history))
+            if "отвечай полностью по-русски" in text.casefold():
+                reply = "Как дела? Всё нормально."
+            else:
+                reply = "Как дела? how?"
+            return SimpleNamespace(text=reply)
+
+    route = SimpleNamespace(
+        kind="ai",
+        commands=[],
+        assistant_lines=[],
+        queue_items=[],
+        execution_result=None,
+    )
+    runtime = _build_runtime(route)
+    runtime._ai = GuardedAi()
+
+    reply = ServiceContainer.handle_external_command(runtime, "Как дела. how?", telegram_chat_id="777")
+
+    assert reply == "Как дела? Всё нормально."
+    assert "Если пользователь пишет по-русски, отвечай полностью по-русски." in runtime._ai.received[0][0]
+    assert "Не смешивай русский и английский" in runtime._ai.received[0][0]
+
+
 def test_handle_external_command_uses_short_telegram_history_per_chat() -> None:
     route = SimpleNamespace(
         kind="ai",
@@ -97,6 +127,27 @@ def test_handle_external_command_uses_short_telegram_history_per_chat() -> None:
         {"role": "user", "text": "hello"},
         {"role": "assistant", "text": "AI"},
     ]
+
+
+def test_handle_external_command_keeps_short_followup_contextual_prompt_in_russian() -> None:
+    route = SimpleNamespace(
+        kind="ai",
+        commands=[],
+        assistant_lines=[],
+        queue_items=[],
+        execution_result=None,
+    )
+    runtime = _build_runtime(route)
+
+    first = ServiceContainer.handle_external_command(runtime, "Привет", telegram_chat_id="777")
+    second = ServiceContainer.handle_external_command(runtime, "ок", telegram_chat_id="777")
+
+    assert first == "AI"
+    assert second == "AI"
+    prompt = runtime._ai.received[1][0]
+    assert "Контекст чата:" in prompt
+    assert "Пользователь: Привет" in prompt
+    assert "Если пользователь отвечает коротко вроде да/ок/ясно, опирайся на контекст." in prompt
 
 
 def test_handle_external_command_includes_recent_telegram_context_in_prompt() -> None:
