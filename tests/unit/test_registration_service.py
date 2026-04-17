@@ -68,3 +68,15 @@ def test_registration_can_be_skipped():
     service = RegistrationService(settings)
     result = service.skip()
     assert result.skipped is True
+
+
+def test_registration_accepts_env_backed_cloud_key(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "env-groq")
+    settings = SettingsService(FakeStore())
+    registration = settings.get_registration()
+    registration["telegram_user_id"] = "123"
+    registration["telegram_bot_token"] = "bot-token"
+    settings.save_registration(registration, skipped=False)
+    service = RegistrationService(settings)
+
+    assert service.is_complete() is True

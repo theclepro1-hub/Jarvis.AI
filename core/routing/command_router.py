@@ -56,12 +56,14 @@ class CommandRouter:
         pc_control: PcControlService | None = None,
         reminder_service=None,
         reminder_provider: Callable[[], object | None] | None = None,
+        settings=None,
     ) -> None:
         self.actions = action_registry
         self.batch_router = batch_router
         self.ai = ai_service
         self.reminders = reminder_service
         self.reminder_provider = reminder_provider
+        self.settings = settings
         self.intent_router = IntentRouter(action_registry)
         self.voice_post_processor = VoiceCommandPostProcessor(action_registry)
         self.pc = pc_control or PcControlService(action_registry)
@@ -286,7 +288,11 @@ class CommandRouter:
         )
 
     def _should_block_passive_wake_ai(self, source: str) -> bool:
-        return str(source or "").strip().casefold() == "wake"
+        if str(source or "").strip().casefold() != "wake":
+            return False
+        if self.settings is None or not hasattr(self.settings, "get"):
+            return True
+        return not bool(self.settings.get("allow_ai_after_wake", False))
 
     def _should_fallback_to_ai(self, commands: list[str], *, source: str = "ui") -> bool:
         normalized = [normalize_text(command) for command in commands if normalize_text(command)]

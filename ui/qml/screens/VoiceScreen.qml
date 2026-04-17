@@ -53,6 +53,27 @@ Rectangle {
 
             SettingRow {
                 Layout.fillWidth: true
+                title: "AI-диалог после wake"
+                description: !voiceBridge.wakeWordEnabled
+                             ? "Сначала включите слово активации."
+                             : (voiceBridge.allowAiAfterWake
+                                ? "После «Джарвис» можно вести свободный диалог голосом. Это менее безопасно рядом с Discord и созвонами."
+                                : "После «Джарвис» разрешены только команды. Для длинного диалога нужен ручной микрофон.")
+                helpText: "Безопасный режим по умолчанию держит wake только для команд. Если включить этот тумблер, фраза после слова активации может уйти в AI как обычный голосовой диалог."
+                onHelpRequested: (text) => voiceRoot.helpRequested(text)
+                onHelpCleared: voiceRoot.helpCleared()
+
+                AppSwitch {
+                    objectName: "allowAiAfterWakeSwitch"
+                    checked: voiceBridge.allowAiAfterWake
+                    enabled: voiceBridge.wakeWordEnabled
+                    opacity: enabled ? 1.0 : 0.48
+                    onToggled: voiceBridge.setAllowAiAfterWake(checked)
+                }
+            }
+
+            SettingRow {
+                Layout.fillWidth: true
                 title: "Микрофон"
                 description: "Выберите устройство, через которое JARVIS слушает вас."
                 helpText: "Если JARVIS слышит не тот микрофон, поменяйте его здесь."
@@ -67,7 +88,7 @@ Rectangle {
                     Layout.alignment: Qt.AlignLeft
                     model: voiceBridge.microphoneDeviceModels
                     textRole: "name"
-                    currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedMicrophone))
+                    currentIndex: model.findIndex(item => item.name === voiceBridge.selectedMicrophone)
                     onActivated: (index) => voiceBridge.setMicrophone(model[index].name)
                 }
             }
@@ -90,7 +111,7 @@ Rectangle {
                     opacity: enabled ? 1.0 : 0.48
                     model: voiceBridge.outputDeviceModels
                     textRole: "name"
-                    currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedOutputDevice))
+                    currentIndex: model.findIndex(item => item.name === voiceBridge.selectedOutputDevice)
                     onActivated: (index) => voiceBridge.setOutputDevice(model[index].name)
                 }
             }
@@ -187,7 +208,7 @@ Rectangle {
                     enabled: voiceBridge.voiceResponseEnabled
                     opacity: enabled ? 1.0 : 0.52
                     model: voiceBridge.ttsVoices
-                    currentIndex: Math.max(0, model.indexOf(voiceBridge.selectedTtsVoice))
+                    currentIndex: model.indexOf(voiceBridge.selectedTtsVoice)
                     onActivated: (index) => voiceBridge.setTtsVoice(model[index])
                 }
             }

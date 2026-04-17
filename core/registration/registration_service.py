@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+
+from core.ai.ai_service import PROVIDERS
 from core.registration.registration_model import RegistrationModel
 
 
@@ -26,8 +29,17 @@ class RegistrationService:
         if not telegram_ready:
             return False
         if self.requires_cloud_for_completion():
-            return current.is_complete
+            return self._has_cloud_completion_key(current)
         return True
+
+    def _has_cloud_completion_key(self, record: RegistrationModel) -> bool:
+        if record.has_cloud_completion_key:
+            return True
+        return any(
+            str(os.environ.get(spec.env_var, "") or "").strip()
+            for spec in PROVIDERS.values()
+            if spec.api_key_field != "telegram_bot_token"
+        )
 
     def save(self, groq_api_key: str, telegram_user_id: str, telegram_bot_token: str) -> RegistrationModel:
         payload = {

@@ -8,7 +8,12 @@ from ui.bridge.voice_bridge import VoiceBridge
 
 class _Settings:
     def __init__(self) -> None:
-        self.payload = {"wake_word_enabled": True, "voice_mode": "balance", "command_style": "one_shot"}
+        self.payload = {
+            "wake_word_enabled": True,
+            "allow_ai_after_wake": False,
+            "voice_mode": "balance",
+            "command_style": "one_shot",
+        }
 
     def get(self, key, default=None):  # noqa: ANN001
         return self.payload.get(key, default)
@@ -136,30 +141,22 @@ def test_voice_bridge_warms_up_once_and_starts_wake(monkeypatch):
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
     wake_ready = threading.Event()
-    voice_ready = threading.Event()
 
     def wake_warm() -> bool:
         services.wake.warm_up_calls += 1
         wake_ready.set()
         return True
 
-    def voice_warm() -> bool:
-        services.voice.warm_up_calls += 1
-        voice_ready.set()
-        return True
-
     services.wake.warm_up_model = wake_warm
-    services.voice.warm_up_local_stt_backend = voice_warm
 
     bridge.startWakeRuntime()
     assert wake_ready.wait(1.0)
-    assert voice_ready.wait(1.0)
 
     bridge.startWakeRuntime()
 
     assert services.wake.start_calls == 2
     assert services.wake.warm_up_calls == 1
-    assert services.voice.warm_up_calls == 1
+    assert services.voice.warm_up_calls == 0
 
 
 def test_voice_bridge_prewarm_refreshes_cached_status(monkeypatch):
@@ -217,6 +214,19 @@ def test_voice_bridge_marks_wake_transcription_with_wake_source() -> None:
     bridge._deliver_transcribed_text("открой ютуб")  # noqa: SLF001
 
     assert chat_bridge.received == [("открой ютуб", "wake")]
+
+
+def test_voice_bridge_round_trips_allow_ai_after_wake_setting() -> None:
+    services = _Services()
+    state = SimpleNamespace(status="Готов")
+    bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
+
+    assert bridge.allowAiAfterWake is False
+
+    bridge.setAllowAiAfterWake(True)
+
+    assert bridge.allowAiAfterWake is True
+    assert services.settings.payload["allow_ai_after_wake"] is True
 
 
 def test_voice_bridge_preserves_failure_note_through_finalize():
@@ -343,35 +353,27 @@ def test_voice_bridge_failed_warmup_can_retry_on_next_start():
     state = SimpleNamespace(status="Готов")
     bridge = VoiceBridge(state, services, chat_bridge=_ChatBridge())
     wake_ready = threading.Event()
-    voice_ready = threading.Event()
-    attempts = {"voice": 0}
+    attempts = {"wake": 0}
 
     def wake_warm() -> bool:
+        attempts["wake"] += 1
         services.wake.warm_up_calls += 1
+        if attempts["wake"] == 1:
+            return False
         wake_ready.set()
         return True
 
-    def voice_warm() -> bool:
-        attempts["voice"] += 1
-        services.voice.warm_up_calls += 1
-        if attempts["voice"] == 1:
-            return False
-        voice_ready.set()
-        return True
-
     services.wake.warm_up_model = wake_warm
-    services.voice.warm_up_local_stt_backend = voice_warm
 
     bridge.startWakeRuntime()
-    assert wake_ready.wait(1.0)
+    assert wake_ready.wait(0.2) is False
 
     wake_ready.clear()
     bridge.startWakeRuntime()
 
     assert wake_ready.wait(1.0)
-    assert voice_ready.wait(1.0)
     assert services.wake.start_calls == 2
-    assert services.voice.warm_up_calls == 2
+    assert services.wake.warm_up_calls == 2
 
 
 def test_voice_bridge_is_recording_does_not_force_lazy_voice_service():

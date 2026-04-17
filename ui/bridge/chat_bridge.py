@@ -39,8 +39,8 @@ class ChatBridge(QObject):
     thinkingLabelChanged = Signal()
     lastResponseHintChanged = Signal()
     saveHistoryEnabledChanged = Signal()
-    workerReplyReady = Signal(str, str, str)
-    workerStatusReady = Signal(str)
+    workerReplyReady = Signal(str, str, str, int)
+    workerStatusReady = Signal(str, int)
     catalogSnapshotReady = Signal(object, object)
 
     def __init__(self, state, services, app_bridge) -> None:
@@ -60,6 +60,7 @@ class ChatBridge(QObject):
         self._catalog_hydrating = False
         self._inflight_signatures: set[str] = set()
         self._recent_submissions: dict[str, float] = {}
+        self._history_generation = 0
         self._submit_lock = threading.Lock()
         self._dedupe_window_seconds = 1.0
         self._response_hint_timer = QTimer(self)
@@ -208,20 +209,30 @@ class ChatBridge(QObject):
     def clearHistory(self) -> None:
         if hasattr(self.services, "chat_history"):
             self.services.chat_history.clear()
+        self._history_generation += 1
         self._messages = [self._welcome_message()]
+        self._queue_items = []
         with self._submit_lock:
             self._inflight_signatures.clear()
             self._recent_submissions.clear()
         self._thinking = False
         self.thinkingChanged.emit()
+        self.queueChanged.emit()
         self._clear_wake_hint()
         self._set_status_stage("")
         self._set_last_response_hint("")
         self._initial_state_hydrated = True
+        self.state.status = "Готов"
         self.messagesChanged.emit()
 
-    def _resolve_ai_reply(self, text: str, signature: str, history_snapshot: list[dict[str, Any]] | None = None) -> None:
-        self.workerStatusReady.emit("Готовлю ответ ИИ…")
+    def _resolve_ai_reply(
+        self,
+        text: str,
+        signature: str,
+        history_snapshot: list[dict[str, Any]] | None = None,
+        generation: int = 0,
+    ) -> None:
+        self.workerStatusReady.emit("Готовлю ответ ИИ…", generation)
         history = history_snapshot if history_snapshot is not None else self._ai_history_snapshot()
         reply_hint = ""
         try:
@@ -230,7 +241,7 @@ class ChatBridge(QObject):
                 result = ai_service.generate_reply_result(
                     text,
                     history,
-                    status_callback=self.workerStatusReady.emit,
+                    status_callback=lambda status: self.workerStatusReady.emit(status, generation),
                 )
                 reply = result.text
                 reply_hint = self._format_ai_response_hint(result)
@@ -239,9 +250,17 @@ class ChatBridge(QObject):
         except Exception as exc:  # noqa: BLE001
             reply = f"ИИ временно недоступен: {type(exc).__name__}"
             reply_hint = ""
-        self.workerReplyReady.emit(reply, signature, reply_hint)
+        self.workerReplyReady.emit(reply, signature, reply_hint, generation)
 
-    def _append_assistant_message(self, text: str, signature: str = "", reply_hint: str = "") -> None:
+    def _append_assistant_message(
+        self,
+        text: str,
+        signature: str = "",
+        reply_hint: str = "",
+        generation: int = 0,
+    ) -> None:
+        if generation != self._history_generation:
+            return
         clean = _sanitize_ai_reply_text(text)
         if not clean and str(text or "").strip():
             clean = "Сейчас ответ не получился. Попробуйте ещё раз."
@@ -471,7 +490,9 @@ class ChatBridge(QObject):
             # Voice output must never block or break chat delivery.
             return
 
-    def _set_status_stage(self, text: str) -> None:
+    def _set_status_stage(self, text: str, generation: int | None = None) -> None:
+        if generation is not None and generation != self._history_generation:
+            return
         self._thinking_label = str(text or "").strip()
         self.thinkingLabelChanged.emit()
         if self._thinking_label:
@@ -530,7 +551,11 @@ class ChatBridge(QObject):
         self._set_status_stage(self._initial_ai_stage_label(route))
         ai_text = " ".join(route.commands).strip() if route is not None and route.commands else original_text
         snapshot = history_snapshot if history_snapshot is not None else self._ai_history_snapshot()
-        thread = threading.Thread(target=self._resolve_ai_reply, args=(ai_text, signature, snapshot), daemon=True)
+        thread = threading.Thread(
+            target=self._resolve_ai_reply,
+            args=(ai_text, signature, snapshot, self._history_generation),
+            daemon=True,
+        )
         thread.start()
 
     def _should_promote_local_route_to_ai(self, route) -> bool:  # noqa: ANN001

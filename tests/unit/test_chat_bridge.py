@@ -296,6 +296,51 @@ def test_chat_bridge_does_not_log_passive_wake_privacy_block() -> None:
     assert bridge.messages[1]["text"] == "Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."
 
 
+def test_chat_bridge_logs_wake_text_when_router_allows_ai_dialog(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ui.bridge.chat_bridge.threading.Thread",
+        lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
+    )
+    route = SimpleNamespace(kind="ai", commands=["обсуждаем проект и критику"], assistant_lines=[], queue_items=["обсуждаем проект и критику"], execution_result=None)
+    bridge, services = _bridge_for(route)
+
+    bridge.submitTranscribedText("обсуждаем проект и критику", source="wake")
+
+    assert services.command_router.received == [("обсуждаем проект и критику", "wake")]
+    assert bridge.messages[1]["role"] == "user"
+    assert bridge.messages[1]["text"] == "обсуждаем проект и критику"
+    assert bridge.messages[-1]["role"] == "assistant"
+    assert bridge.messages[-1]["text"] == "AI fallback: обсуждаем проект и критику"
+
+
+def test_chat_bridge_ignores_late_ai_reply_after_clear_history(monkeypatch) -> None:
+    captured: list[tuple[object, tuple[object, ...]]] = []
+
+    class _Thread:
+        def __init__(self, target, args, daemon) -> None:  # noqa: ANN001, D401
+            _ = daemon
+            captured.append((target, args))
+
+        def start(self) -> None:
+            return None
+
+    monkeypatch.setattr("ui.bridge.chat_bridge.threading.Thread", _Thread)
+    route = SimpleNamespace(kind="ai", commands=["one"], assistant_lines=[], queue_items=["one"], execution_result=None)
+    bridge, services = _bridge_for(route)
+
+    bridge.sendMessage("one")
+    assert len(captured) == 1
+
+    bridge.clearHistory()
+    target, args = captured[0]
+    target(*args)
+
+    assert len(bridge.messages) == 1
+    assert bridge.messages[0]["role"] == "assistant"
+    assert "JARVIS Unity" in bridge.messages[0]["text"]
+    assert services.ai.received == ["one"]
+
+
 def test_chat_bridge_snapshots_ai_history_per_submission(monkeypatch) -> None:
     captured: list[tuple[object, tuple[object, ...]]] = []
 

@@ -46,6 +46,10 @@ Rectangle {
                             event.accepted = true
                             return
                         }
+                        if (input.text.trim().length === 0) {
+                            event.accepted = true
+                            return
+                        }
                         root.submit(input.text)
                         input.clear()
                         event.accepted = true

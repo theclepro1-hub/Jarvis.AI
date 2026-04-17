@@ -247,6 +247,7 @@ class ServiceContainer:
                         self.ai,
                         self.pc_control,
                         reminder_provider=lambda: self.reminders,
+                        settings=self.settings,
                     )
         return self._command_router
 

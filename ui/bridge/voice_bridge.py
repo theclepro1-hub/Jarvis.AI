@@ -11,6 +11,7 @@ class VoiceBridge(QObject):
     modeChanged = Signal()
     commandStyleChanged = Signal()
     wakeWordEnabledChanged = Signal()
+    allowAiAfterWakeChanged = Signal()
     voiceResponseEnabledChanged = Signal()
     ttsEngineChanged = Signal()
     ttsOutputRoutingChanged = Signal()
@@ -116,6 +117,15 @@ class VoiceBridge(QObject):
         self.wakeWordEnabledChanged.emit()
         self.summaryChanged.emit()
         self.statusChanged.emit()
+
+    @Property(bool, notify=allowAiAfterWakeChanged)
+    def allowAiAfterWake(self) -> bool:
+        return bool(self.services.settings.get("allow_ai_after_wake", False))
+
+    @allowAiAfterWake.setter
+    def allowAiAfterWake(self, value: bool) -> None:
+        self.services.settings.set("allow_ai_after_wake", bool(value))
+        self.allowAiAfterWakeChanged.emit()
 
     @Property(bool, notify=voiceResponseEnabledChanged)
     def voiceResponseEnabled(self) -> bool:
@@ -326,6 +336,10 @@ class VoiceBridge(QObject):
     @Slot(bool)
     def setWakeWordEnabled(self, value: bool) -> None:
         self.wakeWordEnabled = value
+
+    @Slot(bool)
+    def setAllowAiAfterWake(self, value: bool) -> None:
+        self.allowAiAfterWake = value
 
     @Slot(bool)
     def setVoiceResponseEnabled(self, value: bool) -> None:
@@ -599,13 +613,10 @@ class VoiceBridge(QObject):
 
         def _worker() -> None:
             wake_backend = getattr(self.services, "wake", None)
-            voice_backend = getattr(self.services, "voice", None)
             warmup_ok = True
             try:
                 if wake_backend is not None and hasattr(wake_backend, "warm_up_model"):
                     warmup_ok = bool(wake_backend.warm_up_model()) and warmup_ok
-                if voice_backend is not None and hasattr(voice_backend, "warm_up_local_stt_backend"):
-                    warmup_ok = bool(voice_backend.warm_up_local_stt_backend()) and warmup_ok
             except Exception:
                 warmup_ok = False
             finally:

@@ -27,7 +27,10 @@ Rectangle {
 
     function updatePillText() {
         const status = settingsBridge.updateStatus
-        if (settingsBridge.updateCheckBusy) {
+        if (status.apply_in_progress || status.installer_running || status.status_code === "installer_started") {
+            return "Устанавливаю"
+        }
+        if (status.check_in_progress || settingsBridge.updateCheckBusy) {
             return "Проверяю"
         }
         if (status.last_error && status.last_error.length > 0) {
@@ -41,7 +44,22 @@ Rectangle {
 
     function updateHintText() {
         const status = settingsBridge.updateStatus
+        if (status.apply_in_progress || status.installer_running || status.status_code === "installer_started") {
+            return status.last_apply_message && status.last_apply_message.length > 0
+                   ? status.last_apply_message
+                   : (status.status_message && status.status_message.length > 0
+                      ? status.status_message
+                      : "Запускаю установку обновления.")
+        }
+        if (status.check_in_progress || settingsBridge.updateCheckBusy) {
+            return status.status_message && status.status_message.length > 0
+                   ? status.status_message
+                   : "Проверяю новый релиз на GitHub."
+        }
         if (status.last_error && status.last_error.length > 0) {
+            if (status.status_message && status.status_message.length > 0 && status.status_message !== status.last_error) {
+                return status.status_message
+            }
             return status.last_error
         }
         if (status.update_available && status.can_apply) {
@@ -72,7 +90,7 @@ Rectangle {
         height: implicitHeight
         implicitHeight: deleteAllDataLayout.implicitHeight + 56
         padding: 0
-        clip: true
+        clip: false
 
         background: Rectangle {
             radius: 28
@@ -140,27 +158,30 @@ Rectangle {
                 border.width: 1
                 implicitHeight: deleteAllDataActions.implicitHeight + 22
 
-                Row {
+                ColumnLayout {
                     id: deleteAllDataActions
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.rightMargin: 14
+                    anchors.fill: parent
+                    anchors.margins: 14
                     spacing: 12
 
                     SecondaryButton {
                         objectName: "deleteAllDataCancelButton"
+                        Layout.fillWidth: true
                         text: "Отмена"
                         onClicked: deleteAllDataConfirmPopup.close()
                     }
 
                     SecondaryButton {
                         objectName: "deleteAllDataConfirmButton"
+                        Layout.fillWidth: true
                         text: "Удалить без возврата"
                         danger: true
                         compact: false
                         onClicked: {
-                            deleteAllDataConfirmPopup.close()
-                            settingsBridge.deleteAllData()
+                            const result = settingsBridge.deleteAllData()
+                            if (result && result.ok) {
+                                deleteAllDataConfirmPopup.close()
+                            }
                         }
                     }
                 }

@@ -42,6 +42,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "voice_mode": "balance",
     "command_style": "one_shot",
     "wake_word_enabled": True,
+    "allow_ai_after_wake": False,
     "microphone_name": "Системный микрофон",
     "voice_output_name": "Системный вывод",
     "voice_response_enabled": False,

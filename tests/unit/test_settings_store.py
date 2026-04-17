@@ -68,6 +68,7 @@ def test_settings_store_defaults_cover_history_and_pinned_commands() -> None:
 
     assert payload["save_history_enabled"] is True
     assert payload["pinned_commands"] == []
+    assert payload["allow_ai_after_wake"] is False
 
 
 def test_settings_store_recovers_from_corrupt_json(monkeypatch, tmp_path) -> None:

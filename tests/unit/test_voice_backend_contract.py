@@ -262,7 +262,8 @@ def test_speech_capture_default_gate_stays_less_aggressive() -> None:
     assert config.end_threshold_ratio <= 0.68
 
 
-def test_stt_service_reports_missing_model_without_key(tmp_path):
+def test_stt_service_reports_missing_model_without_key(monkeypatch, tmp_path):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     settings = SettingsService(FakeStore())
     service = STTService(settings, local_model_path=tmp_path / "missing-model")
     service._faster_whisper_available = lambda: False  # noqa: SLF001
@@ -310,6 +311,25 @@ def test_stt_service_standard_route_prefers_local_faster_whisper(tmp_path):
     service = STTService(settings)
 
     assert service._resolved_stt_route() == ("local_faster_whisper", "groq_whisper")  # noqa: SLF001
+
+
+def test_stt_service_accepts_env_backed_groq_key(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "env-groq")
+    settings = SettingsService(FakeStore())
+    settings.set("stt_engine", "groq_whisper")
+    service = STTService(settings, local_model_path=tmp_path / "missing-model")
+    service._faster_whisper_available = lambda: False  # noqa: SLF001
+
+    assert service.status_text() == "Облачное распознавание готово"
+    assert service.can_transcribe() is True
+
+
+def test_stt_service_prefers_env_override_for_local_model(monkeypatch) -> None:
+    monkeypatch.setenv("JARVIS_UNITY_FASTER_WHISPER_MODEL", "medium")
+    settings = SettingsService(FakeStore())
+    service = STTService(settings)
+
+    assert service._faster_whisper_model_ref() == "medium"  # noqa: SLF001
 
 
 def test_stt_service_local_faster_whisper_uses_ru_prompt_and_vad_tuning(monkeypatch, tmp_path):

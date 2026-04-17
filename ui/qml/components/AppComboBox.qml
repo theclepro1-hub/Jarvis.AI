@@ -58,6 +58,7 @@ ComboBox {
         implicitWidth: width
         implicitHeight: Math.max(66, contentColumn.implicitHeight + topPadding + bottomPadding)
         highlighted: control.highlightedIndex === index
+        enabled: itemDelegate.itemAvailable
         opacity: itemDelegate.itemAvailable ? 1.0 : 0.68
 
         readonly property string itemTitle: {

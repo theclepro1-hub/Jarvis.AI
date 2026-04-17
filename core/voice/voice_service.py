@@ -384,7 +384,11 @@ class VoiceService:
 
         self.set_wake_runtime_status("transcribing", ready=False, detail="Распознаю команду")
         self.mark_wake_stt_started()
-        transcription = self._transcribe_with_cancel(capture.raw_audio, self._current_pipeline_id())
+        transcription = self._transcribe_with_cancel(
+            capture.raw_audio,
+            self._current_pipeline_id(),
+            wake_command=True,
+        )
         self.mark_wake_transcription_result(transcription)
         if transcription.ok:
             self.set_wake_runtime_status("routing", ready=False, detail="Команда распознана. Передаю в обработку")
@@ -501,7 +505,13 @@ class VoiceService:
         with self._pipeline_lock:
             return self._active_pipeline_id == pipeline_id
 
-    def _transcribe_with_cancel(self, raw_bytes: bytes, pipeline_id: int) -> TranscriptionResult:
+    def _transcribe_with_cancel(
+        self,
+        raw_bytes: bytes,
+        pipeline_id: int,
+        *,
+        wake_command: bool = False,
+    ) -> TranscriptionResult:
         if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
             return self._cancelled_transcription_result()
 
@@ -510,10 +520,16 @@ class VoiceService:
 
         def worker() -> None:
             try:
-                result_box["result"] = self.stt_service.transcribe_pcm_bytes(
-                    raw_bytes,
-                    cancel_event=self._manual_stop_event,
-                )
+                if wake_command:
+                    result_box["result"] = self.stt_service.transcribe_wake_command(
+                        raw_bytes,
+                        cancel_event=self._manual_stop_event,
+                    )
+                else:
+                    result_box["result"] = self.stt_service.transcribe_pcm_bytes(
+                        raw_bytes,
+                        cancel_event=self._manual_stop_event,
+                    )
             except Exception as exc:  # pragma: no cover - defensive path
                 result_box["result"] = TranscriptionResult(
                     status="stt_failed",

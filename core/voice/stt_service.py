@@ -198,6 +198,13 @@ class STTService:
             chunk_length=3,
         )
 
+    def transcribe_wake_command(
+        self,
+        raw_bytes: bytes,
+        cancel_event: threading.Event | None = None,
+    ) -> TranscriptionResult:
+        return self._transcribe_local_chain(raw_bytes, ("local_faster_whisper",), cancel_event)
+
     def _transcribe_auto(
         self,
         raw_bytes: bytes,
@@ -482,6 +489,9 @@ class STTService:
         return "local_faster_whisper"
 
     def _faster_whisper_model_ref(self) -> str:
+        env_override = str(os.environ.get("JARVIS_UNITY_FASTER_WHISPER_MODEL", "") or "").strip()
+        if env_override:
+            return env_override
         configured = str(self.settings.get("stt_local_model", DEFAULT_FASTER_WHISPER_MODEL)).strip()
         return configured or DEFAULT_FASTER_WHISPER_MODEL
 
@@ -541,7 +551,10 @@ class STTService:
 
     def _groq_key(self) -> str:
         registration = self.settings.get_registration()
-        return str(registration.get("groq_api_key", "")).strip()
+        configured = str(registration.get("groq_api_key", "")).strip()
+        if configured:
+            return configured
+        return str(os.environ.get("GROQ_API_KEY", "") or "").strip()
 
     def _assistant_policy(self):
         readiness = AssistantReadiness(

@@ -43,7 +43,8 @@ class FakeStore:
         self.payload = payload
 
 
-def test_voice_runtime_without_key_reports_not_connected():
+def test_voice_runtime_without_key_reports_not_connected(monkeypatch):
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     voice.stt_service._faster_whisper_available = lambda: False  # noqa: SLF001
@@ -313,7 +314,7 @@ def test_capture_after_wake_treats_filler_as_not_heard(monkeypatch):
     monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
     monkeypatch.setattr(
         voice.stt_service,
-        "transcribe_pcm_bytes",
+        "transcribe_wake_command",
         lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text="джарвис эээ", detail="ok", engine="stub"),
     )
 
@@ -338,7 +339,7 @@ def test_capture_after_wake_keeps_short_real_command(monkeypatch):
     monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
     monkeypatch.setattr(
         voice.stt_service,
-        "transcribe_pcm_bytes",
+        "transcribe_wake_command",
         lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text="джарвис ютуб", detail="ok", engine="stub"),
     )
 
@@ -362,7 +363,7 @@ def test_capture_after_wake_records_supplied_wake_backend(monkeypatch):
     monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
     monkeypatch.setattr(
         voice.stt_service,
-        "transcribe_pcm_bytes",
+        "transcribe_wake_command",
         lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text="джарвис открой ютуб", detail="ok", engine="stub"),
     )
 
@@ -427,7 +428,7 @@ def test_capture_after_wake_can_be_cancelled_during_transcription(monkeypatch):
             time.sleep(0.01)
         return TranscriptionResult(status="cancelled", detail="Запись остановлена.", engine="local_faster_whisper")
 
-    voice.stt_service.transcribe_pcm_bytes = fake_transcribe  # type: ignore[method-assign]
+    voice.stt_service.transcribe_wake_command = fake_transcribe  # type: ignore[method-assign]
 
     worker = threading.Thread(
         target=lambda: result_box.setdefault("result", voice.capture_after_wake_result(b"wake")),
@@ -443,6 +444,40 @@ def test_capture_after_wake_can_be_cancelled_during_transcription(monkeypatch):
     assert worker.is_alive() is False
     assert result.status == "cancelled"
     assert voice.runtime_status()["wakeWord"] == "Запись остановлена."
+
+
+def test_capture_after_wake_uses_local_only_transcription(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    calls = {"wake_command": 0, "default": 0}
+
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+
+    def fake_wake_command(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        _ = cancel_event
+        calls["wake_command"] += 1
+        return TranscriptionResult(status="ok", text="джарвис открой ютуб", detail="ok", engine="local_faster_whisper")
+
+    def fake_default(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        _ = cancel_event
+        calls["default"] += 1
+        return TranscriptionResult(status="ok", text="облако не должно вызываться", detail="ok", engine="groq_whisper")
+
+    voice.stt_service.transcribe_wake_command = fake_wake_command  # type: ignore[method-assign]
+    voice.stt_service.transcribe_pcm_bytes = fake_default  # type: ignore[method-assign]
+
+    result = voice.capture_after_wake_result(b"")
+
+    assert result.ok is True
+    assert result.text == "открой ютуб"
+    assert calls == {"wake_command": 1, "default": 0}
 
 
 def test_wake_capture_tuning_follows_assistant_mode() -> None:

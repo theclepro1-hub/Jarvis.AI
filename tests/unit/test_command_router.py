@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 
 from core.models.action_models import ActionOutcome, ExecutionPlan, ExecutionStep
 from core.reminders.reminder_service import ReminderService
@@ -138,15 +139,21 @@ class FakeAi:
         raise AssertionError("local command must not call LLM")
 
 
-def make_router(reminder_service=None) -> tuple[CommandRouter, FakeActions, FakePcControl]:
+def make_router(
+    reminder_service=None,
+    *,
+    allow_ai_after_wake: bool = False,
+) -> tuple[CommandRouter, FakeActions, FakePcControl]:
     actions = FakeActions()
     pc_control = FakePcControl(actions)
+    settings = SimpleNamespace(get=lambda key, default=None: allow_ai_after_wake if key == "allow_ai_after_wake" else default)
     router = CommandRouter(
         actions,
         BatchRouter(actions),
         FakeAi(),
         pc_control=pc_control,
         reminder_service=reminder_service,
+        settings=settings,
     )
     return router, actions, pc_control
 
@@ -647,6 +654,16 @@ def test_command_router_blocks_ai_fallback_for_passive_wake_speech() -> None:
     assert result.assistant_lines == ["Похоже на фоновую речь. Для голосового диалога нажмите кнопку микрофона."]
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_can_allow_ai_fallback_for_passive_wake_speech() -> None:
+    router, _actions, _pc_control = make_router(allow_ai_after_wake=True)
+
+    result = router.handle("как дела", source="wake")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела"]
+    assert result.execution_result is None
 
 
 def test_command_router_keeps_broken_command_as_local_clarification() -> None:
