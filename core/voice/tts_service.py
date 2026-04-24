@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import re
+import threading
 from dataclasses import dataclass
 
 from core.voice.voice_models import TTSResult
@@ -22,6 +24,10 @@ class TTSService:
 
     def __init__(self, settings_service) -> None:
         self.settings = settings_service
+        self._speak_lock = threading.Lock()
+        self._engine_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._active_engine = None
 
     def voice_response_enabled(self) -> bool:
         return bool(self.settings.get("voice_response_enabled", False))
@@ -104,47 +110,61 @@ class TTSService:
         return result or [self.DEFAULT_VOICE_LABEL]
 
     def speak(self, text: str, force: bool = False) -> TTSResult:
-        clean = text.strip()
-        if not clean:
+        with self._speak_lock:
+            self._stop_event.clear()
+            clean = text.strip()
+            if not clean:
+                return TTSResult(
+                    status="empty",
+                    message="Нечего озвучивать.",
+                    engine=self.tts_engine(),
+                    available=False,
+                    supports_output_device=self.can_route_output(),
+                )
+            if not force and not self.voice_response_enabled():
+                return TTSResult(
+                    status="disabled",
+                    message="Голосовые ответы выключены.",
+                    engine=self.tts_engine(),
+                    available=False,
+                    supports_output_device=self.can_route_output(),
+                )
+
+            output = self.normalize_output_selection(self.settings.get("voice_output_name", ""))
+            if output and output != self.DEFAULT_OUTPUT_LABEL and not self.can_route_output():
+                return TTSResult(
+                    status="unsupported_output",
+                    message="Выбор колонки сохранён, но голос пока говорит через системный вывод.",
+                    engine=self.tts_engine(),
+                    available=False,
+                    supports_output_device=False,
+                )
+
+            engine = self.tts_engine()
+            if engine == "system":
+                return self._speak_with_pyttsx3(clean)
+            if engine == "edge":
+                return self._speak_with_edge(clean)
+
             return TTSResult(
-                status="empty",
-                message="Нечего озвучивать.",
-                engine=self.tts_engine(),
+                status="unsupported",
+                message="Неизвестный движок голоса.",
+                engine=engine,
                 available=False,
                 supports_output_device=self.can_route_output(),
             )
-        if not force and not self.voice_response_enabled():
-            return TTSResult(
-                status="disabled",
-                message="Голосовые ответы выключены.",
-                engine=self.tts_engine(),
-                available=False,
-                supports_output_device=self.can_route_output(),
-            )
 
-        output = self.normalize_output_selection(self.settings.get("voice_output_name", ""))
-        if output and output != self.DEFAULT_OUTPUT_LABEL and not self.can_route_output():
-            return TTSResult(
-                status="unsupported_output",
-                message="Выбор колонки сохранён, но голос пока говорит через системный вывод.",
-                engine=self.tts_engine(),
-                available=False,
-                supports_output_device=False,
-            )
-
-        engine = self.tts_engine()
-        if engine == "system":
-            return self._speak_with_pyttsx3(clean)
-        if engine == "edge":
-            return self._speak_with_edge(clean)
-
-        return TTSResult(
-            status="unsupported",
-            message="Неизвестный движок голоса.",
-            engine=engine,
-            available=False,
-            supports_output_device=self.can_route_output(),
-        )
+    def stop(self) -> bool:
+        self._stop_event.set()
+        with self._engine_lock:
+            engine = self._active_engine
+        if engine is None:
+            return False
+        try:
+            engine.stop()
+        except Exception:
+            return False
+        return True
 
     def test_voice(self, text: str | None = None) -> TTSResult:
         return self.speak(text or self.DEFAULT_TEST_TEXT, force=True)
@@ -165,7 +185,7 @@ class TTSService:
     def _speak_with_pyttsx3(self, text: str) -> TTSResult:
         if self._module_available("win32com.client"):
             result = self._speak_with_sapi(text)
-            if result.status != "failed":
+            if result.status != "failed" or self._has_custom_output_selected():
                 return result
 
         if not self._module_available("pyttsx3"):
@@ -181,6 +201,8 @@ class TTSService:
             import pyttsx3  # type: ignore[import-not-found]
 
             tts = pyttsx3.init()
+            with self._engine_lock:
+                self._active_engine = tts
             tts.setProperty("rate", self.tts_rate())
             tts.setProperty("volume", max(0.0, min(1.0, self.tts_volume() / 100)))
             selected_voice = self.tts_voice_name()
@@ -192,6 +214,14 @@ class TTSService:
                         break
             tts.say(text)
             tts.runAndWait()
+            if self._stop_event.is_set():
+                return TTSResult(
+                    status="interrupted",
+                    message="Озвучка остановлена.",
+                    engine="system",
+                    available=True,
+                    supports_output_device=self.can_route_output(),
+                )
             return TTSResult(
                 status="ok",
                 message="Голос JARVIS проверен.",
@@ -207,6 +237,10 @@ class TTSService:
                 available=False,
                 supports_output_device=self.can_route_output(),
             )
+        finally:
+            with self._engine_lock:
+                if self._active_engine is not None:
+                    self._active_engine = None
 
     def _speak_with_sapi(self, text: str) -> TTSResult:
         try:
@@ -227,7 +261,19 @@ class TTSService:
                     )
                 voice.Rate = self._sapi_rate()
                 voice.Volume = max(0, min(100, self.tts_volume()))
-                voice.Speak(text)
+                voice.Speak(text, 1)
+                while not self._stop_event.is_set():
+                    if voice.WaitUntilDone(100):
+                        break
+                if self._stop_event.is_set():
+                    voice.Speak("", 2)
+                    return TTSResult(
+                        status="interrupted",
+                        message="Озвучка остановлена.",
+                        engine="system",
+                        available=True,
+                        supports_output_device=self.can_route_output(),
+                    )
             finally:
                 pythoncom.CoUninitialize()
             return TTSResult(
@@ -282,14 +328,50 @@ class TTSService:
         if not selected or selected == self.DEFAULT_OUTPUT_LABEL:
             return True
         selected_key = selected.casefold()
+        selected_device_key = self._audio_device_key(selected)
         outputs = voice.GetAudioOutputs()
         for index in range(outputs.Count):
             token = outputs.Item(index)
             description = str(token.GetDescription())
-            if selected_key in description.casefold() or description.casefold() in selected_key:
+            description_key = description.casefold()
+            description_device_key = self._audio_device_key(description)
+            if (
+                selected_key in description_key
+                or description_key in selected_key
+                or (
+                    selected_device_key
+                    and description_device_key
+                    and (
+                        selected_device_key == description_device_key
+                        or selected_device_key in description_device_key
+                        or description_device_key in selected_device_key
+                    )
+                )
+            ):
                 voice.AudioOutput = token
                 return True
         return False
+
+    def _has_custom_output_selected(self) -> bool:
+        selected = self.normalize_output_selection(self.settings.get("voice_output_name", ""))
+        return bool(selected and selected != self.DEFAULT_OUTPUT_LABEL)
+
+    def _audio_device_key(self, value: str) -> str:
+        cleaned = str(value or "").casefold()
+        if "pro x" in cleaned:
+            return "logitech pro x"
+        if "g435" in cleaned:
+            return "g435"
+        cleaned = re.sub(r"\(.*?\)", " ", cleaned)
+        cleaned = re.sub(r"[^0-9a-zа-яё]+", " ", cleaned)
+        cleaned = re.sub(
+            r"\b(microphone|микрофон|input|output|speaker|speakers|динамики|headphones|"
+            r"наушники|гарнитура|гарнитуры|headset|primary|driver|system|системный|по|"
+            r"умолчанию|audio|hd|render|capture)\b",
+            " ",
+            cleaned,
+        )
+        return re.sub(r"\s+", " ", cleaned).strip()
 
     def _sapi_rate(self) -> int:
         return max(-10, min(10, round((self.tts_rate() - 185) / 14)))

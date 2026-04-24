@@ -286,6 +286,44 @@ def _wheel(app: QGuiApplication, window, obj: QObject, delta_y: int) -> None:
     _pump(app, 120)
 
 
+def _distance_to_bottom(list_view: QObject) -> float:
+    return float(list_view.property("contentHeight")) - (
+        float(list_view.property("contentY")) + float(list_view.property("height"))
+    )
+
+
+def _is_near_bottom(list_view: QObject, slack: float = 48.0) -> bool:
+    return _distance_to_bottom(list_view) <= slack
+
+
+def _navigate_to(app: QGuiApplication, window, runtime, screen: str) -> None:  # noqa: ANN001
+    _click(app, window, _find(window, f"navButton_{screen}"))
+    _wait_for(app, lambda: runtime.state.currentScreen == screen)
+
+
+def _seed_chat_history(runtime, count: int = 30) -> None:  # noqa: ANN001
+    for index in range(count):
+        runtime.chat_bridge._append_message(  # noqa: SLF001 - deterministic UI history seed.
+            "assistant" if index % 2 == 0 else "user",
+            f"История {index}: достаточно длинная строка для стабильной прокрутки списка сообщений.",
+        )
+
+
+def _wait_layout_settled(app: QGuiApplication, list_view: QObject, attempts: int = 6) -> None:
+    previous = None
+    stable = 0
+    for _ in range(attempts):
+        current = (float(list_view.property("contentY")), float(list_view.property("contentHeight")))
+        if previous == current:
+            stable += 1
+            if stable >= 2:
+                return
+        else:
+            stable = 0
+        previous = current
+        _pump(app, 120)
+
+
 @pytest.fixture()
 def ui_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
@@ -558,7 +596,7 @@ def test_settings_updates_section_stays_last(ui_runtime) -> None:
     assert updates_index > appearance_index
 
 
-def test_settings_ai_profile_menu_excludes_local_ai(ui_runtime) -> None:
+def test_settings_ai_profile_menu_includes_local_ai(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
     _click(app, window, _find(window, "registrationSkipButton"))
@@ -569,11 +607,10 @@ def test_settings_ai_profile_menu_excludes_local_ai(ui_runtime) -> None:
     settings_screen = Path(__file__).resolve().parents[2] / "ui" / "qml" / "screens" / "SettingsScreen.qml"
     source = settings_screen.read_text(encoding="utf-8")
 
-    assert 'case "local"' not in source
-    assert 'key: "local"' not in source
-    assert 'title: "Локально"' not in source
-    assert 'локальный ИИ подключён' not in source
-
+    assert 'case "local"' in source
+    assert 'key: "local"' in source
+    assert 'title: "Локально"' in source
+    assert "Only local commands" not in source
 
 def test_scroll_views_accept_scroll_input(ui_runtime) -> None:
     app, runtime, window = ui_runtime
@@ -646,39 +683,150 @@ def test_chat_viewport_does_not_drift_horizontally_after_theme_change(ui_runtime
     assert list_view.property("contentX") == 0
 
 
-def test_chat_autoscroll_follows_new_user_and_assistant_messages(ui_runtime) -> None:
+def test_chat_keeps_bottom_when_already_at_bottom_on_append(ui_runtime) -> None:
     app, runtime, window = ui_runtime
 
     _click(app, window, _find(window, "registrationSkipButton"))
     _wait_for(app, lambda: runtime.state.currentScreen == "chat")
 
-    for index in range(18):
-        role = "assistant" if index % 2 == 0 else "user"
-        runtime.chat_bridge._append_message(  # noqa: SLF001 - regression coverage for UI follow-bottom wiring.
-            role,
-            (
-                f"Сообщение {index}: длинный текст для проверки автоскролла. "
-                "Он должен держать список внизу после каждого нового ответа или запроса."
-            ),
-        )
-
-    _pump(app, 260)
+    _seed_chat_history(runtime, 24)
+    _pump(app, 320)
     list_view = _wait_for_object(app, window, "chatListView")
-    bottom_y = float(list_view.property("contentY"))
-
-    _wheel(app, window, list_view, 260)
-    scrolled_y = float(list_view.property("contentY"))
-    assert scrolled_y < bottom_y
+    _wait_layout_settled(app, list_view)
+    assert _is_near_bottom(list_view)
 
     runtime.chat_bridge._append_message("user", "новое сообщение пользователя")  # noqa: SLF001
     _pump(app, 260)
-    after_user = float(list_view.property("contentY"))
-    assert after_user >= bottom_y - 2
+    assert _is_near_bottom(list_view)
 
     runtime.chat_bridge._append_message("assistant", "новый ответ JARVIS")  # noqa: SLF001
     _pump(app, 260)
+    assert _is_near_bottom(list_view)
+
+
+def test_chat_manual_scroll_is_not_overridden_by_new_appends(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+
+    _seed_chat_history(runtime, 30)
+    _pump(app, 360)
+    list_view = _wait_for_object(app, window, "chatListView")
+    bottom_y = float(list_view.property("contentY"))
+
+    _wheel(app, window, list_view, 300)
+    _pump(app, 180)
+    scrolled_y = float(list_view.property("contentY"))
+    assert scrolled_y < bottom_y
+
+    runtime.chat_bridge._append_message("user", "новый запрос не должен насильно тянуть список вниз")  # noqa: SLF001
+    runtime.chat_bridge._append_message("assistant", "поздний ответ не должен тянуть список вниз")  # noqa: SLF001
+    _pump(app, 320)
+
     after_assistant = float(list_view.property("contentY"))
-    assert after_assistant >= bottom_y - 2
+    assert after_assistant <= scrolled_y + 8
+
+
+def test_chat_scroll_state_persists_across_settings_roundtrip(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _seed_chat_history(runtime, 34)
+    _pump(app, 360)
+
+    list_view = _wait_for_object(app, window, "chatListView")
+    _wheel(app, window, list_view, 360)
+    _pump(app, 180)
+    saved_y = float(list_view.property("contentY"))
+
+    _navigate_to(app, window, runtime, "settings")
+    _navigate_to(app, window, runtime, "chat")
+    restored = _wait_for_object(app, window, "chatListView")
+    _wait_layout_settled(app, restored)
+
+    assert abs(float(restored.property("contentY")) - saved_y) <= 8
+
+
+def test_chat_hidden_appends_preserve_manual_position_when_unloaded(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _seed_chat_history(runtime, 34)
+    _pump(app, 360)
+
+    list_view = _wait_for_object(app, window, "chatListView")
+    _wheel(app, window, list_view, 360)
+    _pump(app, 180)
+    saved_y = float(list_view.property("contentY"))
+
+    _navigate_to(app, window, runtime, "settings")
+    runtime.chat_bridge._append_message("assistant", "скрытый ответ не должен менять ручную позицию")  # noqa: SLF001
+    runtime.chat_bridge._append_message("assistant", "ещё один скрытый ответ")  # noqa: SLF001
+    _pump(app, 180)
+    _navigate_to(app, window, runtime, "chat")
+    restored = _wait_for_object(app, window, "chatListView")
+    _wait_layout_settled(app, restored)
+
+    assert abs(float(restored.property("contentY")) - saved_y) <= 8
+
+
+def test_chat_hidden_appends_restore_bottom_when_unloaded_from_bottom(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _seed_chat_history(runtime, 30)
+    _pump(app, 360)
+    list_view = _wait_for_object(app, window, "chatListView")
+    _wait_layout_settled(app, list_view)
+    assert _is_near_bottom(list_view)
+
+    _navigate_to(app, window, runtime, "settings")
+    runtime.chat_bridge._append_message("assistant", "скрытый ответ должен держать низ")  # noqa: SLF001
+    _pump(app, 180)
+    _navigate_to(app, window, runtime, "chat")
+    restored = _wait_for_object(app, window, "chatListView")
+    _wait_layout_settled(app, restored)
+
+    assert _is_near_bottom(restored)
+
+
+def test_chat_autoscroll_survives_heavy_execution_card_layout(ui_runtime) -> None:
+    app, runtime, window = ui_runtime
+
+    _click(app, window, _find(window, "registrationSkipButton"))
+    _wait_for(app, lambda: runtime.state.currentScreen == "chat")
+    _wait_for_object(app, window, "chatListView")
+
+    for index in range(12):
+        runtime.chat_bridge._append_message(  # noqa: SLF001 - deterministic UI stress input.
+            "assistant" if index % 2 else "user",
+            f"Предыдущее сообщение {index}: держим список достаточно длинным для скролла.",
+        )
+    runtime.chat_bridge._append_message(  # noqa: SLF001
+        "assistant",
+        "Выполняю много действий",
+        message_type="execution",
+        title="Выполняю много действий",
+        steps=[
+            {
+                "title": f"Длинный шаг {index}: проверка позднего пересчёта высоты карточки выполнения",
+                "status": "готово",
+            }
+            for index in range(14)
+        ],
+    )
+
+    _pump(app, 700)
+    list_view = _wait_for_object(app, window, "chatListView")
+    distance_to_bottom = float(list_view.property("contentHeight")) - (
+        float(list_view.property("contentY")) + float(list_view.property("height"))
+    )
+
+    assert distance_to_bottom <= 48
 
 
 def test_chat_execution_card_renders_steps(ui_runtime) -> None:
@@ -687,9 +835,12 @@ def test_chat_execution_card_renders_steps(ui_runtime) -> None:
     _click(app, window, _find(window, "registrationSkipButton"))
     _wait_for(app, lambda: runtime.state.currentScreen == "chat")
 
-    runtime.chat_bridge.appendExecutionResult(
+    runtime.chat_bridge._append_message(  # noqa: SLF001
+        "assistant",
         "Выполняю 2 действия: Музыка, YouTube",
-        [
+        message_type="execution",
+        title="Выполняю 2 действия: Музыка, YouTube",
+        steps=[
             {"title": "Музыка", "status": "готово"},
             {"title": "YouTube", "status": "в очереди"},
         ],

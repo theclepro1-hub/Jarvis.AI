@@ -56,12 +56,21 @@ def test_wake_service_detects_wake_word_in_partial_payload():
     assert wake._contains_wake(alias_payload, partial=True) is True  # noqa: SLF001
 
 
-def test_wake_service_keeps_cleanup_only_aliases_out_of_strict_wake_detection():
+def test_wake_service_detects_extended_strict_aliases():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
     wake = WakeService(settings, voice)
 
     payload = json.dumps({"partial": "гарви с открой steam"}, ensure_ascii=False)
+    assert wake._contains_wake(payload, partial=True) is True  # noqa: SLF001
+
+
+def test_wake_service_does_not_overtrigger_on_cleanup_only_alias():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+
+    payload = json.dumps({"partial": "да любишь открой steam"}, ensure_ascii=False)
     assert wake._contains_wake(payload, partial=True) is False  # noqa: SLF001
 
 
@@ -72,6 +81,41 @@ def test_wake_service_ignores_non_matching_payload():
 
     payload = json.dumps({"text": "просто разговор"}, ensure_ascii=False)
     assert wake._contains_wake(payload) is False  # noqa: SLF001
+
+
+def test_wake_service_accepts_final_wake_payload_while_tts_is_speaking_for_barge_in():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    voice._speaking_count = 1  # noqa: SLF001
+
+    payload = json.dumps({"text": "джарвис открой steam"}, ensure_ascii=False)
+
+    assert wake._contains_wake(payload, barge_in=True) is True  # noqa: SLF001
+
+
+def test_wake_service_rejects_partial_barge_in_while_tts_is_speaking():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    voice._speaking_count = 1  # noqa: SLF001
+
+    payload = json.dumps({"partial": "джарвис открой steam"}, ensure_ascii=False)
+
+    assert wake._contains_wake(payload, partial=True, barge_in=True) is False  # noqa: SLF001
+
+
+def test_wake_service_barge_in_interrupts_tts():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    calls: list[str] = []
+
+    voice.interrupt_tts = lambda: calls.append("interrupt") or True  # type: ignore[method-assign]
+
+    wake._interrupt_tts_for_barge_in()  # noqa: SLF001
+
+    assert calls == ["interrupt"]
 
 
 def test_wake_service_reports_missing_model_without_network(tmp_path, monkeypatch):
@@ -135,6 +179,19 @@ def test_wake_service_uses_local_appdata_for_user_model_path(monkeypatch, tmp_pa
     wake = WakeService(settings, voice)
 
     assert wake.user_model_path == tmp_path / "JarvisAi_Unity" / "models" / "vosk-model-small-ru-0.22"
+
+
+def test_wake_service_keeps_explicit_model_path_during_refresh(tmp_path, monkeypatch):
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    explicit_path = tmp_path / "explicit-model"
+    wake.model_path = explicit_path
+    monkeypatch.setattr("core.voice.wake_service.resolve_vosk_model_path", lambda: tmp_path / "auto-model")
+
+    wake._refresh_model_path()  # noqa: SLF001
+
+    assert wake.model_path == explicit_path
 
 
 def test_wake_service_reports_transcribing_status_truthfully():

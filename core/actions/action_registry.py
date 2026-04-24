@@ -154,8 +154,6 @@ SYSTEM_ACTION_TITLES = {
     "logoff": "Выхожу из системы",
     "lock": "Блокирую экран",
 }
-SYSTEM_ACTION_CONFIRM_REQUIRED: set[str] = set()
-SYSTEM_ACTION_CONFIRM_PROMPTS: dict[str, str] = {}
 SYSTEM_POLITE_PREFIXES = ("пожалуйста ", "ну ", "давай ", "jarvis ", "джарвис ")
 
 
@@ -170,7 +168,7 @@ class ActionRegistry:
             {
                 "id": "youtube",
                 "title": "YouTube",
-                "aliases": ["youtube", "ютуб", "ютубе", "ютюб", "ютубчик", "you tube"],
+                "aliases": ["youtube", "ютуб", "ютубе", "ютюб", "ютубчик", "туб", "you tube"],
                 "kind": "url",
                 "target": "https://www.youtube.com",
                 "category": "web",
@@ -194,7 +192,7 @@ class ActionRegistry:
             {
                 "id": "steam",
                 "title": "Steam",
-                "aliases": ["steam", "стим", "стиме", "стимчик", "с тим"],
+                "aliases": ["steam", "стим", "стиме", "стимчик", "с тим", "тим"],
                 "kind": "uri",
                 "target": "steam://open/main",
                 "category": "launcher",
@@ -386,8 +384,6 @@ class ActionRegistry:
                 "mode": "power",
                 "title": SYSTEM_ACTION_TITLES[action],
                 "detail": "Системная команда отправлена.",
-                "requires_confirmation": False,
-                "confirmation_prompt": "",
             }
 
         if any(normalized.startswith(f"{verb} ") for verb in OPEN_VERBS):
@@ -596,15 +592,6 @@ class ActionRegistry:
         custom_apps = [item for item in self.settings.get("custom_apps", []) if item.get("id") != app_id]
         self.settings.set("custom_apps", custom_apps)
         self.catalog = self._merged_catalog()
-
-    def discover_apps(self) -> list[dict[str, str]]:
-        existing = self._existing_keys()
-        candidates = []
-        for candidate in self.discovery.discover():
-            if self._candidate_exists(candidate, existing) or self._is_windows_music_candidate(candidate):
-                continue
-            candidates.append(candidate.to_dict())
-        return candidates[:12]
 
     def scan_and_import_apps(self) -> dict[str, object]:
         existing = self._existing_keys()

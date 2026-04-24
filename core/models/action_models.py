@@ -46,10 +46,6 @@ class ExecutionPlan:
     question: str = ""
     requires_ai: bool = False
 
-    @property
-    def is_empty(self) -> bool:
-        return not self.steps and not self.question
-
 
 @dataclass(slots=True)
 class ExecutionResult:

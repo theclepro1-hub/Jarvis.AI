@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtQuickControls2 import QQuickStyle
 from PySide6.QtWidgets import QApplication
 
 from core.app_identity import WINDOWS_APP_DISPLAY_NAME, WINDOWS_APP_USER_MODEL_ID, WINDOWS_APP_VERSION
@@ -41,6 +42,9 @@ def _set_windows_app_user_model_id() -> None:
 def bootstrap() -> int:
     os.environ.setdefault("JARVIS_UNITY_BOOT_T0_NS", str(time.perf_counter_ns()))
     _boot_log("bootstrap:begin")
+    if not os.environ.get("QT_QUICK_CONTROLS_STYLE"):
+        os.environ["QT_QUICK_CONTROLS_STYLE"] = "Basic"
+        QQuickStyle.setStyle("Basic")
     QGuiApplication.setOrganizationName("theclepro1")
     QGuiApplication.setOrganizationDomain("jarvisai.unity")
     QGuiApplication.setApplicationName(WINDOWS_APP_DISPLAY_NAME)

@@ -44,7 +44,7 @@ Rectangle {
                     Layout.preferredWidth: 420
                     model: voiceBridge.microphoneDeviceModels
                     textRole: "name"
-                    currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedMicrophone))
+                    currentIndex: model.findIndex(item => item.name === voiceBridge.selectedMicrophone)
                     onActivated: (index) => voiceBridge.setMicrophone(model[index].name)
                 }
             }
@@ -64,7 +64,7 @@ Rectangle {
                     opacity: enabled ? 1.0 : 0.48
                     model: voiceBridge.outputDeviceModels
                     textRole: "name"
-                    currentIndex: Math.max(0, model.findIndex(item => item.name === voiceBridge.selectedOutputDevice))
+                    currentIndex: model.findIndex(item => item.name === voiceBridge.selectedOutputDevice)
                     onActivated: (index) => voiceBridge.setOutputDevice(model[index].name)
                 }
 
@@ -180,82 +180,6 @@ Rectangle {
                     objectName: "wakeWordSwitch"
                     checked: voiceBridge.wakeWordEnabled
                     onToggled: voiceBridge.setWakeWordEnabled(checked)
-                }
-            }
-
-            SettingRow {
-                Layout.fillWidth: true
-                title: "Статус"
-                description: "Короткая сводка по wake-слову, распознаванию и озвучке."
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    Text {
-                        text: "Слово активации: " + voiceBridge.runtimeStatus["wakeWord"]
-                        color: Theme.Colors.text
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.body
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Распознавание речи: " + voiceBridge.runtimeStatus["command"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Озвучка: " + voiceBridge.runtimeStatus["tts"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Модуль активации: " + voiceBridge.runtimeStatus["wakeModel"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: "Готовность движка: " + voiceBridge.runtimeStatus["model"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        visible: voiceBridge.voiceTimingsSummary.length > 0
-                        text: "Последний wake-сценарий: " + voiceBridge.voiceTimingsSummary
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        visible: voiceBridge.voiceTimings["transcript"] && String(voiceBridge.voiceTimings["transcript"]).length > 0
-                        text: "Что услышал: " + voiceBridge.voiceTimings["transcript"]
-                        color: Theme.Colors.textSoft
-                        font.family: Theme.Typography.bodyFamily
-                        font.pixelSize: Theme.Typography.small
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
                 }
             }
 

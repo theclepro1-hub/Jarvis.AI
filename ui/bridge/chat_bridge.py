@@ -12,11 +12,14 @@ from core.ai.ai_service import SUPPORTED_AI_MODES
 
 
 class ChatBridge(QObject):
+    SCROLL_BOTTOM_THRESHOLD = 48.0
+
     messagesChanged = Signal()
     quickActionsChanged = Signal()
     appCatalogChanged = Signal()
     queueChanged = Signal()
     messageAppended = Signal(str)
+    chatScrollStateChanged = Signal()
     thinkingChanged = Signal()
     thinkingLabelChanged = Signal()
     lastResponseHintChanged = Signal()
@@ -40,6 +43,10 @@ class ChatBridge(QObject):
         self._initial_state_hydrated = False
         self._catalog_hydrated = False
         self._catalog_hydrating = False
+        self._chat_scroll_mode = "bottom"
+        self._chat_scroll_y = 0.0
+        self._chat_scroll_revision = 0
+        self._chat_view_attached = False
         self._inflight_signatures: set[str] = set()
         self._recent_submissions: dict[str, float] = {}
         self._submit_lock = threading.Lock()
@@ -70,6 +77,18 @@ class ChatBridge(QObject):
     @Property("QVariantList", notify=queueChanged)
     def queueItems(self) -> list[str]:
         return self._queue_items
+
+    @Property(str, notify=chatScrollStateChanged)
+    def chatScrollMode(self) -> str:
+        return self._chat_scroll_mode
+
+    @Property(float, notify=chatScrollStateChanged)
+    def chatScrollY(self) -> float:
+        return self._chat_scroll_y
+
+    @Property(int, notify=chatScrollStateChanged)
+    def chatScrollRevision(self) -> int:
+        return self._chat_scroll_revision
 
     @Property(bool, notify=thinkingChanged)
     def thinking(self) -> bool:
@@ -157,6 +176,26 @@ class ChatBridge(QObject):
             return
         self.sendMessage(f"открой {action['title']}")
 
+    @Slot()
+    def chatViewAttached(self) -> None:
+        self._chat_view_attached = True
+
+    @Slot()
+    def chatViewDetached(self) -> None:
+        self._chat_view_attached = False
+
+    @Slot(float, float, float, int)
+    def chatViewSnapshot(self, content_y: float, content_height: float, viewport_height: float, message_count: int) -> None:
+        if message_count <= 0:
+            return
+        max_y = max(0.0, float(content_height) - float(viewport_height))
+        clean_y = max(0.0, min(float(content_y), max_y))
+        distance_to_bottom = float(content_height) - (clean_y + float(viewport_height))
+        if distance_to_bottom <= self.SCROLL_BOTTOM_THRESHOLD:
+            self._set_chat_scroll_state("bottom", 0.0)
+            return
+        self._set_chat_scroll_state("manual", clean_y)
+
     @Slot(str)
     def submitTranscribedText(self, text: str) -> None:
         self._submit_message(text, source="voice")
@@ -166,18 +205,6 @@ class ChatBridge(QObject):
         if self._is_system_noise(text):
             return
         self._append_message("assistant", text)
-        self._clear_wake_hint()
-        self.state.status = "Готов"
-
-    @Slot(str, "QVariantList")
-    def appendExecutionResult(self, title: str, steps: list[dict[str, Any]]) -> None:
-        self._append_message(
-            "assistant",
-            title,
-            message_type="execution",
-            title=title,
-            steps=steps,
-        )
         self._clear_wake_hint()
         self.state.status = "Готов"
 
@@ -195,10 +222,11 @@ class ChatBridge(QObject):
         self._set_status_stage("")
         self._set_last_response_hint("")
         self._initial_state_hydrated = True
+        self._set_chat_scroll_state("bottom", 0.0, force_revision=True)
         self.messagesChanged.emit()
 
     def _resolve_ai_reply(self, text: str, signature: str, history_snapshot: list[dict[str, Any]] | None = None) -> None:
-        self.workerStatusReady.emit("Готовлю ответ ИИ…")
+        self.workerStatusReady.emit("Готовлю ответ ИИ...")
         history = history_snapshot if history_snapshot is not None else self._ai_history_snapshot()
         reply_hint = ""
         try:
@@ -320,18 +348,18 @@ class ChatBridge(QObject):
             clean = str(text).strip()
             if not clean:
                 continue
-            steps.append({"title": clean, "status": "готово"})
+            steps.append({"title": clean, "status": "Готово"})
         return steps
 
     def _step_status_label(self, status: str) -> str:
         return {
-            "done": "готово",
-            "failed": "ошибка",
-            "sent_unverified": "отправлено",
-            "needs_input": "нужно уточнение",
-            "needs_ai": "нужен разбор",
-            "pending": "ожидает",
-        }.get(status, status or "готово")
+            "done": "Готово",
+            "failed": "Ошибка",
+            "sent_unverified": "Отправлено",
+            "needs_input": "Нужно уточнение",
+            "needs_ai": "Нужен разбор",
+            "pending": "Ожидает",
+        }.get(status, status or "Готово")
 
     def _append_message(
         self,
@@ -355,8 +383,25 @@ class ChatBridge(QObject):
         ]
         if self._should_persist_history():
             self.services.chat_history.save(self._messages)
+        self._note_message_for_scroll_state()
         self.messagesChanged.emit()
         self.messageAppended.emit(role)
+
+    def _note_message_for_scroll_state(self) -> None:
+        if self._chat_scroll_mode == "bottom" or not self._chat_view_attached:
+            self._chat_scroll_revision += 1
+            self.chatScrollStateChanged.emit()
+
+    def _set_chat_scroll_state(self, mode: str, scroll_y: float, *, force_revision: bool = False) -> None:
+        normalized_mode = "manual" if mode == "manual" else "bottom"
+        normalized_y = max(0.0, float(scroll_y)) if normalized_mode == "manual" else 0.0
+        changed = self._chat_scroll_mode != normalized_mode or abs(self._chat_scroll_y - normalized_y) > 0.5
+        if not changed and not force_revision:
+            return
+        self._chat_scroll_mode = normalized_mode
+        self._chat_scroll_y = normalized_y
+        self._chat_scroll_revision += 1
+        self.chatScrollStateChanged.emit()
 
     def _time_string(self) -> str:
         return datetime.now().strftime("%H:%M")
@@ -476,12 +521,14 @@ class ChatBridge(QObject):
             mode = self._normalize_ai_mode(settings.get("ai_mode", "auto"))
             provider = str(settings.get("ai_provider", "auto") or "auto").strip().lower()
         if route is not None and getattr(route, "execution_result", None) is not None:
-            return "Локально не хватило уверенности, подключаю ИИ…"
+            return "Локально не хватило уверенности, подключаю ИИ..."
+        if mode == "local":
+            return "Локальный профиль: облачные провайдеры отключены."
         if mode == "fast" or provider in {"groq", "cerebras"}:
-            return "Быстрый режим: готовлю ответ…"
+            return "Быстрый режим: готовлю ответ..."
         if mode == "quality" or provider == "gemini":
-            return "Режим качества: готовлю ответ…"
-        return "Готовлю ответ ИИ…"
+            return "Режим качества: готовлю ответ..."
+        return "Готовлю ответ ИИ..."
 
     def _format_ai_response_hint(self, result) -> str:  # noqa: ANN001
         provider_label = str(getattr(result, "provider_label", "") or "").strip()
@@ -493,6 +540,7 @@ class ChatBridge(QObject):
             "fast": "Быстро",
             "quality": "Качество",
             "auto": "Авто",
+            "local": "Локально",
         }.get(mode, "ИИ")
         hint = f"{mode_label}: {provider_label} · {elapsed_ms / 1000.0:.1f} с"
         if bool(getattr(result, "fallback_used", False)):
@@ -549,6 +597,7 @@ class ChatBridge(QObject):
         self._initial_state_hydrated = True
         if len(self._messages) == 1 and self._messages[0].get("role") == "assistant":
             self._messages = self._load_history()
+            self._set_chat_scroll_state("bottom", 0.0, force_revision=True)
             self.messagesChanged.emit()
 
     def _hydrate_initial_catalog(self) -> None:

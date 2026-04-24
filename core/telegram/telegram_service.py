@@ -476,14 +476,6 @@ class TelegramService:
             return f"{type(exc).__name__}: {message}"
         return type(exc).__name__
 
-    def _is_seen_update(self, update_id: int) -> bool:
-        with self._offset_lock:
-            return update_id in self._completed_update_ids_set
-
-    def _remember_seen_update(self, update_id: int) -> None:
-        with self._offset_lock:
-            self._completed_update_ids_set.add(update_id)
-
     def _should_acknowledge_result(self, result: TelegramDispatchResult) -> bool:
         if not result.authorized:
             return True

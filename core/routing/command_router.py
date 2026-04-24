@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -15,6 +16,12 @@ from core.routing.text_rules import (
     normalize_text,
     strip_leading_wake_prefix,
 )
+
+VOICE_SOURCE_NAMES = {"voice", "wake", "speech"}
+VOICE_STT_COMMAND_REPAIRS = (
+    (re.compile(r"^(?:со|с|за|а)\s+открой[.?!]*$", re.IGNORECASE), "открой"),
+)
+VOICE_AI_PREFIXES = {"привет", "как", "что", "кто", "где", "когда", "почему", "зачем", "можешь", "умеешь"}
 
 
 @dataclass(slots=True)
@@ -116,7 +123,7 @@ class CommandRouter:
                 queue_items=queue_items,
             )
 
-        if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands):
+        if unsupported and not actionable_plans and not clarification_steps and self._should_fallback_to_ai(commands, source=source):
             return RouteResult("ai", [clean_text], [], [clean_text])
 
         if self._should_abort_for_clarification(
@@ -181,7 +188,7 @@ class CommandRouter:
             steps=execution_steps,
             assistant_lines=[summary] if summary else [],
             queue_items=queue_items,
-            requires_ai=bool(unsupported),
+            requires_ai=bool(unsupported) and source.casefold() not in VOICE_SOURCE_NAMES,
         )
         return RouteResult("local" if execute else "preview", commands, result.assistant_lines, queue_items, result)
 
@@ -215,7 +222,7 @@ class CommandRouter:
         )
         return RouteResult("local" if execute else "preview", queue, result.assistant_lines, queue, result)
 
-    def _should_fallback_to_ai(self, commands: list[str]) -> bool:
+    def _should_fallback_to_ai(self, commands: list[str], *, source: str = "ui") -> bool:
         normalized = [normalize_text(command) for command in commands if normalize_text(command)]
         if not normalized:
             return False
@@ -223,16 +230,35 @@ class CommandRouter:
             return False
         if any(looks_like_system_command(command) for command in normalized):
             return False
+        if source.casefold() in VOICE_SOURCE_NAMES:
+            return all(self._looks_like_voice_ai_request(command) for command in normalized)
         return all(looks_like_conversation(command) for command in normalized)
+
+    def _looks_like_voice_ai_request(self, text: str) -> bool:
+        clean = normalize_text(text)
+        lower = clean.casefold().strip(" ,.:;!?-")
+        if not lower:
+            return False
+        if clean.endswith("?"):
+            return True
+        first_word = lower.split(" ", 1)[0]
+        return first_word in VOICE_AI_PREFIXES
 
     def _normalize_incoming_text(self, text: str, *, source: str) -> str:
         # Voice transcripts often miss commas/joins; post-process before planner.
         result = self.voice_post_processor.normalize(text)
-        if source.casefold() in {"voice", "wake", "speech"}:
-            return result.normalized
+        if source.casefold() in VOICE_SOURCE_NAMES:
+            return self._repair_voice_stt_command(result.normalized)
         # For typed text keep it conservative: only use post-processed text if command-like.
         if result.changed and not looks_like_conversation(result.normalized):
             return result.normalized
+        return text
+
+    def _repair_voice_stt_command(self, text: str) -> str:
+        clean = normalize_text(text)
+        for pattern, replacement in VOICE_STT_COMMAND_REPAIRS:
+            if pattern.match(clean):
+                return replacement
         return text
 
     def _should_abort_for_clarification(
@@ -249,7 +275,7 @@ class CommandRouter:
         ambiguity_count = len(clarification_steps) + len(unsupported)
         if ambiguity_count == 0:
             return False
-        if source.casefold() in {"voice", "wake", "speech"}:
+        if source.casefold() in VOICE_SOURCE_NAMES:
             return True
         return len(commands) > 1
 

@@ -24,11 +24,11 @@ class FakeActions:
             items.append({"id": "system_task_manager", "title": "Диспетчер задач", "kind": "uri", "target": "taskmgr.exe"})
         if "проводник" in lower or "explorer" in lower or "файлы" in lower:
             items.append({"id": "system_explorer", "title": "Проводник", "kind": "uri", "target": "explorer.exe"})
-        if "steam" in lower or "стим" in lower:
+        if "steam" in lower or "стим" in lower or "тим" in lower:
             items.append({"id": "steam", "title": "Steam", "kind": "uri", "target": "steam://open/main"})
         if "discord" in lower or "дискорд" in lower:
             items.append({"id": "discord", "title": "Discord", "kind": "uri", "target": "discord://"})
-        if "ютуб" in lower or "youtube" in lower:
+        if "ютуб" in lower or "youtube" in lower or "туб" in lower:
             items.append({"id": "youtube", "title": "YouTube", "kind": "url", "target": "https://www.youtube.com"})
         if "spotify" in lower or "спотифай" in lower or "спотик" in lower:
             items.append({"id": "spotify", "title": "Spotify", "kind": "uri", "target": "spotify:"})
@@ -46,8 +46,8 @@ class FakeActions:
             ("панель управления", "панель", "control panel", "control"),
             ("диспетчер задач", "task manager", "taskmgr"),
             ("проводник", "explorer", "файлы"),
-            ("youtube", "ютуб", "ютюб"),
-            ("steam", "стим"),
+            ("youtube", "ютуб", "ютюб", "туб"),
+            ("steam", "стим", "тим"),
             ("discord", "дискорд"),
             ("spotify", "спотифай", "спотик"),
         )
@@ -292,6 +292,110 @@ def test_command_router_voice_strips_polite_filler_before_opening_system_target(
     assert pc_control.opened_urls == []
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_command_router_voice_recovers_short_youtube_alias_from_wake_stt():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой туб", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой туб"]
+    assert actions.opened == ["youtube"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_command_router_voice_recovers_question_prefix_before_short_youtube_alias():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("что открой туб?", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой туб"]
+    assert actions.opened == ["youtube"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_command_router_voice_recovers_steam_from_tim_alias():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("открой тим", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой тим"]
+    assert actions.opened == ["steam"]
+    assert pc_control.opened_urls == []
+    assert result.execution_result is not None
+    assert result.execution_result.steps[0].kind == "open_items"
+
+
+def test_command_router_voice_does_not_turn_sadness_phrase_into_steam():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("от грусти.", source="voice")
+
+    assert result.kind != "ai"
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
+
+
+def test_command_router_keeps_typed_sadness_phrase_out_of_voice_repair():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("от грусти.", source="ui")
+
+    assert result.kind == "ai"
+    assert result.commands == ["от грусти."]
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
+
+
+def test_command_router_voice_routes_how_are_you_to_ai():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("как дела", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["как дела"]
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
+
+
+def test_command_router_voice_routes_what_is_youtube_to_ai():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("что такое ютуб", source="voice")
+
+    assert result.kind == "ai"
+    assert result.commands == ["что такое ютуб"]
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
+
+
+def test_command_router_voice_does_not_fallback_to_ai_for_non_question_garbage():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("ла ла ла", source="voice")
+
+    assert result.kind != "ai"
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
+
+
+def test_command_router_voice_noisy_bare_open_asks_for_target():
+    router, actions, pc_control = make_router()
+
+    result = router.handle("со открой.", source="voice")
+
+    assert result.kind == "local"
+    assert result.commands == ["открой"]
+    assert result.assistant_lines == ["Что открыть?"]
+    assert actions.opened == []
+    assert pc_control.opened_urls == []
 
 
 def test_voice_post_processor_inserts_followup_connector_after_open_target():
@@ -620,13 +724,38 @@ def test_command_router_runs_power_action_without_open_verb() -> None:
     assert pc_control.power == ["lock"]
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "power_action"
+
+
+def test_command_router_executes_all_power_actions_directly() -> None:
+    cases = {
+        "выключи компьютер": "shutdown",
+        "перезапусти пк": "restart",
+        "выйди из системы": "logoff",
+        "сон": "sleep",
+        "гибернация": "hibernate",
+        "заблокируй экран": "lock",
+    }
+
+    for command, action in cases.items():
+        router, _actions, pc_control = make_router()
+
+        result = router.handle(command)
+
+        assert result.kind == "local"
+        assert pc_control.power == [action]
+        assert result.execution_result is not None
+        step = result.execution_result.steps[0]
+        assert step.kind == "power_action"
+        assert step.payload["action"] == action
+
+
 def _broken_agent_test_command_router_aborts_voice_multi_action_when_one_target_needs_input() -> None:
     router, actions, pc_control = make_router()
 
-    result = router.handle("РѕС‚РєСЂРѕР№ Р±СЂР°СѓР·РµСЂ СЋС‚СѓР± Рё РјСѓР·С‹РєСѓ", source="voice")
+    result = router.handle('открой браузер ютуб и музыку', source="voice")
 
     assert result.kind == "local"
-    assert result.assistant_lines[0].startswith("РЈС‚РѕС‡РЅРёС‚Рµ РєРѕРјР°РЅРґСѓ С†РµР»РёРєРѕРј.")
+    assert result.assistant_lines[0].startswith('Уточните команду целиком.')
     assert actions.opened == []
     assert pc_control.media == []
     assert result.execution_result is not None
@@ -636,10 +765,10 @@ def _broken_agent_test_command_router_aborts_voice_multi_action_when_one_target_
 def _broken_agent_test_command_router_preview_keeps_missing_target_out_of_executable_summary() -> None:
     router, _actions, _pc_control = make_router()
 
-    result = router.preview("РѕС‚РєСЂРѕР№ Р±СЂР°СѓР·РµСЂ СЋС‚СѓР± Рё РјСѓР·С‹РєСѓ", source="voice")
+    result = router.preview('открой браузер ютуб и музыку', source="voice")
 
     assert result.kind == "preview"
-    assert result.assistant_lines[0].startswith("РЈС‚РѕС‡РЅРёС‚Рµ РєРѕРјР°РЅРґСѓ С†РµР»РёРєРѕРј.")
+    assert result.assistant_lines[0].startswith('Уточните команду целиком.')
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "clarify"
 def test_command_router_aborts_voice_multi_action_when_one_target_needs_input_utf8() -> None:
@@ -729,3 +858,15 @@ def test_command_router_does_not_fallback_to_ai_for_unknown_system_like_phrase()
     assert pc_control.power == []
     assert result.execution_result is not None
     assert result.execution_result.steps[0].kind == "clarify"
+
+
+def test_command_router_strips_additional_wake_noise_aliases_before_ai_fallback() -> None:
+    router, _actions, _pc_control = make_router()
+
+    garris = router.handle("\u0433\u0430\u0440\u0440\u0438\u0441 \u043a\u0430\u043a \u0434\u0435\u043b\u0430")
+    narve = router.handle("\u043d\u0430\u0440\u0432\u0435 \u043a\u0430\u043a \u0434\u0435\u043b\u0430")
+
+    assert garris.kind == "ai"
+    assert garris.commands == ["\u043a\u0430\u043a \u0434\u0435\u043b\u0430"]
+    assert narve.kind == "ai"
+    assert narve.commands == ["\u043a\u0430\u043a \u0434\u0435\u043b\u0430"]

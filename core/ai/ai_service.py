@@ -18,15 +18,16 @@ SYSTEM_PROMPT = """
 """.strip()
 
 RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
-SUPPORTED_AI_MODES = ("auto", "fast", "quality")
+SUPPORTED_AI_MODES = ("auto", "fast", "quality", "local")
 SUPPORTED_AI_MODE_SET = frozenset(SUPPORTED_AI_MODES)
-SUPPORTED_AI_PROFILES = ("auto", "groq_fast", "cerebras_fast", "gemini_quality", "openrouter_free")
+SUPPORTED_AI_PROFILES = ("auto", "local", "groq_fast", "cerebras_fast", "gemini_quality", "openrouter_free")
 AI_MODES = SUPPORTED_AI_MODE_SET
 DEFAULT_NO_PROXY = "localhost,127.0.0.1,::1"
 AI_MODE_BUDGET_SECONDS: dict[str, float] = {
     "auto": 5.0,
     "fast": 2.5,
     "quality": 9.0,
+    "local": 2.0,
 }
 
 
@@ -126,6 +127,7 @@ PROVIDER_PLANS: dict[str, tuple[str, ...]] = {
     "auto": ("groq", "cerebras", "gemini", "openrouter"),
     "fast": ("groq", "cerebras"),
     "quality": ("gemini", "groq", "cerebras", "openrouter"),
+    "local": (),
 }
 
 
@@ -157,11 +159,12 @@ class AIService:
         attempts = self.provider_plan(ai_mode)
         if not attempts:
             reply = self._fallback_reply(user_text)
+            error = "" if ai_mode == "local" else "no_provider_attempts"
             return AIReplyResult(
                 text=reply,
                 mode=ai_mode,
                 elapsed_ms=self._elapsed_ms(started_at),
-                error="no_provider_attempts",
+                error=error,
             )
 
         budget_seconds = self._mode_budget_seconds(ai_mode)
@@ -223,6 +226,8 @@ class AIService:
 
     def provider_plan(self, ai_mode: str | None = None) -> list[ProviderAttempt]:
         mode = self._normalize_mode(ai_mode or self._ai_mode())
+        if mode == "local":
+            return []
         configured_provider = str(self.settings.get("ai_provider", "auto")).strip().lower()
         if configured_provider in PROVIDERS:
             provider_keys = (configured_provider,)
@@ -361,6 +366,11 @@ class AIService:
                 "temperature": 0.55,
                 "max_tokens": 560,
             }
+        if mode == "local":
+            return {
+                "temperature": 0.0,
+                "max_tokens": 120,
+            }
         return {
             "temperature": 0.35,
             "max_tokens": 300,
@@ -381,11 +391,11 @@ class AIService:
             "auto": "Авто-режим",
         }.get(ai_mode, "ИИ")
         if attempts_total <= 1:
-            return f"{mode_label}: {spec.label}…"
-        return f"{mode_label}: {spec.label} ({attempt_index + 1}/{attempts_total})…"
+            return f"{mode_label}: {spec.label}..."
+        return f"{mode_label}: {spec.label} ({attempt_index + 1}/{attempts_total})..."
 
     def _fallback_stage_label(self, current: ProviderSpec, next_spec: ProviderSpec) -> str:
-        return f"{current.label} не ответил, переключаюсь на {next_spec.label}…"
+        return f"{current.label} не ответил, переключаюсь на {next_spec.label}..."
 
     def _report_stage(self, callback: Callable[[str], None] | None, text: str) -> None:
         if callback is None:

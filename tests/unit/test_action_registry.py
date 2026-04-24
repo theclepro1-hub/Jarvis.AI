@@ -49,6 +49,18 @@ def test_quick_actions_are_curated_and_limited() -> None:
     assert len(quick) <= 7
 
 
+def test_noisy_short_voice_aliases_resolve_to_builtin_launchers() -> None:
+    registry, _service = make_registry()
+
+    youtube_items, youtube_question = registry.resolve_open_command("открой туб")
+    steam_items, steam_question = registry.resolve_open_command("открой тим")
+
+    assert youtube_question == ""
+    assert [item["id"] for item in youtube_items] == ["youtube"]
+    assert steam_question == ""
+    assert [item["id"] for item in steam_items] == ["steam"]
+
+
 def test_generic_music_uses_single_custom_music_app() -> None:
     registry, service = make_registry()
     service.set(
@@ -582,6 +594,17 @@ def test_registry_resolves_windows_builtin_entries() -> None:
     assert [item["id"] for item in items] == ["folder_downloads"]
 
 
+def test_resolve_system_action_marks_power_commands_directly_executable() -> None:
+    registry, _service = make_registry()
+
+    resolved = registry.resolve_system_action("выключи компьютер")
+
+    assert resolved is not None
+    assert resolved["mode"] == "power"
+    assert resolved["action"] == "shutdown"
+    assert resolved["detail"] == "Системная команда отправлена."
+
+
 def test_registry_runs_power_targets_via_shutdown_command(monkeypatch) -> None:
     registry, _service = make_registry()
     launched: dict[str, object] = {}
@@ -633,13 +656,6 @@ def test_registry_power_action_returns_failed_outcome_on_oserror(monkeypatch) ->
     assert outcome.success is False
     assert outcome.title == "Не удалось: Блокирую экран"
     assert outcome.detail == "boom"
-def _broken_agent_test_split_open_target_sequence_handles_system_and_spoken_targets() -> None:
-    registry, _service = make_registry()
-
-    targets, remainder = registry.split_open_target_sequence("РїР°СЂР°РјРµС‚СЂС‹ СЃ С‚РёРј Рё РїСЂРѕРІРѕРґРЅРёРє")
-
-    assert targets == ["РїР°СЂР°РјРµС‚СЂС‹", "СЃ С‚РёРј", "РїСЂРѕРІРѕРґРЅРёРє"]
-    assert remainder == ""
 
 
 def test_resolve_system_action_promotes_bare_builtin_windows_target() -> None:
@@ -653,15 +669,6 @@ def test_resolve_system_action_promotes_bare_builtin_windows_target() -> None:
     assert resolved["target_kind"] == "uri"
 
 
-def _broken_agent_test_resolve_system_action_promotes_builtin_windows_target() -> None:
-    registry, _service = make_registry()
-
-    resolved = registry.resolve_system_action("РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹")
-
-    assert resolved is not None
-    assert resolved["mode"] == "open"
-    assert resolved["item_id"] == "system_settings"
-    assert resolved["target_kind"] == "uri"
 def test_split_open_target_sequence_handles_system_and_spoken_targets_utf8() -> None:
     registry, _service = make_registry()
 

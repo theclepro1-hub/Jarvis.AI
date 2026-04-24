@@ -36,6 +36,7 @@ FOLLOWUP_ACTION_VERBS = (
 )
 
 NOISY_OPEN_PREFIXES = {"откр", "откры", "откро", "открь", "откри"}
+NOISY_COMMAND_INTRO_PREFIXES = {"что", "чё", "че"}
 NOISY_VOLUME_REPLACEMENTS = (
     ("погромче", "громче"),
     ("по громче", "громче"),
@@ -70,9 +71,23 @@ class VoiceCommandPostProcessor:
 
     def _normalize_noisy_transcript(self, text: str) -> str:
         normalized = strip_leading_command_fillers(text)
+        normalized = self._normalize_leading_question_before_command(normalized)
         normalized = self._normalize_volume_inflections(normalized)
         normalized = self._normalize_open_prefix_fragment(normalized)
         return normalized
+
+    def _normalize_leading_question_before_command(self, text: str) -> str:
+        parts = text.split(" ", 1)
+        if len(parts) < 2:
+            return text
+        first = parts[0].casefold().strip(" ,.:;!?-")
+        if first not in NOISY_COMMAND_INTRO_PREFIXES:
+            return text
+        tail = parts[1].lstrip(" ,.:;!?-")
+        tail_first = tail.split(" ", 1)[0].casefold().strip(" ,.:;!?-")
+        if tail_first in OPEN_VERBS or tail_first in NOISY_OPEN_PREFIXES:
+            return tail
+        return text
 
     def _normalize_volume_inflections(self, text: str) -> str:
         normalized = text

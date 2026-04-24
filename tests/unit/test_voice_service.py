@@ -5,7 +5,7 @@ import time
 
 from core.settings.settings_service import SettingsService
 from core.voice.tts_service import TTSService
-from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult
+from core.voice.voice_models import SpeechCaptureResult, TTSResult, TranscriptionResult
 from core.voice.voice_service import VoiceService
 
 
@@ -41,6 +41,25 @@ class FakeStore:
 
     def save(self, payload):
         self.payload = payload
+
+
+def _capture_after_wake_text(monkeypatch, text: str) -> TranscriptionResult:
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "transcribe_pcm_bytes",
+        lambda _raw, cancel_event=None: TranscriptionResult(status="ok", text=text, detail="ok", engine="stub"),
+    )
+    return voice.capture_after_wake_result(b"")
 
 
 def test_voice_runtime_without_key_reports_not_connected():
@@ -115,12 +134,26 @@ def test_voice_service_strips_wake_word_from_transcription():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
 
-    assert voice._strip_wake_word("Джарвис открой YouTube") == "открой YouTube"  # noqa: SLF001
-    assert voice._strip_wake_word("jarvis запусти музыку") == "запусти музыку"  # noqa: SLF001
-    assert voice._strip_wake_word("гарви с как дела") == "как дела"  # noqa: SLF001
-    assert voice._strip_wake_word("жарвис, как дела?") == "как дела?"  # noqa: SLF001
+    assert voice._strip_wake_word("гаррис открой YouTube").casefold() == "открой YouTube".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("нарве открой YouTube").casefold() == "открой YouTube".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("нарве с открой YouTube").casefold() == "открой YouTube".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("Джарвис открой YouTube").casefold() == "открой YouTube".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("jarvis запусти музыку").casefold() == "запусти музыку".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("гарви с как дела").casefold() == "как дела?".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("да любишь как дела у тебя").casefold() == "как дела у тебя?".casefold()  # noqa: SLF001
+    assert voice._strip_wake_word("жарвис, как дела?").casefold() == "как дела?".casefold()  # noqa: SLF001
     assert voice._strip_wake_word("как у джарвиса дела") == "как у джарвиса дела"  # noqa: SLF001
     assert voice._strip_wake_word("джарвис") == ""  # noqa: SLF001
+
+
+def test_voice_service_normalizes_text_consistently_for_manual_and_wake():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    assert voice._normalize_command_text("как дела у тебя") == "Как дела у тебя?"  # noqa: SLF001
+    assert voice._normalize_command_text("привет") == "Привет"  # noqa: SLF001
+    assert voice._normalize_command_text("открой ютуб") == "Открой ютуб"  # noqa: SLF001
+    assert voice._normalize_command_text("да открой ютуб", strip_connectors=True) == "Открой ютуб"  # noqa: SLF001
 
 
 def test_voice_service_normalizes_output_devices_and_filters_inputs(monkeypatch):
@@ -262,6 +295,59 @@ def test_tts_engines_enable_output_routing_with_sapi(monkeypatch):
     assert voice.can_route_tts_output() is True
 
 
+def test_tts_custom_output_does_not_fallback_to_system_default(monkeypatch):
+    settings = SettingsService(FakeStore())
+    settings.set("voice_output_name", "Logitech PRO X")
+    settings.set("voice_response_enabled", True)
+    tts = TTSService(settings)
+
+    monkeypatch.setattr(tts, "_module_available", lambda name: name in {"win32com.client", "pyttsx3"})
+    monkeypatch.setattr(
+        tts,
+        "_speak_with_sapi",
+        lambda _text: TTSResult(
+            status="failed",
+            message="SAPI failed",
+            engine="system",
+            available=False,
+            supports_output_device=True,
+        ),
+    )
+
+    result = tts.speak("Проверка")
+
+    assert result.status == "failed"
+    assert result.message == "SAPI failed"
+
+
+def test_voice_service_interrupt_tts_stops_engine_and_clears_speaking_state(monkeypatch):
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    calls: list[str] = []
+
+    def fake_stop() -> bool:
+        calls.append("stop")
+        return True
+
+    monkeypatch.setattr(voice.tts_service, "stop", fake_stop)
+    voice._speaking_count = 1  # noqa: SLF001
+    voice._speaking_cooldown_until = time.monotonic() + 10.0  # noqa: SLF001
+
+    assert voice.interrupt_tts() is True
+
+    assert calls == ["stop"]
+    assert voice.is_speaking is False
+
+
+def test_voice_service_interrupt_tts_is_idempotent(monkeypatch):
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    monkeypatch.setattr(voice.tts_service, "stop", lambda: False)
+
+    assert voice.interrupt_tts() is False
+    assert voice.is_speaking is False
+
+
 def test_wake_not_heard_status_is_status_only():
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)
@@ -326,7 +412,63 @@ def test_capture_after_wake_keeps_short_real_command(monkeypatch):
     result = voice.capture_after_wake_result(b"")
 
     assert result.ok is True
-    assert result.text == "ютуб"
+    assert result.text.casefold() == "ютуб".casefold()
+
+
+def test_capture_after_wake_rejects_long_background_speech_without_wake_prefix(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=1.2)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+    monkeypatch.setattr(
+        voice.stt_service,
+        "transcribe_pcm_bytes",
+        lambda _raw, cancel_event=None: TranscriptionResult(
+            status="ok",
+            text="у меня не будет рака я не думаю об этом",
+            detail="ok",
+            engine="stub",
+        ),
+    )
+
+    result = voice.capture_after_wake_result(b"")
+
+    assert result.status == "no_speech"
+    assert result.detail == "Не расслышал команду"
+
+
+def test_capture_after_wake_rejects_non_question_noise_with_wake_prefix(monkeypatch):
+    result = _capture_after_wake_text(monkeypatch, "джарвис ла ла ла ла")
+
+    assert result.status == "no_speech"
+    assert result.detail == "Не расслышал команду"
+
+
+def test_capture_after_wake_accepts_how_are_you_question_with_wake_prefix(monkeypatch):
+    result = _capture_after_wake_text(monkeypatch, "джарвис как дела")
+
+    assert result.ok is True
+    assert result.text.casefold() == "Как дела?".casefold()
+
+
+def test_capture_after_wake_accepts_what_is_youtube_question_with_wake_prefix(monkeypatch):
+    result = _capture_after_wake_text(monkeypatch, "джарвис что такое ютуб")
+
+    assert result.ok is True
+    assert result.text.casefold() == "Что такое ютуб?".casefold()
+
+
+def test_capture_after_wake_rejects_non_command_non_question_phrase_even_with_wake_prefix(monkeypatch):
+    result = _capture_after_wake_text(monkeypatch, "джарвис от грусти")
+
+    assert result.status == "no_speech"
+    assert result.detail == "Не расслышал команду"
 
 
 def test_manual_capture_stop_cancels_pending_transcription():
@@ -400,3 +542,138 @@ def test_capture_after_wake_can_be_cancelled_during_transcription(monkeypatch):
     assert worker.is_alive() is False
     assert result.status == "cancelled"
     assert voice.runtime_status()["wakeWord"] == "Запись остановлена."
+
+
+def test_transcribe_with_cancel_times_out_when_backend_hangs():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_transcribe(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        started.set()
+        release.wait(1.0)
+        return TranscriptionResult(status="ok", text="done", detail="ok", engine="stub")
+
+    voice.stt_service.transcribe_pcm_bytes = fake_transcribe  # type: ignore[method-assign]
+    voice.STT_JOB_TIMEOUT_SECONDS = 0.05
+
+    pipeline_id = voice._begin_pipeline()  # noqa: SLF001
+    result = voice._transcribe_with_cancel(b"pcm", pipeline_id)  # noqa: SLF001
+
+    assert started.wait(1.0)
+    assert result.status == "stt_timeout"
+    release.set()
+
+
+def test_transcribe_timeout_result_is_not_downgraded_to_cancelled():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    def timeout_then_cancel(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        voice.cancel_active_pipeline()
+        return TranscriptionResult(status="stt_timeout", detail="STT backend timeout.")
+
+    voice.stt_service.transcribe_pcm_bytes = timeout_then_cancel  # type: ignore[method-assign]
+
+    pipeline_id = voice._begin_pipeline()  # noqa: SLF001
+    result = voice._transcribe_with_cancel(b"pcm", pipeline_id)  # noqa: SLF001
+
+    assert result.status == "stt_timeout"
+
+
+def test_stop_stt_worker_stops_idle_worker_and_is_idempotent():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    voice.stt_service.transcribe_pcm_bytes = lambda _raw, cancel_event=None: TranscriptionResult(  # type: ignore[method-assign]
+        status="ok",
+        text="ok",
+        detail="ok",
+        engine="stub",
+    )
+
+    pipeline_id = voice._begin_pipeline()  # noqa: SLF001
+    result = voice._transcribe_with_cancel(b"pcm", pipeline_id)  # noqa: SLF001
+    assert result.ok is True
+
+    with voice._stt_worker_cv:  # noqa: SLF001
+        worker_before = voice._stt_worker_thread  # noqa: SLF001
+    assert worker_before is not None and worker_before.is_alive()
+
+    voice.stop_stt_worker(timeout=0.2)
+
+    with voice._stt_worker_cv:  # noqa: SLF001
+        worker_after = voice._stt_worker_thread  # noqa: SLF001
+        assert voice._stt_active_job is None  # noqa: SLF001
+        assert voice._stt_pending_job is None  # noqa: SLF001
+    assert worker_after is None or not worker_after.is_alive()
+
+    voice.stop_stt_worker(timeout=0.2)
+
+
+def test_stop_stt_worker_without_running_worker_keeps_service_usable():
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+
+    voice.stop_stt_worker(timeout=0.2)
+
+    voice.stt_service.transcribe_pcm_bytes = lambda _raw, cancel_event=None: TranscriptionResult(  # type: ignore[method-assign]
+        status="ok",
+        text="ok",
+        detail="ok",
+        engine="stub",
+    )
+    pipeline_id = voice._begin_pipeline()  # noqa: SLF001
+    result = voice._transcribe_with_cancel(b"pcm", pipeline_id)  # noqa: SLF001
+
+    assert result.ok is True
+
+
+def test_voice_service_stop_stt_worker_cancels_and_allows_restart(monkeypatch):
+    class FakeCaptureService:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def capture_until_silence(self, pre_roll=b""):  # noqa: ARG002
+            return SpeechCaptureResult(status="ok", raw_audio=b"pcm", speech_started=True, duration_seconds=0.8)
+
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    started = threading.Event()
+    result_box: dict[str, TranscriptionResult] = {}
+
+    monkeypatch.setattr("core.voice.voice_service.SpeechCaptureService", FakeCaptureService)
+
+    def blocking_transcribe(_raw: bytes, cancel_event=None):  # noqa: ANN001
+        started.set()
+        while cancel_event is not None and not cancel_event.is_set():
+            time.sleep(0.01)
+        return TranscriptionResult(status="cancelled", detail="Запись остановлена.")
+
+    voice.stt_service.transcribe_pcm_bytes = blocking_transcribe  # type: ignore[method-assign]
+
+    worker = threading.Thread(
+        target=lambda: result_box.setdefault("result", voice.capture_after_wake_result(b"wake")),
+        daemon=True,
+    )
+    worker.start()
+    assert started.wait(1.0)
+
+    voice.stop_stt_worker()
+    worker.join(timeout=1.0)
+
+    result = result_box["result"]
+    assert worker.is_alive() is False
+    assert result.status == "cancelled"
+
+    voice.stt_service.transcribe_pcm_bytes = lambda _raw, cancel_event=None: TranscriptionResult(  # type: ignore[method-assign]
+        status="ok",
+        text="Готово",
+        detail="ok",
+        engine="stub",
+    )
+    pipeline_id = voice._begin_pipeline()  # noqa: SLF001
+    restarted = voice._transcribe_with_cancel(b"pcm", pipeline_id)  # noqa: SLF001
+
+    assert restarted.ok is True
+    assert restarted.text == "Готово"

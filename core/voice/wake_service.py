@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
+import shutil
 import threading
 import time
+import zipfile
 from collections import deque
+from pathlib import Path
 
+import httpx
 import sounddevice as sd
 
 from core.routing.text_rules import STRICT_WAKE_ALIASES, normalize_text, strip_leading_wake_prefix
 from core.voice.model_paths import (
+    MODEL_DIR_NAME,
+    resolve_vosk_build_cache_model_path,
     resolve_vosk_bundled_model_path,
     resolve_vosk_model_path,
     resolve_vosk_runtime_model_path,
@@ -25,6 +32,8 @@ class WakeService:
     POST_WAKE_BRIDGE_FRAMES = 6
     POST_WAKE_BRIDGE_TIMEOUT = 0.05
     HANDOFF_PHASES = {"capturing_command", "transcribing", "routing", "executing"}
+    MODEL_DOWNLOAD_TIMEOUT_SECONDS = 45.0
+    MODEL_DOWNLOAD_CHUNK_BYTES = 256 * 1024
 
     def __init__(self, settings_service, voice_service) -> None:
         self.settings = settings_service
@@ -33,7 +42,8 @@ class WakeService:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.user_model_path = resolve_vosk_runtime_model_path()
         self.bundled_model_path = resolve_vosk_bundled_model_path()
-        self.model_path = resolve_vosk_model_path()
+        self._model_path = resolve_vosk_model_path()
+        self._model_path_overridden = False
         self._callback = None
         self._status_callback = None
         self._stop_event = threading.Event()
@@ -58,13 +68,25 @@ class WakeService:
     def phase(self) -> str:
         return self._phase
 
+    @property
+    def model_path(self) -> Path:
+        return self._model_path
+
+    @model_path.setter
+    def model_path(self, value: Path | str) -> None:
+        self._model_path = Path(value)
+        self._model_path_overridden = True
+
     def start(self, on_detected, on_status=None) -> str:
         self._callback = on_detected
         self._status_callback = on_status
         if self._thread and self._thread.is_alive():
-            return self.status()
-        self._refresh_model_path()
-        if not is_vosk_model_ready(self.model_path):
+            if self._phase != "error":
+                return self.status()
+            self._thread.join(timeout=0.15)
+            if self._thread.is_alive():
+                return self.status()
+        if not self._ensure_model_ready(allow_download=False):
             self._set_phase("error", "Локальная модель слова активации не загружена", ready=False)
             return self.status()
 
@@ -92,8 +114,7 @@ class WakeService:
         return "загружена" if is_vosk_model_ready(self.model_path) else "не загружена"
 
     def warm_up_model(self) -> bool:
-        self._refresh_model_path()
-        if not is_vosk_model_ready(self.model_path):
+        if not self._ensure_model_ready(allow_download=True):
             return False
         try:
             load_vosk_model(self.model_path)
@@ -132,13 +153,17 @@ class WakeService:
                         continue
 
                     self._buffer.append(data)
+                    speaking = self._voice_is_speaking()
                     if recognizer.AcceptWaveform(data):
-                        detected = self._contains_wake(recognizer.Result())
+                        detected = self._contains_wake(recognizer.Result(), barge_in=speaking)
                     else:
-                        detected = self._contains_wake(recognizer.PartialResult(), partial=True)
+                        detected = False if speaking else self._contains_wake(recognizer.PartialResult(), partial=True)
 
                     if detected and time.time() - self._last_detected_at > 2.5:
                         self._last_detected_at = time.time()
+                        if speaking:
+                            self._interrupt_tts_for_barge_in()
+                            self._buffer.clear()
                         post_roll = self._collect_post_wake_bridge(audio_queue)
                         pre_roll = b"".join(self._buffer) + post_roll
                         self._buffer.clear()
@@ -160,9 +185,123 @@ class WakeService:
 
     def _refresh_model_path(self) -> None:
         self.bundled_model_path = resolve_vosk_bundled_model_path()
-        self.model_path = resolve_vosk_model_path()
+        if not self._model_path_overridden:
+            self._model_path = resolve_vosk_model_path()
 
-    def _contains_wake(self, payload: str, partial: bool = False) -> bool:
+    def _ensure_model_ready(self, *, allow_download: bool) -> bool:
+        self._refresh_model_path()
+        if is_vosk_model_ready(self.model_path):
+            return True
+        if self._model_path_overridden:
+            return False
+        if self._seed_runtime_model_from_local_sources():
+            self._refresh_model_path()
+            if is_vosk_model_ready(self.model_path):
+                return True
+        if allow_download and self._allow_model_download() and self._download_runtime_model():
+            self._refresh_model_path()
+            return is_vosk_model_ready(self.model_path)
+        return False
+
+    def _seed_runtime_model_from_local_sources(self) -> bool:
+        if is_vosk_model_ready(self.user_model_path):
+            return True
+        candidates = (
+            self.bundled_model_path,
+            resolve_vosk_build_cache_model_path(),
+            resolve_vosk_model_path(),
+        )
+        seen: set[Path] = set()
+        for candidate in candidates:
+            path = Path(candidate)
+            if path in seen or path == self.user_model_path:
+                continue
+            seen.add(path)
+            if not is_vosk_model_ready(path):
+                continue
+            if self._copy_model_tree(path, self.user_model_path):
+                return True
+        return False
+
+    def _allow_model_download(self) -> bool:
+        raw = str(os.environ.get("JARVIS_UNITY_WAKE_AUTO_DOWNLOAD", "1")).strip().casefold()
+        return raw not in {"0", "false", "off", "no"}
+
+    def _download_runtime_model(self) -> bool:
+        runtime_path = self.user_model_path
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        download_url = str(
+            os.environ.get(
+                "JARVIS_UNITY_WAKE_MODEL_URL",
+                f"https://alphacephei.com/vosk/models/{MODEL_DIR_NAME}.zip",
+            )
+        ).strip()
+        if not download_url:
+            return False
+        archive_path = runtime_path.parent / f"{MODEL_DIR_NAME}.zip.download"
+        extract_dir = runtime_path.parent / f".{MODEL_DIR_NAME}.extract"
+        self._set_phase("preparing", "Загружаю модель слова активации", ready=False)
+        try:
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            if archive_path.exists():
+                archive_path.unlink()
+            timeout = httpx.Timeout(
+                connect=10.0,
+                read=self.MODEL_DOWNLOAD_TIMEOUT_SECONDS,
+                write=20.0,
+                pool=10.0,
+            )
+            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                with client.stream("GET", download_url) as response:
+                    response.raise_for_status()
+                    with archive_path.open("wb") as handle:
+                        for chunk in response.iter_bytes(chunk_size=self.MODEL_DOWNLOAD_CHUNK_BYTES):
+                            if chunk:
+                                handle.write(chunk)
+            with zipfile.ZipFile(archive_path) as archive:
+                archive.extractall(extract_dir)
+            extracted_root = self._locate_extracted_model_root(extract_dir)
+            if extracted_root is None:
+                return False
+            return self._copy_model_tree(extracted_root, runtime_path)
+        except Exception:
+            return False
+        finally:
+            try:
+                if archive_path.exists():
+                    archive_path.unlink()
+            except Exception:
+                pass
+            shutil.rmtree(extract_dir, ignore_errors=True)
+
+    def _locate_extracted_model_root(self, extract_dir: Path) -> Path | None:
+        expected_dir = extract_dir / MODEL_DIR_NAME
+        if is_vosk_model_ready(expected_dir):
+            return expected_dir
+        if is_vosk_model_ready(extract_dir):
+            return extract_dir
+        for child in extract_dir.iterdir():
+            if child.is_dir() and is_vosk_model_ready(child):
+                return child
+        return None
+
+    def _copy_model_tree(self, source: Path, target: Path) -> bool:
+        temp_target = target.parent / f".{target.name}.copy"
+        try:
+            shutil.rmtree(temp_target, ignore_errors=True)
+            shutil.copytree(source, temp_target, dirs_exist_ok=True)
+            shutil.rmtree(target, ignore_errors=True)
+            temp_target.replace(target)
+            return is_vosk_model_ready(target)
+        except Exception:
+            return False
+        finally:
+            shutil.rmtree(temp_target, ignore_errors=True)
+
+    def _contains_wake(self, payload: str, partial: bool = False, barge_in: bool = False) -> bool:
+        if barge_in and partial:
+            return False
         try:
             data = json.loads(payload)
         except json.JSONDecodeError:
@@ -173,6 +312,14 @@ class WakeService:
             return False
         stripped = strip_leading_wake_prefix(text, aliases=STRICT_WAKE_ALIASES)
         return stripped != text or text.casefold().strip(" ,.:;!?-") in STRICT_WAKE_ALIASES
+
+    def _voice_is_speaking(self) -> bool:
+        return bool(getattr(self.voice, "is_speaking", False))
+
+    def _interrupt_tts_for_barge_in(self) -> None:
+        interrupt = getattr(self.voice, "interrupt_tts", None)
+        if callable(interrupt):
+            interrupt()
 
     def _collect_post_wake_bridge(self, audio_queue: "queue.Queue[bytes]") -> bytes:
         bridge: list[bytes] = []

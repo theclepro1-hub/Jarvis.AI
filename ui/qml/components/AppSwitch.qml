@@ -5,7 +5,6 @@ Item {
     id: control
 
     property bool checked: false
-    property bool enabled: true
     signal toggled()
 
     implicitWidth: 58

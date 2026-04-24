@@ -65,7 +65,9 @@ Rectangle {
                     Repeater {
                         model: chatBridge.queueItems
 
-                        StatusPill {
+                        delegate: StatusPill {
+                            required property var modelData
+
                             text: modelData
                         }
                     }
@@ -107,33 +109,45 @@ Rectangle {
             ListView {
                 id: listView
                 objectName: "chatListView"
-                property bool followBottom: true
-                property bool followBottomPending: false
-                property int followBottomRetries: 0
+                property bool applyingBridgeScroll: false
+                property int appliedScrollRevision: -1
 
                 function nearBottom() {
                     return (contentHeight - (contentY + height)) <= 48
                 }
 
-                function requestFollowBottom() {
-                    followBottom = true
-                    followBottomPending = true
-                    followBottomRetries = 4
-                    scheduleFollowBottom()
+                function snapshotToBridge() {
+                    chatBridge.chatViewSnapshot(contentY, contentHeight, height, count)
                 }
 
-                function scheduleFollowBottom() {
-                    if (!(followBottom || followBottomPending) || count <= 0) {
-                        return
-                    }
+                function maxContentY() {
+                    return Math.max(originY, contentHeight - height)
+                }
+
+                function applyBottomScroll() {
                     forceLayout()
                     positionViewAtEnd()
-                    if (nearBottom()) {
-                        followBottomPending = false
-                        followBottomRetries = 0
-                        followBottomTimer.stop()
-                    } else if (followBottomPending && !followBottomTimer.running) {
-                        followBottomTimer.start()
+                    contentY = maxContentY()
+                }
+
+                function applyScrollFromBridge() {
+                    if (count <= 0) {
+                        return
+                    }
+                    applyingBridgeScroll = true
+                    if (chatBridge.chatScrollMode === "manual") {
+                        forceLayout()
+                        contentY = Math.max(originY, Math.min(chatBridge.chatScrollY, maxContentY()))
+                    } else {
+                        applyBottomScroll()
+                    }
+                    appliedScrollRevision = chatBridge.chatScrollRevision
+                    applyingBridgeScroll = false
+                }
+
+                function scheduleApplyScrollFromBridge() {
+                    if (!applyScrollTimer.running) {
+                        applyScrollTimer.start()
                     }
                 }
 
@@ -146,17 +160,26 @@ Rectangle {
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
 
-                onCountChanged: scheduleFollowBottom()
-                onContentHeightChanged: scheduleFollowBottom()
-                onHeightChanged: scheduleFollowBottom()
-                onMovementStarted: followBottom = nearBottom()
-                onFlickStarted: followBottom = nearBottom()
-                onMovementEnded: followBottom = nearBottom()
-                onFlickEnded: followBottom = nearBottom()
+                onCountChanged: scheduleApplyScrollFromBridge()
+                onContentHeightChanged: {
+                    if (chatBridge.chatScrollMode === "bottom") {
+                        scheduleApplyScrollFromBridge()
+                    }
+                }
+                onHeightChanged: scheduleApplyScrollFromBridge()
+                onMovementEnded: snapshotToBridge()
+                onFlickEnded: snapshotToBridge()
 
                 onContentYChanged: {
-                    if (!moving && !flicking) {
-                        followBottom = nearBottom()
+                    if (!applyingBridgeScroll) {
+                        const pendingBottomApply = chatBridge.chatScrollMode === "bottom" && !nearBottom() && applyScrollTimer.running
+                        if (!pendingBottomApply) {
+                            if (chatBridge.chatScrollMode === "bottom" && !nearBottom()) {
+                                snapshotToBridge()
+                            } else {
+                                snapshotDebounceTimer.restart()
+                            }
+                        }
                     }
                 }
 
@@ -167,45 +190,42 @@ Rectangle {
                 }
 
                 Timer {
-                    id: followBottomTimer
+                    id: applyScrollTimer
                     interval: 16
                     repeat: false
-                    onTriggered: {
-                        if (!(listView.followBottom || listView.followBottomPending) || listView.count <= 0) {
-                            listView.followBottomPending = false
-                            listView.followBottomRetries = 0
-                            return
-                        }
-                        listView.forceLayout()
-                        listView.positionViewAtEnd()
-                        if (listView.nearBottom()) {
-                            listView.followBottomPending = false
-                            listView.followBottomRetries = 0
-                            return
-                        }
-                        if (listView.followBottomRetries > 0) {
-                            listView.followBottomRetries -= 1
-                            restart()
-                        } else {
-                            listView.followBottomPending = false
-                        }
-                    }
+                    onTriggered: listView.applyScrollFromBridge()
                 }
 
-                Component.onCompleted: requestFollowBottom()
+                Timer {
+                    id: snapshotDebounceTimer
+                    interval: 90
+                    repeat: false
+                    onTriggered: listView.snapshotToBridge()
+                }
+
+                Component.onCompleted: {
+                    chatBridge.chatViewAttached()
+                    scheduleApplyScrollFromBridge()
+                }
+
+                Component.onDestruction: {
+                    snapshotToBridge()
+                    chatBridge.chatViewDetached()
+                }
 
                 Connections {
                     target: chatBridge
 
-                    function onMessageAppended(role) {
-                        if (role === "user" || role === "assistant") {
-                            listView.requestFollowBottom()
+                    function onChatScrollStateChanged() {
+                        if (chatBridge.chatScrollRevision !== listView.appliedScrollRevision) {
+                            listView.scheduleApplyScrollFromBridge()
                         }
                     }
                 }
 
                 delegate: Item {
                     required property var modelData
+                    required property int index
                     readonly property bool isUser: !!modelData && modelData.role === "user"
                     readonly property bool isExecution: !!modelData && modelData.type === "execution"
 

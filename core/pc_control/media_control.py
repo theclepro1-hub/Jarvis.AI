@@ -229,15 +229,6 @@ class _EndpointVolumeController:
             raise OSError("Endpoint volume is unavailable.")
         return endpoint
 
-    def _call_endpoint(self, endpoint, method_name: str) -> bool:
-        method_index = {"VolumeStepUp": 17, "VolumeStepDown": 18}[method_name]
-        method = self._method(
-            endpoint,
-            method_index,
-            ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p, ctypes.c_void_p),
-        )
-        return method(endpoint, None) == 0
-
     def _change_volume_by(self, endpoint, delta: float) -> bool:
         get_volume = self._method(
             endpoint,

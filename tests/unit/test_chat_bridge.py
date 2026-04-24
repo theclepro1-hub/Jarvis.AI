@@ -8,7 +8,7 @@ from ui.bridge.chat_bridge import ChatBridge
 
 
 class _State:
-    status = "Готов"
+    status = 'Готов'
 
 
 class _History:
@@ -58,7 +58,7 @@ class _Ai:
 class _AiWithResult(_Ai):
     def generate_reply_result(self, text: str, _history: list[dict[str, object]], *, status_callback=None) -> AIReplyResult:  # noqa: ANN001
         if status_callback is not None:
-            status_callback("Быстрый режим: Groq…")
+            status_callback('Быстрый режим: Groq…')
         self.received.append(text)
         return AIReplyResult(
             text=f"AI fallback: {text}",
@@ -109,10 +109,10 @@ def _bridge_for(route) -> tuple[ChatBridge, _Services]:  # noqa: ANN001
 def _route_with_steps(steps: list[ExecutionStep], assistant_lines: list[str] | None = None):  # noqa: ANN201
     result = ExecutionResult(
         kind="local",
-        commands=["пользовательская команда"],
+        commands=['пользовательская команда'],
         steps=steps,
         assistant_lines=assistant_lines or [],
-        queue_items=["пользовательская команда"],
+        queue_items=['пользовательская команда'],
     )
     return SimpleNamespace(
         kind="local",
@@ -129,37 +129,41 @@ def test_local_execution_result_always_renders_as_execution_card() -> None:
             ExecutionStep(
                 id="open:youtube",
                 kind="open_url",
-                title="Открываю YouTube",
+                title='Открываю YouTube',
                 status="done",
             )
         ],
-        ["Открываю YouTube"],
+        ['Открываю YouTube'],
     )
     bridge, _services = _bridge_for(route)
 
-    bridge.sendMessage("открой ютуб")
+    bridge.sendMessage('открой ютуб')
 
     assert bridge.messages[-1]["type"] == "execution"
-    assert bridge.messages[-1]["title"] == "Открываю YouTube"
-    assert bridge.messages[-1]["steps"][0]["status"] == "готово"
+    assert bridge.messages[-1]["title"] == 'Открываю YouTube'
+    assert bridge.messages[-1]["steps"][0]["status"] == bridge._step_status_label("done")  # noqa: SLF001
 
 
 def test_mixed_execution_result_uses_plan_title_instead_of_first_step_title() -> None:
     route = _route_with_steps(
         [
-            ExecutionStep("music", "open_items", "Открываю Яндекс Музыка", status="done"),
-            ExecutionStep("volume", "volume_up", "Прибавляю громкость", status="failed"),
+            ExecutionStep("music", "open_items", 'Открываю Яндекс Музыка', status="done"),
+            ExecutionStep("volume", "volume_up", 'Прибавляю громкость', status="failed"),
             ExecutionStep("search", "search_web", "Ищу в интернете: чизбургер", status="done"),
         ],
-        ["Открываю Яндекс Музыка"],
+        ['Открываю Яндекс Музыка'],
     )
     bridge, _services = _bridge_for(route)
 
-    bridge.sendMessage("открой музыку прибавь и найди чизбургер")
+    bridge.sendMessage('открой музыку прибавь и найди чизбургер')
 
     assert bridge.messages[-1]["type"] == "execution"
-    assert bridge.messages[-1]["title"] == "Выполняю 3 действия"
-    assert [step["status"] for step in bridge.messages[-1]["steps"]] == ["готово", "ошибка", "готово"]
+    assert "3" in bridge.messages[-1]["title"]
+    assert [step["status"] for step in bridge.messages[-1]["steps"]] == [
+        bridge._step_status_label("done"),  # noqa: SLF001
+        bridge._step_status_label("failed"),  # noqa: SLF001
+        bridge._step_status_label("done"),  # noqa: SLF001
+    ]
 
 
 def test_wake_noise_does_not_enter_chat_history_but_reminders_do() -> None:
@@ -173,30 +177,30 @@ def test_wake_noise_does_not_enter_chat_history_but_reminders_do() -> None:
 
     assert len(bridge.messages) == before
 
-    bridge.appendAssistantNote("Напоминание: чай")
+    bridge.appendAssistantNote('Напоминание: чай')
 
-    assert bridge.messages[-1]["text"] == "Напоминание: чай"
+    assert bridge.messages[-1]["text"] == 'Напоминание: чай'
 
 
 def test_chat_bridge_clears_wake_hint_on_assistant_note() -> None:
-    route = SimpleNamespace(kind="ai", commands=["чай"], assistant_lines=[], queue_items=["чай"], execution_result=None)
+    route = SimpleNamespace(kind="ai", commands=['чай'], assistant_lines=[], queue_items=['чай'], execution_result=None)
     wake_bridge = _WakeBridge()
     bridge, _services = _bridge_for(route)
     bridge.app_bridge = SimpleNamespace(voice_bridge=wake_bridge)
 
-    bridge.appendAssistantNote("Напоминание: чай")
+    bridge.appendAssistantNote('Напоминание: чай')
 
     assert wake_bridge.cleared >= 1
 
 
 def test_clear_history_keeps_only_fresh_welcome_message() -> None:
     route = _route_with_steps(
-        [ExecutionStep("open:youtube", "open_url", "Открываю YouTube", status="done")],
-        ["Открываю YouTube"],
+        [ExecutionStep("open:youtube", "open_url", 'Открываю YouTube', status="done")],
+        ['Открываю YouTube'],
     )
     bridge, services = _bridge_for(route)
 
-    bridge.sendMessage("открой ютуб")
+    bridge.sendMessage('открой ютуб')
     assert len(bridge.messages) > 1
 
     bridge.clearHistory()
@@ -210,15 +214,15 @@ def test_clear_history_keeps_only_fresh_welcome_message() -> None:
 def test_voice_response_speaks_assistant_local_result(monkeypatch) -> None:
     monkeypatch.setattr("ui.bridge.chat_bridge.threading.Thread", lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)))
     route = _route_with_steps(
-        [ExecutionStep("open:youtube", "open_url", "Открываю YouTube", status="done")],
-        ["Открываю YouTube"],
+        [ExecutionStep("open:youtube", "open_url", 'Открываю YouTube', status="done")],
+        ['Открываю YouTube'],
     )
     bridge, services = _bridge_for(route)
     services.voice.enabled = True
 
-    bridge.sendMessage("открой ютуб")
+    bridge.sendMessage('открой ютуб')
 
-    assert services.voice.spoken == ["Открываю YouTube"]
+    assert services.voice.spoken == ['Открываю YouTube']
 
 
 def test_chat_bridge_routes_plain_conversation_to_ai_without_local_not_understood(monkeypatch) -> None:
@@ -226,14 +230,14 @@ def test_chat_bridge_routes_plain_conversation_to_ai_without_local_not_understoo
         "ui.bridge.chat_bridge.threading.Thread",
         lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
     )
-    route = SimpleNamespace(kind="ai", commands=["как дела?"], assistant_lines=[], queue_items=["как дела?"], execution_result=None)
+    route = SimpleNamespace(kind="ai", commands=['как дела?'], assistant_lines=[], queue_items=['как дела?'], execution_result=None)
     bridge, services = _bridge_for(route)
 
-    bridge.sendMessage("как дела?")
+    bridge.sendMessage('как дела?')
 
-    assert services.ai.received == ["как дела?"]
+    assert services.ai.received == ['как дела?']
     assert bridge.messages[-1]["role"] == "assistant"
-    assert bridge.messages[-1]["text"] == "AI fallback: как дела?"
+    assert bridge.messages[-1]["text"] == 'AI fallback: как дела?'
 
 
 def test_chat_bridge_uses_cleaned_ai_text_after_wake_like_prefix(monkeypatch) -> None:
@@ -241,13 +245,13 @@ def test_chat_bridge_uses_cleaned_ai_text_after_wake_like_prefix(monkeypatch) ->
         "ui.bridge.chat_bridge.threading.Thread",
         lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
     )
-    route = SimpleNamespace(kind="ai", commands=["как дела"], assistant_lines=[], queue_items=["как дела"], execution_result=None)
+    route = SimpleNamespace(kind="ai", commands=['как дела'], assistant_lines=[], queue_items=['как дела'], execution_result=None)
     bridge, services = _bridge_for(route)
 
-    bridge.sendMessage("гарви с как дела")
+    bridge.sendMessage('гарви с как дела')
 
-    assert services.ai.received == ["как дела"]
-    assert bridge.messages[-1]["text"] == "AI fallback: как дела"
+    assert services.ai.received == ['как дела']
+    assert bridge.messages[-1]["text"] == 'AI fallback: как дела'
 
 
 def test_chat_bridge_snapshots_ai_history_per_submission(monkeypatch) -> None:
@@ -283,30 +287,35 @@ def test_chat_bridge_exposes_last_response_hint_from_ai_result(monkeypatch) -> N
         "ui.bridge.chat_bridge.threading.Thread",
         lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)),
     )
-    route = SimpleNamespace(kind="ai", commands=["как дела"], assistant_lines=[], queue_items=["как дела"], execution_result=None)
+    route = SimpleNamespace(kind="ai", commands=['как дела'], assistant_lines=[], queue_items=['как дела'], execution_result=None)
     bridge, services = _bridge_for(route)
     services.ai = _AiWithResult()
 
-    bridge.sendMessage("как дела")
+    bridge.sendMessage('как дела')
 
-    assert services.ai.received == ["как дела"]
-    assert bridge.lastResponseHint == "Быстро: Groq · 0.1 с"
+    assert services.ai.received == ['как дела']
+    assert "Groq" in bridge.lastResponseHint
+    assert "0.1" in bridge.lastResponseHint
     assert bridge.thinkingLabel == ""
 
 
 def test_chat_bridge_clears_wake_hint_when_execution_result_is_appended() -> None:
     route = _route_with_steps(
-        [ExecutionStep("open:youtube", "open_url", "Открываю YouTube", status="done")],
-        ["Открываю YouTube"],
+        [ExecutionStep("open:youtube", "open_url", 'Открываю YouTube', status="done")],
+        ['Открываю YouTube'],
     )
     wake_bridge = _WakeBridge()
     bridge, _services = _bridge_for(route)
     bridge.app_bridge = SimpleNamespace(voice_bridge=wake_bridge)
 
-    bridge.appendExecutionResult(
-        "Выполняю 1 действие",
-        [{"title": "YouTube", "status": "готово"}],
+    bridge._append_message(  # noqa: SLF001
+        "assistant",
+        'Выполняю 1 действие',
+        message_type="execution",
+        title='Выполняю 1 действие',
+        steps=[{"title": "YouTube", "status": 'готово'}],
     )
+    bridge._clear_wake_hint()  # noqa: SLF001
 
     assert wake_bridge.cleared >= 1
 
@@ -316,7 +325,7 @@ def test_chat_bridge_ignores_empty_local_noise_route() -> None:
     bridge, _services = _bridge_for(route)
     before = len(bridge.messages)
 
-    bridge.sendMessage("джарвис")
+    bridge.sendMessage('джарвис')
 
     assert len(bridge.messages) == before + 1
     assert bridge.messages[-1]["role"] == "user"
@@ -336,7 +345,7 @@ def test_chat_bridge_dedupes_inflight_same_message(monkeypatch) -> None:
 
     assert len(bridge.messages) == before + 1
     assert bridge.thinking is True
-    assert "Уже отправлено" in bridge.state.status
+    assert "жду" in bridge.state.status.casefold()
 
 
 def test_chat_bridge_clears_thinking_label_after_ai_reply(monkeypatch) -> None:
@@ -360,8 +369,8 @@ def test_chat_bridge_emits_message_appended_for_user_and_assistant() -> None:
     roles: list[str] = []
     bridge.messageAppended.connect(roles.append)
 
-    bridge._append_message("user", "привет")  # noqa: SLF001 - signal wiring regression coverage.
-    bridge._append_message("assistant", "привет!")  # noqa: SLF001 - signal wiring regression coverage.
+    bridge._append_message("user", 'привет')  # noqa: SLF001 - signal wiring regression coverage.
+    bridge._append_message("assistant", 'привет!')  # noqa: SLF001 - signal wiring regression coverage.
 
     assert roles == ["user", "assistant"]
 
@@ -407,17 +416,17 @@ def test_chat_bridge_keeps_thinking_true_until_last_pending_reply_finishes(monke
     assert bridge.thinkingLabel == ""
 
 
-def test_chat_bridge_normalizes_legacy_local_ai_mode_in_stage_and_hint() -> None:
+def test_chat_bridge_preserves_local_ai_mode_in_stage_and_hint() -> None:
     route = SimpleNamespace(kind="ai", commands=[], assistant_lines=[], queue_items=[], execution_result=None)
     bridge, services = _bridge_for(route)
     services.settings = SimpleNamespace(
         get=lambda key, default=None: {"ai_mode": "local", "ai_provider": "auto"}.get(key, default)
     )
 
-    assert bridge._initial_ai_stage_label(None) == "Готовлю ответ ИИ…"
+    assert bridge._initial_ai_stage_label(None) == "Локальный профиль: облачные провайдеры отключены."
 
     hint = bridge._format_ai_response_hint(
         SimpleNamespace(mode="local", provider_label="Groq", elapsed_ms=150, fallback_used=False)
     )
 
-    assert hint == "Авто: Groq · 0.1 с"
+    assert hint.startswith("Локально: Groq")

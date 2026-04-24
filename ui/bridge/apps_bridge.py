@@ -9,10 +9,8 @@ class AppsBridge(QObject):
     catalogChanged = Signal()
     feedbackChanged = Signal()
     discoveredChanged = Signal()
-    scanResultChanged = Signal()
     defaultMusicAppChanged = Signal()
     pinnedCommandsChanged = Signal()
-    scanBusyChanged = Signal()
     _scanFinished = Signal(object)
     _scanFailed = Signal(str)
 
@@ -22,7 +20,6 @@ class AppsBridge(QObject):
         self.chat_bridge = chat_bridge
         self._feedback = ""
         self._discovered: list[dict[str, str]] = []
-        self._scan_result: dict[str, object] = {}
         self._scan_busy = False
         self._scan_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="apps-scan")
         self._scanFinished.connect(self._apply_scan_result)
@@ -35,14 +32,6 @@ class AppsBridge(QObject):
     @Property("QVariantList", notify=discoveredChanged)
     def discovered(self) -> list[dict[str, str]]:
         return self._discovered
-
-    @Property("QVariantMap", notify=scanResultChanged)
-    def scanResult(self) -> dict[str, object]:
-        return self._scan_result
-
-    @Property(bool, notify=scanBusyChanged)
-    def scanBusy(self) -> bool:
-        return self._scan_busy
 
     @Property(str, notify=feedbackChanged)
     def feedback(self) -> str:
@@ -63,22 +52,6 @@ class AppsBridge(QObject):
         self.feedbackChanged.emit()
         self.catalogChanged.emit()
         self.chat_bridge.refreshCatalog()
-
-    @Slot(str, str, str, str)
-    def updateCustomApp(self, app_id: str, title: str, target: str, aliases: str) -> None:
-        if not title.strip() or not target.strip():
-            self._feedback = "Нужны хотя бы название и цель запуска."
-            self.feedbackChanged.emit()
-            return
-        if not self.services.actions.update_custom_app(app_id, title, target, aliases):
-            self._feedback = "Не удалось изменить приложение."
-            self.feedbackChanged.emit()
-            return
-        self._feedback = f"Изменено: {title.strip()}"
-        self.feedbackChanged.emit()
-        self.catalogChanged.emit()
-        self.chat_bridge.refreshCatalog()
-
     @Slot(str)
     def removeCustomApp(self, app_id: str) -> None:
         self.services.actions.remove_custom_app(app_id)
@@ -174,19 +147,16 @@ class AppsBridge(QObject):
         if self._scan_busy == busy:
             return
         self._scan_busy = busy
-        self.scanBusyChanged.emit()
 
     @Slot(object)
     def _apply_scan_result(self, result: object) -> None:
         payload = dict(result) if isinstance(result, dict) else {}
         review = payload.get("review", [])
         self._discovered = review if isinstance(review, list) else []
-        self._scan_result = payload
         self._feedback = str(payload.get("summary") or "Новых безопасных приложений не найдено.")
         self._set_scan_busy(False)
         self.feedbackChanged.emit()
         self.discoveredChanged.emit()
-        self.scanResultChanged.emit()
         self.catalogChanged.emit()
         self.chat_bridge.refreshCatalog()
 

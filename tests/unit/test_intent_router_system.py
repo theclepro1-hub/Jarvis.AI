@@ -48,7 +48,7 @@ class _Actions:
         return []
 
 
-def test_intent_router_executes_shutdown_without_confirmation() -> None:
+def test_intent_router_executes_shutdown_directly() -> None:
     router = IntentRouter(_Actions())
 
     plan = router.build("\u0432\u044b\u043a\u043b\u044e\u0447\u0438 \u043a\u043e\u043c\u043f\u044c\u044e\u0442\u0435\u0440")

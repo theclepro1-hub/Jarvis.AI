@@ -145,10 +145,10 @@ def test_split_open_command_with_noisy_connector_before_builtin_windows_target()
 
 def _broken_agent_test_split_voice_sequence_with_system_and_spoken_launcher_targets():
     router = make_router()
-    assert router.split("РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹ СЃ С‚РёРј Рё РїСЂРѕРІРѕРґРЅРёРє") == [
-        "РѕС‚РєСЂРѕР№ РїР°СЂР°РјРµС‚СЂС‹",
-        "РѕС‚РєСЂРѕР№ СЃ С‚РёРј",
-        "РѕС‚РєСЂРѕР№ РїСЂРѕРІРѕРґРЅРёРє",
+    assert router.split('открой параметры с тим и проводник') == [
+        'открой параметры',
+        'открой с тим',
+        'открой проводник',
     ]
 def _broken_agent_test_split_voice_sequence_with_system_and_spoken_launcher_targets_utf8() -> None:
     router = make_router()

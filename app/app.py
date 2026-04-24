@@ -260,10 +260,6 @@ class JarvisUnityApplication:
         self._update_timer.start()
         QTimer.singleShot(5500, self._check_updates_async)
 
-    def _tick_background_services(self) -> None:
-        self._fire_due_reminders()
-        self._poll_telegram_async()
-
     def _telegram_poll_interval_ms(self) -> int:
         telegram = getattr(self.services, "_telegram", None)
         if telegram is None or not hasattr(telegram, "poll_interval_ms"):

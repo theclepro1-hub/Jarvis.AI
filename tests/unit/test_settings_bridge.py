@@ -98,7 +98,7 @@ def test_settings_bridge_update_properties_do_not_force_lazy_update_service() ->
     assert bridge.updateStatus["status_code"] == "idle"
 
 
-def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
+def test_settings_bridge_preserves_local_ai_mode_and_profile() -> None:
     store = InMemoryStore()
     settings = SettingsService(store)
     settings.set("ai_mode", "local")
@@ -106,10 +106,11 @@ def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
     services = SimpleNamespace(settings=settings, telegram=FakeTelegram())
     bridge = SettingsBridge(state=None, services=services, app_bridge=None)
 
-    assert bridge.aiMode == "auto"
-    assert bridge.aiProfile == "auto"
+    assert bridge.aiMode == "local"
+    assert bridge.aiProfile == "local"
     assert bridge.aiProfiles == [
         "auto",
+        "local",
         "groq_fast",
         "cerebras_fast",
         "gemini_quality",
@@ -117,8 +118,8 @@ def test_settings_bridge_normalizes_legacy_local_ai_mode_and_profile() -> None:
     ]
 
     bridge.aiMode = "local"
-    assert settings.get("ai_mode") == "auto"
+    assert settings.get("ai_mode") == "local"
 
     bridge.aiProfile = "local"
-    assert settings.get("ai_mode") == "auto"
+    assert settings.get("ai_mode") == "local"
     assert settings.get("ai_provider") == "auto"

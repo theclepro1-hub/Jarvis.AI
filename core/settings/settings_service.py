@@ -31,10 +31,6 @@ class SettingsService:
         self._settings[key] = value
         self.store.save(self._settings)
 
-    def bulk_update(self, payload: dict[str, Any]) -> None:
-        self._settings.update(payload)
-        self.store.save(self._settings)
-
     def get_registration(self) -> dict[str, Any]:
         return dict(self._settings["registration"])
 

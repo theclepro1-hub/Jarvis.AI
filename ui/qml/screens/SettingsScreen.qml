@@ -41,6 +41,8 @@ Rectangle {
             return { key: "cerebras_fast", title: "Быстрый Cerebras", note: "Ещё один быстрый облачный вариант при наличии ключа." }
         case "openrouter_free":
             return { key: "openrouter_free", title: "Резервный OpenRouter", note: "Запасной бесплатный вариант с лимитами." }
+        case "local":
+            return { key: "local", title: "Локально", note: "Только локальные команды и офлайн-ответы без облачных API." }
         default:
             return { key: "auto", title: "Авто", note: "Сам выбирает доступный быстрый профиль." }
         }
@@ -576,17 +578,6 @@ Rectangle {
                             Layout.fillWidth: true
                         }
 
-                        Text {
-                            visible: false
-                            text: settingsBridge.connectionFeedback.length > 0
-                                  ? settingsBridge.connectionFeedback
-                                  : "Действие необратимое. Используйте, если хотите полностью сбросить локальный профиль."
-                            color: Theme.Colors.textSoft
-                            font.family: Theme.Typography.bodyFamily
-                            font.pixelSize: Theme.Typography.micro
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
                     }
                 }
             }

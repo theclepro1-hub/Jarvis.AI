@@ -63,6 +63,19 @@ def test_wake_service_warm_up_model_loads_shared_vosk_cache(tmp_path, monkeypatc
     assert calls == [wake.model_path]
 
 
+def test_wake_service_warm_up_model_preserves_explicit_path(tmp_path, monkeypatch):
+    settings = SettingsService(FakeStore())
+    voice = VoiceService(settings)
+    wake = WakeService(settings, voice)
+    explicit_path = tmp_path / "explicit-model"
+    wake.model_path = explicit_path
+    monkeypatch.setattr("core.voice.wake_service.resolve_vosk_model_path", lambda: tmp_path / "auto-model")
+    monkeypatch.setattr("core.voice.wake_service.is_vosk_model_ready", lambda _path: False)
+
+    assert wake.warm_up_model() is False
+    assert wake.model_path == explicit_path
+
+
 def test_voice_service_warms_up_local_stt_backend(monkeypatch):
     settings = SettingsService(FakeStore())
     voice = VoiceService(settings)

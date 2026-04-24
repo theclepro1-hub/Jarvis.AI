@@ -61,10 +61,6 @@ class AppBridge(QObject):
         self.state.currentScreen = screen
 
     @Slot()
-    def openSettings(self) -> None:
-        self.navigate("settings")
-
-    @Slot()
     def finishRegistration(self) -> None:
         self.state.registrationRequired = False
         self.state.currentScreen = "chat"

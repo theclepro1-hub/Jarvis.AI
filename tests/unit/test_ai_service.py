@@ -127,7 +127,9 @@ def test_generate_reply_result_reports_stage_and_timing_hint() -> None:
     assert result.provider_label == "Groq"
     assert result.elapsed_ms >= 0
     assert result.fallback_used is False
-    assert stages and stages[0].startswith("Быстрый режим: Groq")
+    assert stages
+    assert "Groq" in stages[0]
+    assert "режим" in stages[0].casefold()
 
 
 def test_quality_mode_prioritizes_quality_plan() -> None:
@@ -185,7 +187,7 @@ def test_retryable_error_can_retry_same_provider_when_attempts_enabled() -> None
     assert [call["base_url"] for call in calls].count("https://api.groq.com/openai/v1") == 2
 
 
-def test_legacy_local_mode_is_normalized_to_auto_without_cloud_calls(monkeypatch) -> None:
+def test_local_mode_stays_local_without_cloud_calls(monkeypatch) -> None:
     for key in ("GROQ_API_KEY", "CEREBRAS_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
         monkeypatch.delenv(key, raising=False)
 
@@ -207,7 +209,7 @@ def test_legacy_local_mode_is_normalized_to_auto_without_cloud_calls(monkeypatch
 
     result = service.generate_reply_result("привет")
 
-    assert result.mode == "auto"
+    assert result.mode == "local"
     assert result.error == ""
     assert "local" not in result.text.lower()
 

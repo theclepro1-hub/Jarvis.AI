@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import importlib.util
 import re
+from dataclasses import dataclass, field
 import threading
 import time
 import uuid
@@ -9,12 +10,28 @@ from typing import Callable
 
 import sounddevice as sd
 
-from core.routing.text_rules import WAKE_PREFIX_ALIASES, strip_leading_wake_prefix
+from core.routing.text_rules import (
+    COMMAND_FRAGMENT_TOKENS,
+    WAKE_PREFIX_ALIASES,
+    looks_like_conversation,
+    looks_like_system_command,
+    normalize_text,
+    strip_leading_wake_prefix,
+)
 from core.voice.audio_device_service import AudioDeviceService
 from core.voice.speech_capture_service import CaptureConfig, SpeechCaptureService
 from core.voice.stt_service import STTService
 from core.voice.tts_service import TTSService
 from core.voice.voice_models import SpeechCaptureResult, TranscriptionResult, WakeSessionMetrics
+
+
+@dataclass(slots=True)
+class _STTJob:
+    raw_bytes: bytes
+    pipeline_id: int
+    cancel_event: threading.Event
+    done: threading.Event = field(default_factory=threading.Event)
+    result: TranscriptionResult | None = None
 
 
 class VoiceService:
@@ -23,10 +40,13 @@ class VoiceService:
     BLOCK_FRAMES = 1600
     MANUAL_MAX_SECONDS = 8.0
     SILENCE_SECONDS = 0.9
-    WAKE_MAX_SECONDS = 4.4
-    WAKE_SILENCE_SECONDS = 0.4
-    WAKE_PRE_ROLL_GRACE_SECONDS = 0.35
+    WAKE_MAX_SECONDS = 5.2
+    WAKE_SILENCE_SECONDS = 0.55
+    WAKE_PRE_ROLL_GRACE_SECONDS = 0.45
     ENERGY_THRESHOLD = 160.0
+    STT_JOB_TIMEOUT_SECONDS = 15.0
+    STT_WORKER_IDLE_TIMEOUT_SECONDS = 2.0
+    STT_WORKER_SHUTDOWN_JOIN_TIMEOUT_SECONDS = 1.0
     WAKE_FILLER_TOKENS = {
         "а",
         "э",
@@ -44,6 +64,35 @@ class VoiceService:
         "нет",
         "ой",
     }
+    QUESTION_PREFIXES = (
+        "как",
+        "что",
+        "кто",
+        "где",
+        "когда",
+        "почему",
+        "зачем",
+        "можешь",
+        "умеешь",
+        "любишь",
+    )
+    DIALOGUE_PREFIXES = (*QUESTION_PREFIXES, "привет")
+    WAKE_SHORT_COMMAND_TARGETS = {
+        "браузер",
+        "дискорд",
+        "музыка",
+        "музыку",
+        "параметры",
+        "проводник",
+        "спотифай",
+        "steam",
+        "spotify",
+        "стим",
+        "тим",
+        "туб",
+        "ютуб",
+        "youtube",
+    }
     DEFAULT_INPUT_LABEL = "Системный микрофон"
     DEFAULT_OUTPUT_LABEL = "Системный вывод"
     DEFAULT_TTS_TEXT = "Я на связи."
@@ -60,6 +109,15 @@ class VoiceService:
         self._wake_ready = False
         self._wake_metrics = WakeSessionMetrics()
         self._audio_devices: AudioDeviceService | None = None
+        self._stt_worker_lock = threading.Lock()
+        self._stt_worker_cv = threading.Condition(self._stt_worker_lock)
+        self._stt_worker_thread: threading.Thread | None = None
+        self._stt_active_job: _STTJob | None = None
+        self._stt_pending_job: _STTJob | None = None
+        self._stt_worker_stop_event = threading.Event()
+        self._speaking_lock = threading.Lock()
+        self._speaking_count = 0
+        self._speaking_cooldown_until = 0.0
 
         self.capture_service = SpeechCaptureService(
             resolve_input_device=self._resolve_input_device,
@@ -79,6 +137,11 @@ class VoiceService:
     @property
     def is_recording(self) -> bool:
         return self._recording
+
+    @property
+    def is_speaking(self) -> bool:
+        with self._speaking_lock:
+            return self._speaking_count > 0 or time.monotonic() < self._speaking_cooldown_until
 
     @property
     def audio_devices(self) -> AudioDeviceService:
@@ -305,7 +368,27 @@ class VoiceService:
         return self.tts_service.tts_volume()
 
     def speak(self, text: str, force: bool = False) -> str:
-        return self.tts_service.speak(text, force=force).message
+        with self._speaking_lock:
+            self._speaking_count += 1
+        result_status = ""
+        try:
+            result = self.tts_service.speak(text, force=force)
+            result_status = result.status
+            return result.message
+        finally:
+            with self._speaking_lock:
+                self._speaking_count = max(0, self._speaking_count - 1)
+                self._speaking_cooldown_until = 0.0 if result_status == "interrupted" else time.monotonic() + 0.7
+
+    def interrupt_tts(self) -> bool:
+        stopped = False
+        stop_tts = getattr(self.tts_service, "stop", None)
+        if callable(stop_tts):
+            stopped = bool(stop_tts())
+        with self._speaking_lock:
+            self._speaking_count = 0
+            self._speaking_cooldown_until = 0.0
+        return stopped
 
     def test_jarvis_voice(self) -> str:
         return self.tts_service.test_voice(self.DEFAULT_TTS_TEXT).message
@@ -393,9 +476,21 @@ class VoiceService:
                 )
                 self.mark_wake_transcription_result(failed)
                 return failed
+            if not self._accept_wake_transcript(stripped_text, matched_prefix=matched_prefix):
+                detail = "Не расслышал команду"
+                self.set_wake_runtime_status("not_heard", ready=False, detail=detail)
+                failed = TranscriptionResult(
+                    status="no_speech",
+                    detail=detail,
+                    engine=transcription.engine,
+                    backend_trace=transcription.backend_trace,
+                    latency_ms=transcription.latency_ms,
+                )
+                self.mark_wake_transcription_result(failed)
+                return failed
             cleaned = TranscriptionResult(
                 status="ok",
-                text=stripped_text,
+                text=self._normalize_command_text(stripped_text, strip_connectors=True),
                 detail=transcription.detail,
                 engine=transcription.engine,
                 backend_trace=transcription.backend_trace,
@@ -433,7 +528,7 @@ class VoiceService:
             transcription = self._transcribe_with_cancel(capture.raw_audio, pipeline_id)
             if transcription.ok:
                 if on_text is not None and self._pipeline_active(pipeline_id):
-                    on_text(transcription.text)
+                    on_text(self._normalize_command_text(transcription.text))
             elif on_note is not None and self._pipeline_active(pipeline_id):
                 on_note(self._stt_note_from_result(transcription))
         finally:
@@ -456,6 +551,8 @@ class VoiceService:
     def _stt_note_from_result(self, result: TranscriptionResult) -> str:
         if result.status == "cancelled":
             return "Запись остановлена."
+        if result.status == "stt_timeout":
+            return "STT timeout."
         if result.status == "stt_key_missing":
             return "Нужен ключ Groq."
         if result.status == "model_missing":
@@ -466,6 +563,31 @@ class VoiceService:
 
     def cancel_active_pipeline(self) -> None:
         self._manual_stop_event.set()
+
+    def stop_stt_worker(self, timeout: float = STT_WORKER_SHUTDOWN_JOIN_TIMEOUT_SECONDS) -> None:
+        self.cancel_active_pipeline()
+        with self._stt_worker_cv:
+            self._stt_worker_stop_event.set()
+            if self._stt_pending_job is not None and not self._stt_pending_job.done.is_set():
+                self._stt_pending_job.result = self._cancelled_transcription_result()
+                self._stt_pending_job.done.set()
+                self._stt_pending_job = None
+            worker_thread = self._stt_worker_thread
+            self._stt_worker_cv.notify_all()
+
+        if worker_thread is not None and worker_thread.is_alive() and threading.current_thread() is not worker_thread:
+            worker_thread.join(timeout=timeout)
+
+        with self._stt_worker_cv:
+            if self._stt_active_job is not None and self._stt_active_job.done.is_set():
+                self._stt_active_job = None
+            if self._stt_pending_job is not None and self._stt_pending_job.done.is_set():
+                self._stt_pending_job = None
+            if worker_thread is None:
+                self._stt_worker_stop_event.clear()
+            elif not worker_thread.is_alive() and self._stt_worker_thread is worker_thread:
+                self._stt_worker_thread = None
+                self._stt_worker_stop_event.clear()
 
     def _begin_pipeline(self) -> int:
         with self._pipeline_lock:
@@ -485,34 +607,136 @@ class VoiceService:
         if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
             return self._cancelled_transcription_result()
 
-        result_box: dict[str, TranscriptionResult] = {}
-        done = threading.Event()
+        job = _STTJob(
+            raw_bytes=raw_bytes,
+            pipeline_id=pipeline_id,
+            cancel_event=self._manual_stop_event,
+        )
+        self._queue_stt_job(job)
 
-        def worker() -> None:
-            try:
-                result_box["result"] = self.stt_service.transcribe_pcm_bytes(
-                    raw_bytes,
-                    cancel_event=self._manual_stop_event,
-                )
-            except Exception as exc:  # pragma: no cover - defensive path
-                result_box["result"] = TranscriptionResult(
-                    status="stt_failed",
-                    detail=f"Не удалось распознать речь: {exc}",
-                )
-            finally:
-                done.set()
-
-        thread = threading.Thread(target=worker, daemon=True)
-        thread.start()
-
-        while not done.wait(0.03):
+        while not job.done.wait(0.03):
             if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
                 return self._cancelled_transcription_result()
+            with self._stt_worker_cv:
+                worker_alive = self._stt_worker_thread is not None and self._stt_worker_thread.is_alive()
+            if not worker_alive:
+                return TranscriptionResult(status="stt_failed", detail="STT worker is not running.")
 
-        result = result_box.get("result", self._cancelled_transcription_result())
-        if not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set():
+        result = job.result
+        if result is None:
+            return self._cancelled_transcription_result()
+        if result.status != "stt_timeout" and (not self._pipeline_active(pipeline_id) or self._manual_stop_event.is_set()):
             return self._cancelled_transcription_result()
         return result
+
+    def _queue_stt_job(self, job: _STTJob) -> None:
+        with self._stt_worker_cv:
+            self._ensure_stt_worker_locked()
+            if self._stt_worker_stop_event.is_set():
+                job.result = self._cancelled_transcription_result()
+                job.done.set()
+                return
+            if self._stt_active_job is None:
+                self._stt_active_job = job
+                self._stt_worker_cv.notify_all()
+                return
+
+            if self._stt_pending_job is not None:
+                self._stt_pending_job.result = self._cancelled_transcription_result()
+                self._stt_pending_job.done.set()
+            self._stt_pending_job = job
+            self._stt_worker_cv.notify_all()
+
+    def _ensure_stt_worker_locked(self) -> None:
+        if self._stt_worker_thread is not None and self._stt_worker_thread.is_alive():
+            return
+        self._stt_worker_stop_event.clear()
+        self._stt_worker_thread = threading.Thread(
+            target=self._stt_worker_main,
+            name="jarvis-stt-worker",
+            daemon=True,
+        )
+        self._stt_worker_thread.start()
+
+    def _stt_worker_main(self) -> None:
+        while True:
+            with self._stt_worker_cv:
+                while self._stt_active_job is None and self._stt_pending_job is None:
+                    if self._stt_worker_stop_event.is_set():
+                        self._stt_worker_stop_event.clear()
+                        self._stt_worker_thread = None
+                        return
+                    self._stt_worker_cv.wait(timeout=self.STT_WORKER_IDLE_TIMEOUT_SECONDS)
+                    if self._stt_active_job is None and self._stt_pending_job is None and not self._stt_worker_stop_event.is_set():
+                        self._stt_worker_thread = None
+                        return
+                if self._stt_active_job is None:
+                    self._stt_active_job = self._stt_pending_job
+                    self._stt_pending_job = None
+                    self._stt_worker_cv.notify_all()
+                job = self._stt_active_job
+
+            try:
+                result = self._run_stt_job(job)
+            except Exception as exc:  # pragma: no cover - defensive path
+                result = TranscriptionResult(
+                    status="stt_failed",
+                    detail=f"STT worker crashed: {exc}",
+                )
+
+            with self._stt_worker_cv:
+                job.result = result
+                job.done.set()
+                if self._stt_active_job is job:
+                    self._stt_active_job = None
+                if self._stt_active_job is None and self._stt_pending_job is not None:
+                    self._stt_active_job = self._stt_pending_job
+                    self._stt_pending_job = None
+                self._stt_worker_cv.notify_all()
+
+    def shutdown(self) -> None:
+        self.stop_stt_worker()
+
+    def _run_stt_job(self, job: _STTJob) -> TranscriptionResult:
+        if self._is_cancelled(job.cancel_event) or not self._pipeline_active(job.pipeline_id):
+            return self._cancelled_transcription_result()
+        result_box: dict[str, TranscriptionResult] = {}
+        error_box: dict[str, Exception] = {}
+        done_event = threading.Event()
+
+        def _backend_worker() -> None:
+            try:
+                result_box["result"] = self.stt_service.transcribe_pcm_bytes(
+                    job.raw_bytes,
+                    cancel_event=job.cancel_event,
+                )
+            except Exception as exc:  # pragma: no cover - defensive path
+                error_box["error"] = exc
+            finally:
+                done_event.set()
+
+        threading.Thread(target=_backend_worker, name=f"jarvis-stt-{job.pipeline_id}", daemon=True).start()
+        deadline = time.monotonic() + self.STT_JOB_TIMEOUT_SECONDS
+        while not done_event.wait(0.03):
+            if time.monotonic() >= deadline:
+                return TranscriptionResult(status="stt_timeout", detail="STT backend timeout.")
+            if self._is_cancelled(job.cancel_event) or not self._pipeline_active(job.pipeline_id):
+                return self._cancelled_transcription_result()
+
+        if "error" in error_box:
+            return TranscriptionResult(
+                status="stt_failed",
+                detail=f"STT backend error: {error_box['error']}",
+            )
+        result = result_box.get("result")
+        if result is None:
+            return TranscriptionResult(status="stt_failed", detail="STT backend returned no result.")
+        return result
+
+    def _is_cancelled(self, cancel_event: threading.Event | None) -> bool:
+        if cancel_event is not None and cancel_event.is_set():
+            return True
+        return self._manual_stop_event.is_set()
 
     def _cancelled_transcription_result(self) -> TranscriptionResult:
         return TranscriptionResult(status="cancelled", detail="Запись остановлена.")
@@ -528,10 +752,6 @@ class VoiceService:
     def _resolve_input_device(self) -> int | None:
         selected = self.settings.get("microphone_name", self.DEFAULT_INPUT_LABEL)
         return self.audio_devices.resolve_input_device(str(selected))
-
-    def _resolve_output_device(self) -> int | None:
-        selected = self.settings.get("voice_output_name", self.DEFAULT_OUTPUT_LABEL)
-        return self.audio_devices.resolve_output_device(str(selected))
 
     def normalize_microphone_selection(self, value: str) -> str:
         return self.audio_devices.normalize_microphone_selection(value)
@@ -555,47 +775,40 @@ class VoiceService:
             )
 
         if command_style == "one_shot":
-            max_seconds += 0.8
-            silence_seconds += 0.12
+            max_seconds += 1.0
+            silence_seconds += 0.15
         return max_seconds, silence_seconds, energy_threshold, pre_roll_grace
-
-    def _capture_until_silence(
-        self,
-        pre_roll: bytes = b"",
-        max_seconds: float = 4.5,
-        silence_seconds: float = 0.9,
-        energy_threshold: float = 160.0,
-    ) -> bytes:
-        custom = SpeechCaptureService(
-            resolve_input_device=self._resolve_input_device,
-            stop_event=self._manual_stop_event,
-            config=CaptureConfig(
-                sample_rate=self.SAMPLE_RATE,
-                channels=self.CHANNELS,
-                block_frames=self.BLOCK_FRAMES,
-                max_seconds=max_seconds,
-                silence_seconds=silence_seconds,
-                energy_threshold=energy_threshold,
-            ),
-        )
-        result = custom.capture_until_silence(pre_roll=pre_roll)
-        return result.raw_audio if result.ok else b""
-
-    def _transcribe_pcm_bytes(self, raw_bytes: bytes) -> str:
-        result = self.stt_service.transcribe_pcm_bytes(raw_bytes)
-        return result.text if result.ok else ""
 
     def _split_wake_prefix(self, text: str) -> tuple[str, bool, bool]:
         clean = text.strip()
         stripped = strip_leading_wake_prefix(clean)
+        if stripped != clean:
+            normalized_tail = self._normalize_command_text(stripped, strip_connectors=True)
+            return normalized_tail, True, bool(normalized_tail)
         if not stripped:
             normalized = clean.casefold().strip(" ,.:;!?-")
             if normalized in WAKE_PREFIX_ALIASES:
                 return "", True, False
             return "", False, False
-        if stripped != clean:
-            return stripped, True, True
         return clean, False, bool(clean)
+
+    def _normalize_command_text(self, text: str, *, strip_connectors: bool = False) -> str:
+        clean = re.sub(r"\s+", " ", str(text or "").strip())
+        if not clean:
+            return ""
+        clean = clean.lstrip(" ,.:;!?-")
+        if strip_connectors:
+            clean = re.sub(r"^(?:и|с|ну|а|да|эй|ээ+)\s+", "", clean, flags=re.IGNORECASE)
+        clean = clean.strip()
+        if not clean:
+            return ""
+        if clean[0].isalpha():
+            clean = clean[0].upper() + clean[1:]
+        word_count = len(clean.split())
+        if clean[-1] not in ".!?…" and word_count >= 2 and looks_like_conversation(clean):
+            first = clean.casefold().split(" ", 1)[0]
+            clean = f"{clean}{'?' if first in self.QUESTION_PREFIXES else '.'}"
+        return clean
 
     def _strip_wake_word(self, text: str) -> str:
         clean, _matched_prefix, has_tail = self._split_wake_prefix(text)
@@ -622,6 +835,32 @@ class VoiceService:
         if len(tokens) <= 2 and all(len(token) <= 2 for token in tokens):
             return True
         return False
+
+    def _accept_wake_transcript(self, text: str, *, matched_prefix: bool) -> bool:
+        clean = normalize_text(text)
+        if not clean:
+            return False
+
+        lower = clean.casefold().strip(" ,.:;!?-")
+        words = [token for token in re.split(r"[\s,.:;!?-]+", lower) if token]
+        if not words:
+            return False
+
+        if any(lower == token or lower.startswith(f"{token} ") for token in COMMAND_FRAGMENT_TOKENS):
+            return True
+        if looks_like_system_command(lower):
+            return True
+        if self._looks_like_wake_dialogue(clean, words):
+            return True
+        if len(words) <= 2 and any(word in self.WAKE_SHORT_COMMAND_TARGETS for word in words):
+            return True
+
+        return False
+
+    def _looks_like_wake_dialogue(self, clean: str, words: list[str]) -> bool:
+        if clean.endswith("?"):
+            return True
+        return words[0] in self.DIALOGUE_PREFIXES and len(words) <= 8
 
     def _module_available(self, module_name: str) -> bool:
         return importlib.util.find_spec(module_name) is not None

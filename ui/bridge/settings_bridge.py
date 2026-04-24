@@ -194,6 +194,8 @@ class SettingsBridge(QObject):
     def aiProfile(self) -> str:
         mode = self.aiMode
         provider = self.aiProvider
+        if mode == "local":
+            return "local"
         if provider == "groq" and mode == "fast":
             return "groq_fast"
         if provider == "gemini" and mode == "quality":
@@ -215,6 +217,7 @@ class SettingsBridge(QObject):
     def aiProfile(self, value: str) -> None:
         profile_map = {
             "auto": ("auto", "auto"),
+            "local": ("local", "auto"),
             "groq_fast": ("fast", "groq"),
             "gemini_quality": ("quality", "gemini"),
             "cerebras_fast": ("fast", "cerebras"),

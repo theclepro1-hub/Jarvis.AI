@@ -41,3 +41,24 @@ def test_registration_can_be_skipped():
     service = RegistrationService(settings)
     result = service.skip()
     assert result.skipped is True
+
+
+def test_registration_load_ignores_unknown_legacy_keys():
+    settings = SettingsService(FakeStore())
+    settings.save_registration(
+        {
+            "groq_api_key": "k",
+            "telegram_user_id": "1",
+            "telegram_bot_token": "t",
+            "deepseek_api_key": "legacy",
+            "unexpected": "x",
+        },
+        skipped=False,
+    )
+    service = RegistrationService(settings)
+
+    result = service.load()
+
+    assert result.groq_api_key == "k"
+    assert result.telegram_user_id == "1"
+    assert result.telegram_bot_token == "t"
